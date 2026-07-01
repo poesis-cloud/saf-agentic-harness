@@ -5,7 +5,9 @@
   "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` conditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by a `consistency`/completion condition. Each step's obligations are ONE flat `conditions` list, isomorphic to the run log's conditions[]: each condition has `kind` (precondition / postcondition / invariant), `type` (a judgment category authority/content/clarification/challenge/consistency/transition/state, or a structural dependency after/input/output), `expression` (`cel` harness-evaluated / `instruction` resolved structurally / `ref` structurally resolved), and `value`. Structural refs (after/input/output) are checked STRUCTURALLY, never via CEL; after/input are preconditions, output a postcondition. There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["workflow"],
+  "required": [
+    "workflow"
+  ],
   "definitions": {
     "identifier": {
       "description": "A lowercase, hyphen/underscore slug (workflow id, step id).",
@@ -21,34 +23,190 @@
       "description": "One entry in a step's flat `conditions` list. Four orthogonal attributes: `kind` = WHEN it holds (precondition / postcondition / invariant); `type` = WHAT it is about — a judgment category (authority / content / clarification / challenge / consistency / transition / state) or a structural dependency (`after` a predecessor step, `input` a consumed artifact, `output` a produced artifact); `expression` = the FORM of `value` (`cel` a harness-evaluated predicate, `instruction` a relative URI to a `.instructions.md` obligation file the harness resolves structurally, `ref` a path/step-id the harness resolves structurally); `value` = the body itself. Coherence is enforced by the schema: every condition carries an `id`; structural types (after/input/output) use `expression: ref`; `after`/`input` are preconditions and `output` a postcondition; a precondition/postcondition judgment uses `expression: cel` and an invariant uses `expression: instruction`. Isomorphic to the run log's conditions[].",
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "type", "expression", "value", "id"],
+      "required": [
+        "kind",
+        "type",
+        "expression",
+        "value",
+        "id"
+      ],
       "properties": {
-        "kind": { "type": "string", "enum": ["precondition", "postcondition", "invariant"], "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after), invariant (throughout)." },
-        "type": { "type": "string", "enum": ["authority", "content", "clarification", "challenge", "consistency", "transition", "state", "after", "input", "output"], "description": "WHAT the condition is about: a judgment category (authority/content/clarification/challenge/consistency/transition/state) or a structural dependency — `after` (a predecessor step that must be logged complete), `input` (an artifact consumed before the step), `output` (an artifact produced after the step)." },
-        "id": { "$ref": "#/definitions/conditionId", "description": "Stable id, required on EVERY condition — the handle in the run log, findings, and check-step. Structural refs use a generated id (e.g. after_<step>); for `instruction` it keys the obligation file." },
-        "expression": { "type": "string", "enum": ["cel", "instruction", "ref"], "description": "The form of `value`: `cel` (a CEL predicate the harness evaluates against the read-only fact set — every precondition/postcondition); `instruction` (a relative URI to a `.instructions.md` obligation file the harness resolves structurally — every invariant; the agent follows it); `ref` (a repo path / {unit_id}/{product} template / predecessor step id — structural after/input/output)." },
-        "value": { "type": "string", "minLength": 1, "description": "The body: a CEL expression (e.g. `status == \"funnel\"`, `has(unit.wsjf)`, `gate_packet_ok`), a natural-language judgment, or a ref (e.g. `portfolio/epics/{unit_id}.md`, or a predecessor step id when type: after)." }
+        "kind": {
+          "type": "string",
+          "enum": [
+            "precondition",
+            "postcondition",
+            "invariant"
+          ],
+          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after), invariant (throughout)."
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "authority",
+            "content",
+            "clarification",
+            "challenge",
+            "consistency",
+            "transition",
+            "state",
+            "after",
+            "input",
+            "output"
+          ],
+          "description": "WHAT the condition is about: a judgment category (authority/content/clarification/challenge/consistency/transition/state) or a structural dependency — `after` (a predecessor step that must be logged complete), `input` (an artifact consumed before the step), `output` (an artifact produced after the step)."
+        },
+        "id": {
+          "$ref": "#/definitions/conditionId",
+          "description": "Stable id, required on EVERY condition — the handle in the run log, findings, and check-step. Structural refs use a generated id (e.g. after_<step>); for `instruction` it keys the obligation file."
+        },
+        "expression": {
+          "type": "string",
+          "enum": [
+            "cel",
+            "instruction",
+            "ref"
+          ],
+          "description": "The form of `value`: `cel` (a CEL predicate the harness evaluates against the read-only fact set — every precondition/postcondition); `instruction` (a relative URI to a `.instructions.md` obligation file the harness resolves structurally — every invariant; the agent follows it); `ref` (a repo path / {unit_id}/{product} template / predecessor step id — structural after/input/output)."
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The body: a CEL expression (e.g. `status == \"funnel\"`, `has(unit.wsjf)`, `gate_packet_ok`), a natural-language judgment, or a ref (e.g. `portfolio/epics/{unit_id}.md`, or a predecessor step id when type: after)."
+        }
       },
       "allOf": [
         {
-          "if": { "required": ["type"], "properties": { "type": { "enum": ["after", "input", "output"] } } },
-          "then": { "required": ["expression"], "properties": { "expression": { "const": "ref" } } }
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "after",
+                  "input",
+                  "output"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expression"
+            ],
+            "properties": {
+              "expression": {
+                "const": "ref"
+              }
+            }
+          }
         },
         {
-          "if": { "required": ["type"], "properties": { "type": { "enum": ["after", "input"] } } },
-          "then": { "properties": { "kind": { "const": "precondition" } } }
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "after",
+                  "input"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "precondition"
+              }
+            }
+          }
         },
         {
-          "if": { "required": ["type"], "properties": { "type": { "const": "output" } } },
-          "then": { "properties": { "kind": { "const": "postcondition" } } }
+          "if": {
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "const": "output"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "postcondition"
+              }
+            }
+          }
         },
         {
-          "if": { "required": ["type", "kind"], "properties": { "type": { "enum": ["authority", "content", "clarification", "challenge", "consistency", "transition", "state"] }, "kind": { "enum": ["precondition", "postcondition"] } } },
-          "then": { "properties": { "expression": { "const": "cel" } } }
+          "if": {
+            "required": [
+              "type",
+              "kind"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "authority",
+                  "content",
+                  "clarification",
+                  "challenge",
+                  "consistency",
+                  "transition",
+                  "state"
+                ]
+              },
+              "kind": {
+                "enum": [
+                  "precondition",
+                  "postcondition"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expression": {
+                "const": "cel"
+              }
+            }
+          }
         },
         {
-          "if": { "required": ["type", "kind"], "properties": { "type": { "enum": ["authority", "content", "clarification", "challenge", "consistency", "transition", "state"] }, "kind": { "const": "invariant" } } },
-          "then": { "properties": { "expression": { "const": "instruction" } } }
+          "if": {
+            "required": [
+              "type",
+              "kind"
+            ],
+            "properties": {
+              "type": {
+                "enum": [
+                  "authority",
+                  "content",
+                  "clarification",
+                  "challenge",
+                  "consistency",
+                  "transition",
+                  "state"
+                ]
+              },
+              "kind": {
+                "const": "invariant"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "expression": {
+                "const": "instruction"
+              }
+            }
+          }
         }
       ]
     },
@@ -56,11 +214,23 @@
       "description": "One structurant step (one actor's turn). Its obligations are ONE flat `conditions` list — each entry a {kind, type, expression, value, id} record (structural refs + cel/instruction judgments), isomorphic to the run log's conditions[]. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. Conventional authoring order groups conditions by kind: preconditions (after, input, judgment preconditions), invariants, postconditions (output, judgment postconditions). NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition/invariant).",
       "type": "object",
       "additionalProperties": true,
-      "required": ["id", "kind", "actor"],
+      "required": [
+        "id",
+        "kind",
+        "actor"
+      ],
       "properties": {
-        "id": { "$ref": "#/definitions/identifier" },
-        "kind": { "type": "string", "minLength": 1 },
-        "actor": { "type": "string", "minLength": 1 },
+        "id": {
+          "$ref": "#/definitions/identifier"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1
+        },
         "delegates_to": {
           "description": "For kind: delegate — the sub-workflow this step runs (path under workflows/).",
           "type": "string",
@@ -69,7 +239,9 @@
         "skills": {
           "description": "The ordered skill ids the dispatched agent loads for THIS step (per-step, not per-workflow). The harness injects them as deterministic context at sessionStart (inject-skills); a sub-orchestration is a step, so its procedure skill rides here.",
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "role": {
           "description": "Routing metadata: the bench role used for the role-default tier floor (ModelRouter.role_default). Optional — when absent the harness derives it from `actor` (leading `@` stripped).",
@@ -79,25 +251,47 @@
         "risk": {
           "description": "Routing metadata: risk class. critical -> tier-high floor; medium -> tier-balanced; low -> role default.",
           "type": "string",
-          "enum": ["low", "medium", "critical"]
+          "enum": [
+            "low",
+            "medium",
+            "critical"
+          ]
         },
         "complexity": {
           "description": "Routing metadata: complexity class. complex -> tier-high floor; involved -> tier-balanced; simple -> no raise.",
           "type": "string",
-          "enum": ["simple", "involved", "complex"]
+          "enum": [
+            "simple",
+            "involved",
+            "complex"
+          ]
         },
         "tags": {
           "description": "Routing metadata: capability tags scored by ModelRouter to resolve the concrete model.",
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["deep-reasoning", "code-specialized", "creative", "editorial", "long-context", "multimodal", "fast-iteration", "structured-output"]
+            "enum": [
+              "deep-reasoning",
+              "code-specialized",
+              "creative",
+              "editorial",
+              "long-context",
+              "multimodal",
+              "fast-iteration",
+              "structured-output"
+            ]
           }
         },
         "config": {
           "description": "Routing metadata: the config profile dispatched with the step.",
           "type": "string",
-          "enum": ["deterministic", "audit", "exploratory", "creative"]
+          "enum": [
+            "deterministic",
+            "audit",
+            "exploratory",
+            "creative"
+          ]
         },
         "output": {
           "description": "The single artifact KIND this step produces or updates (effect-determinism, invariant 15). Resolves to a real, owned, typed artifact via the artifact catalog + ACL. The structural `type: output` condition still carries the path ref; this names the kind.",
@@ -107,53 +301,82 @@
         "conditions": {
           "description": "The step's flat obligations list — {kind, type, expression, value} records. Isomorphic to the run log's conditions[].",
           "type": "array",
-          "items": { "$ref": "#/definitions/condition" }
+          "items": {
+            "$ref": "#/definitions/condition"
+          }
         }
       }
     }
   },
   "properties": {
     "workflow": {
-      "description": "The single root node. Carries the workflow header (id, rank, kind/parent or drives/fsm) plus the `steps` that constitute it. Root workflows declare drives/fsm; sub-workflows declare kind/parent.",
+      "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`/`parent`) plus the `steps` that constitute it. Root workflows are identified by id ∈ {lpm, art, scrum} and carry no parent; sub-workflows declare kind/parent.",
       "type": "object",
       "additionalProperties": true,
-      "required": ["id", "rank", "steps"],
+      "required": [
+        "id",
+        "steps"
+      ],
       "properties": {
-        "version": {
-          "description": "Workflow schema version. 2 = the steps model.",
-          "type": "integer",
-          "minimum": 2
+        "id": {
+          "$ref": "#/definitions/identifier"
         },
-        "id": { "$ref": "#/definitions/identifier" },
-        "rank": { "type": "string", "enum": ["root", "suborchestration"] },
-        "kind": { "type": "string", "minLength": 1 },
-        "parent": { "$ref": "#/definitions/identifier" },
-        "drives": { "type": "string", "minLength": 1 },
-        "facilitator": { "type": "string", "minLength": 1 },
-        "skills": {
-          "description": "DEPRECATED (transitional) — skills are per STEP, not per workflow (see definitions.step.skills). Still tolerated here while the workflows are migrated; Phase 4 moves each skill onto the step that loads it and removes this. The root is harness-driven, so it has no workflow-level skill.",
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent": {
+          "$ref": "#/definitions/identifier"
+        },
+        "facilitator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cdp_stage": {
+          "type": "string"
+        },
+        "delivers": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "fsm": { "type": "array", "items": { "type": "string" } },
-        "cdp_stage": { "type": "string" },
-        "delivers": { "type": "array", "items": { "type": "string" } },
-        "log_dir": { "type": "string" },
         "steps": {
           "description": "The structurant steps constituting this workflow (one actor per step; fork/merge/loop via `after`).",
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/definitions/step" }
+          "items": {
+            "$ref": "#/definitions/step"
+          }
         }
       },
       "allOf": [
         {
-          "if": { "required": ["rank"], "properties": { "rank": { "const": "suborchestration" } } },
-          "then": { "required": ["kind", "parent"] }
+          "if": {
+            "required": [
+              "parent"
+            ]
+          },
+          "then": {
+            "required": [
+              "kind",
+              "parent"
+            ]
+          }
         },
         {
-          "if": { "required": ["rank"], "properties": { "rank": { "const": "root" } } },
-          "then": { "required": ["drives"] }
+          "if": {
+            "not": {
+              "required": [
+                "parent"
+              ]
+            }
+          },
+          "then": {
+            "required": [
+              "facilitator"
+            ]
+          }
         }
       ]
     }

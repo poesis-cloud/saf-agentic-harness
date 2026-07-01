@@ -58,11 +58,11 @@ def main() -> int:
     if "check-step" in svc.commands_for("postcondition"):
         failures.append("unit-scope check-step must not auto-run at a boundary")
 
-    # 6. sessionStart injects the workflow-declared agent→skill map + invariants as additionalContext,
+    # 6. sessionStart injects orchestrator context + invariants as additionalContext,
     #    including the suborchestration skill map (sub-id -> procedure skill) for the active root.
     d = svc.handle("sessionStart", {"agent": "release-train-engineer"})
-    if "art-orchestration" not in d.context or "skills" not in d.context:
-        failures.append("sessionStart should inject the RTE skills map")
+    if "orchestration art: facilitate @release-train-engineer" not in d.context:
+        failures.append("sessionStart should inject the RTE orchestrator context")
     if "feature-backlog-refinement" not in d.context:
         failures.append("sessionStart should inject the RTE suborchestration skill map")
 

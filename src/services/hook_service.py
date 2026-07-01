@@ -49,7 +49,7 @@ class HookDecision:
     session phases can block); observe-only phases return allow. `report` carries findings; `outputs`
     echoes the derived write refs for the ledger; `phase` is the normalized workflow concept;
     `context` is deterministic additionalContext the host injects into the agent (session-open:
-    workflow skills + instructions)."""
+    workflow + instructions + step/sub-orchestration skills)."""
 
     permission: str = "allow"
     reason: str = ""
@@ -119,7 +119,7 @@ class HookService:
 
     def _inject_orchestrator(self, actor: str, wants: list[str]) -> str:
         """The orchestrator session's context: the root it facilitates + the suborchestration skill
-        map (each sub-id → its procedure skill + invariants), so the driver loads the right procedure
+        map (each sub-id → procedure skill + invariants), so the driver loads the right procedure
         skill the moment it enters a sub. The active actor scopes it to the root it facilitates."""
         all_wf = self.workflows.all()
         blocks: list[str] = []
@@ -128,8 +128,6 @@ class HookService:
                 continue
             if "workflow" in wants:
                 blocks.append(f"orchestration {wf.id}: facilitate {wf.facilitator}")
-            if "skills" in wants and wf.skills:
-                blocks.append(f"load skills: {', '.join(wf.skills)}")
             if "instructions" in wants:
                 refs = self._invariant_refs(wf)
                 if refs:
@@ -137,8 +135,8 @@ class HookService:
             subs = [s for s in all_wf if s.parent == wf.id]
             for sub in sorted(subs, key=lambda s: str(s.id)):
                 parts: list[str] = []
-                if "skills" in wants and sub.skills:
-                    parts.append("load skill " + ", ".join(sub.skills))
+                if "skills" in wants and sub.id:
+                    parts.append("load skill " + str(sub.id))
                 if "instructions" in wants:
                     refs = self._invariant_refs(sub)
                     if refs:
@@ -150,8 +148,8 @@ class HookService:
     def _inject_step(self, frame: Any, wants: list[str]) -> str:
         """A dispatched child step session inherits the step it was dispatched for and loads that
         step's skills (per-step injection). The skill resolves in precedence: an explicit step-level
-        `skills`, else the target suborchestration's procedure skill (a delegate step IS the sub),
-        else the owning workflow's skill. Instruction refs are scoped to that one step."""
+        `skills`, else the target suborchestration id as its procedure skill (a delegate step IS the
+        sub). Instruction refs are scoped to that one step."""
         orchestration = frame.orchestration
         step_id = frame.step
         wf = self._workflow_by_id(orchestration)
@@ -180,9 +178,9 @@ class HookService:
             return step.skills
         if step is not None and step.delegates_to:
             target = self._workflow_by_id(str(step.delegates_to).rstrip("/").split("/")[-1])
-            if target is not None and target.skills:
-                return target.skills
-        return wf.skills
+            if target is not None and target.id:
+                return [str(target.id)]
+        return []
 
     def _workflow_by_id(self, wid: Any) -> Any:
         if not wid:

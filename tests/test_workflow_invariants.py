@@ -3,10 +3,10 @@
 DESIGN-TIME framework tests — deliberately NOT runtime harness functions. They assert the two
 structural invariants and cross-workflow integrity over every Poesis-owned ``workflow.yaml``:
 
-1. root-completeness    — every root orchestration has a ``rank: root`` workflow declaring ``drives``;
+1. root-completeness    — every root orchestration exists and is identified by a root id;
 2. one-actor-per-step   — every step names exactly one hat (Invariant 1);
 3. delegates_to resolves — every ``delegates_to`` points to a real sub-workflow;
-4. fsm/CEL coherence    — every ``status == "X"`` in a root's CEL uses a state declared in its ``fsm``;
+4. legacy-header cleanup — workflow-level ``skills``/``drives``/``fsm`` keys are absent;
 5. instruction URI resolves — every invariant's ``instruction`` value points to an existing file.
 
 The harness is the sole implicit mediator (Design invariant: one log = run journal; the orchestrate
@@ -43,9 +43,6 @@ ROOT_ORCHESTRATIONS = (
 # A single actor: one ``@hat`` or the human ``central-supervisor``, each with an optional "(… hat)"
 # note. Anything carrying " or ", "/", or "," is a multi-actor hedge and must FAIL Invariant 1.
 _ACTOR_RE = re.compile(r"^(@[a-z][a-z0-9-]*|central-supervisor)(\s*\([^)]*\))?$")
-_STATUS_EQ_RE = re.compile(r'status\s*==\s*"([^"]+)"')
-
-
 def _workspace() -> Workspace:
     return Workspace.detect()
 
@@ -58,7 +55,7 @@ def _norm(actor: object) -> str:
     return str(actor if actor is not None else "").strip()
 
 
-# --- the six structural checks (each returns a list of human-readable violations) --------------
+# --- the structural checks (each returns a list of human-readable violations) -------------------
 def violations_root_completeness(workspace: Workspace) -> list[str]:
     out: list[str] = []
     repo = WorkflowRepository(workspace)
@@ -68,10 +65,10 @@ def violations_root_completeness(workspace: Workspace) -> list[str]:
             out.append(f"{oid}: missing root workflow.yaml")
             continue
         workflow = repo.load(path)
-        if workflow.rank != "root":
-            out.append(f"{oid}/workflow.yaml: rank is {workflow.rank!r}, expected 'root'")
-        if not workflow.drives:
-            out.append(f"{oid}/workflow.yaml: root workflow is missing `drives`")
+        if not workflow.is_root:
+            out.append(f"{oid}/workflow.yaml: id {workflow.id!r} is not a root id, expected one of lpm/art/scrum")
+        if workflow.parent:
+            out.append(f"{oid}/workflow.yaml: root workflow must not declare `parent`")
     return out
 
 
@@ -100,23 +97,14 @@ def violations_delegates_to(workspace: Workspace) -> list[str]:
     return out
 
 
-def violations_fsm_coherence(workspace: Workspace) -> list[str]:
+def violations_legacy_header_keys_absent(workspace: Workspace) -> list[str]:
     out: list[str] = []
     for workflow in _workflows(workspace):
-        if not workflow.is_root:
-            continue
-        fsm = workflow.fsm
-        if not fsm:
-            continue
         label = workspace.label(workflow.path, workspace.skills_root)
-        for step in workflow.steps:
-            for cid, expr in step.cel_exprs:
-                for status in _STATUS_EQ_RE.findall(str(expr)):
-                    if status not in fsm:
-                        out.append(
-                            f"{label}: step {step.raw_id!r} condition {cid!r} uses status "
-                            f"{status!r} not in declared fsm {sorted(fsm)}"
-                        )
+        block = workflow.block
+        for key in ("skills", "drives", "fsm"):
+            if key in block:
+                out.append(f"{label}: workflow-level `{key}` is legacy and must be removed")
     return out
 
 
@@ -138,7 +126,7 @@ _CHECKS = (
     ("root-completeness", violations_root_completeness),
     ("one-actor-per-step (Invariant 1)", violations_one_actor),
     ("delegates_to resolves", violations_delegates_to),
-    ("fsm/CEL status coherence", violations_fsm_coherence),
+    ("legacy-header cleanup", violations_legacy_header_keys_absent),
     ("instruction URI resolves", violations_instruction_uri_resolves),
 )
 
@@ -159,8 +147,8 @@ def test_delegates_to_resolves() -> None:
     assert not violations, "\n".join(violations)
 
 
-def test_fsm_status_coherence() -> None:
-    violations = violations_fsm_coherence(_workspace())
+def test_legacy_header_keys_absent() -> None:
+    violations = violations_legacy_header_keys_absent(_workspace())
     assert not violations, "\n".join(violations)
 
 

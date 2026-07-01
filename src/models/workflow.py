@@ -8,12 +8,18 @@ from typing import Any
 from .step import Step
 
 
+# The three root orchestrations, identified by id (portfolio / program / team). Root-ness is
+# intrinsic to the id — a workflow is a root iff its id is one of these; every other workflow.yaml
+# is a suborchestration (and carries `parent`).
+ROOT_IDS = frozenset({"lpm", "art", "scrum"})
+
+
 class Workflow:
     """The single `workflow` root node of a workflow.yaml: header fields + a steps model.
 
     A Workflow abstracts one workflow.yaml file. The `WorkflowRepository` maps the file
-    to this entity; checkers read the header (`id`/`rank`/`facilitator`/`fsm`/`drives`)
-    and the `steps` (each a `Step`) through it, plus the `after` DAG cycle check.
+    to this entity; checkers read the header (`id`/`facilitator`) and the `steps`
+    (each a `Step`) through it, plus the `after` DAG cycle check.
     """
 
     def __init__(self, data: dict[str, Any], path: Path | None = None) -> None:
@@ -30,10 +36,6 @@ class Workflow:
         return self.block.get("id")
 
     @property
-    def rank(self) -> Any:
-        return self.block.get("rank")
-
-    @property
     def facilitator(self) -> Any:
         return self.block.get("facilitator")
 
@@ -42,21 +44,8 @@ class Workflow:
         return self.block.get("parent")
 
     @property
-    def skills(self) -> list[str]:
-        raw = self.block.get("skills")
-        return [str(s) for s in raw] if isinstance(raw, list) else []
-
-    @property
-    def drives(self) -> Any:
-        return self.block.get("drives")
-
-    @property
-    def fsm(self) -> set[str]:
-        return set(self.block.get("fsm") or [])
-
-    @property
     def is_root(self) -> bool:
-        return self.block.get("rank") == "root"
+        return self.block.get("id") in ROOT_IDS
 
     @property
     def steps(self) -> list[Step]:
