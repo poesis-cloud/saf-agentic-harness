@@ -1,0 +1,105 @@
+# Centralized access-control list for SAFe orchestration — owned by the harness.
+#
+# A privilege is "<action>_<resource>":
+#   action   ∈ create | read | update | delete | *           (verb on the resource)
+#   resource = <schema-name> | *                              (the artifact's schema name; whole resource)
+#
+# Resources are the artifact SCHEMA NAMES (the `*.artifact.schema.json` stem) — one resource per
+# schema. The checker resolves each output path to its schema; the kanban schemas split per layer
+# (kanban-portfolio / kanban-program / kanban-team), and the business vs enabler backlog into
+# epic/epic-enabler, feature/feature-enabler, story/story-enabler.
+#
+# A write is legal only when the acting agent holds a privilege whose action covers the attempted
+# action and whose resource covers the attempted (whole) resource. Authorization is PLAIN RBAC — per
+# action + per resource, NEVER per property: the host hook only sees the file path being written
+# (whole-file), not which field changes, so property-level grants are unenforceable at the boundary.
+# Each artifact has ONE author (e.g. PM owns the Feature). Status TRANSITIONS are governed separately
+# by the transition-guard plane (check-artifact --to, owner check vmo->epic / rte->feature /
+# sm->story) and recorded in the layer kanban the orchestrator owns — not by a per-property write
+# grant. The checker derives (action, resource) from each run-log line's actor + outputs and matches
+# against that agent's privileges here. The harness identifies the AGENT (not the skill) as the actor.
+#
+# Business vs enabler: Epics/Features/Stories share one path pattern, so the enabler variant
+# (frontmatter `type: enabler`) resolves to its own schema/resource — `epic-enabler`,
+# `feature-enabler`, `story-enabler`. Business backlog is authored by Business-Owner/PM/PO;
+# the enabler backlog by Enterprise-Architect/System-Architect.
+agents:
+  value-management-officier:
+    - "*_portfolio-init"
+    - "*_product-init"
+    - "*_strategic-themes"
+    - "*_epic"
+    - "*_lean-business-case"
+    - "*_vision"
+    - "*_roadmap"
+    - "*_kanban-portfolio"
+    - "*_gate-decisions"
+
+  release-train-engineer:
+    - create_feature
+    - create_feature-enabler
+    - "*_pi-objectives"
+    - "*_risks"
+    - "*_inspect-adapt"
+    - "*_architectural-vision"
+    - "*_kanban-program"
+    - "*_gate-decisions"
+    - "*_roadmap"
+
+  scrum-master:
+    - create_story
+    - create_story-enabler
+    - "*_sprint-plan"
+    - "*_daily"
+    - "*_progress"
+    - "*_retro"
+    - "*_kanban-team"
+    - "*_gate-decisions"
+
+  product-manager:
+    - "*_feature"             # business Feature content
+    - "*_project-brief"
+
+  product-owner:
+    - "*_story"               # business Story content
+
+  system-architect:
+    - "*_adr"
+    - "*_architecture-decision-inventory"
+    - "*_architecture-review"
+    - "*_runway-register"
+    - "*_nfr-register"
+    - "*_feature-enabler"     # enabler Feature authoring
+    - "*_story-enabler"       # enabler Story authoring
+
+  business-owner:
+    - "*_epic"                # business Epic content
+    - "*_lean-business-case"
+    - "*_vision"
+    - "*_value-review"        # business-value / WSJF review (challenge output)
+
+  enterprise-architect:
+    - "*_epic-enabler"        # enabler Epic authoring
+    - "*_architectural-vision"
+    - "*_architecture-review"
+
+  developer:
+    - "*_story"
+    - "*_story-enabler"
+    - "*_feasibility-review"  # implementation-feasibility review (challenge output)
+
+  quality-engineer:
+    - "*_qa-signoff"
+    - "*_testability-review"  # testability review (challenge output)
+
+  # Advisory specialists — own their review/verdict artifacts (no backlog artifact of their own).
+  # Their challenge/review steps produce an owned, typed review (effect-determinism, invariant 15);
+  # findings fold back into the owner's artifact via open_items, the verdict rides the review.
+  security-expert:
+    - "*_security-review"
+
+  ux-designer:
+    - "*_ux-review"
+
+  operator:
+    - "*_operability-review"

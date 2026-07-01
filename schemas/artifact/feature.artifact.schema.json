@@ -1,0 +1,416 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/artifacts/feature.artifact.schema.json",
+  "title": "feature artifact schema",
+  "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "nonEmptyString": {
+      "description": "Reusable helper: a string with at least one character.",
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableString": {
+      "description": "Reusable helper: a string or null.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stringArray": {
+      "description": "Reusable helper: an array of strings.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workItemRelations": {
+      "description": "Typed work-item relations between backlog items.",
+      "type": "object",
+      "properties": {
+        "depends_on": {
+          "description": "Hard prerequisite work-item ids that must advance or land before this item.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enables": {
+          "description": "Work-item ids this item intentionally makes possible or materially easier.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "related_to": {
+          "description": "Non-gating semantic or strategic links; never use as a hidden dependency list.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supersedes": {
+          "description": "Work-item ids intentionally replaced by this item.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block used to rank the backlog.",
+      "type": "object",
+      "required": [
+        "user_business_value",
+        "time_criticality",
+        "risk_reduction",
+        "job_size",
+        "score"
+      ],
+      "properties": {
+        "user_business_value": {
+          "description": "Relative user/business value of the work item.",
+          "type": "number"
+        },
+        "time_criticality": {
+          "description": "How time-sensitive the value is (it decays if delayed).",
+          "type": "number"
+        },
+        "risk_reduction": {
+          "description": "Risk reduction / opportunity enablement value.",
+          "type": "number"
+        },
+        "job_size": {
+          "description": "Relative size/effort of the job (the WSJF denominator).",
+          "type": "number"
+        },
+        "score": {
+          "description": "Computed WSJF score = (user_business_value + time_criticality + risk_reduction) / job_size.",
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "cost": {
+      "description": "Token-cost accounting block (see the cost-snapshot invariant instructions).",
+      "type": "object",
+      "required": [
+        "tokens_in",
+        "tokens_out",
+        "tokens_cached",
+        "tokens_self",
+        "tokens_rolled",
+        "dispatches",
+        "source",
+        "committed"
+      ],
+      "properties": {
+        "tokens_in": {
+          "description": "NET-NEW prompt tokens = sum(inputTokens \u2212 cachedTokens) of this item's dispatches.",
+          "type": "number"
+        },
+        "tokens_out": {
+          "description": "Sum of outputTokens of those dispatches.",
+          "type": "number"
+        },
+        "tokens_cached": {
+          "description": "Sum of cachedTokens (re-sent context); excluded from tokens_self, kept for billed-cost reconstruction.",
+          "type": "number"
+        },
+        "tokens_self": {
+          "description": "tokens_in + tokens_out \u2014 the item's own net cost.",
+          "type": "number"
+        },
+        "tokens_rolled": {
+          "description": "tokens_self plus the rolled cost of child items \u2014 the item's end-to-end cost.",
+          "type": "number"
+        },
+        "dispatches": {
+          "description": "Number of subagent dispatches counted into tokens_self (not llm_request turns).",
+          "type": "number"
+        },
+        "source": {
+          "description": "Provenance of the cost figures: measured, estimated, or mixed.",
+          "enum": [
+            "measured",
+            "estimated",
+            "mixed"
+          ]
+        },
+        "committed": {
+          "description": "YYYY-MM-DD the one-time cost snapshot was written; immutable after (null until committed).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "githubSync": {
+      "description": "GitHub Projects sync envelope; filled by portfolio/_sync, null when authoring.",
+      "type": "object",
+      "properties": {
+        "issue_number": {
+          "description": "GitHub issue number; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "integer",
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "issue_node_id": {
+          "description": "GitHub issue node id; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_item_id": {
+          "description": "GitHub Projects item id; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "openItems": {
+      "description": "Clarification + challenge ledger entries (each an object: id, kind, raised_by, owner, blocking, status, ...).",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "x-artifact": {
+    "id": "feature",
+    "kind": "feature",
+    "template": "layers/program/actors/product-manager/artifacts/feature.artifact-template.md",
+    "pathPatterns": [
+      "*/features/*.md"
+    ],
+    "renderOnly": false,
+    "type": "business"
+  },
+  "required": [
+    "__path",
+    "__kind",
+    "__artifact_id",
+    "__frontmatter_present",
+    "id",
+    "status",
+    "type",
+    "title",
+    "parent_epic",
+    "epic_rationale",
+    "work_item_relations",
+    "wsjf",
+    "structurant",
+    "risk",
+    "complexity",
+    "architecture_inventory",
+    "adrs",
+    "owner",
+    "created",
+    "open_items",
+    "cost",
+    "github"
+  ],
+  "properties": {
+    "__path": {
+      "description": "Workspace-relative path of the artifact file, injected by the orchestration harness (not authored in frontmatter).",
+      "type": "string",
+      "minLength": 1
+    },
+    "__kind": {
+      "description": "Artifact-kind discriminator injected by the harness; must equal x-artifact.kind.",
+      "const": "feature"
+    },
+    "__artifact_id": {
+      "description": "Stable artifact id injected by the harness, derived from the file and frontmatter.",
+      "type": "string",
+      "minLength": 1
+    },
+    "__frontmatter_present": {
+      "description": "Harness assertion that YAML frontmatter was found and parsed; always true for a valid artifact.",
+      "const": true
+    },
+    "__sections": {
+      "description": "Artifact body sections keyed by their `## ` heading \u2014 one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
+      "type": "object",
+      "properties": {
+        "Description": {
+          "description": "What is this Feature, in one paragraph.",
+          "type": "string"
+        },
+        "Acceptance criteria": {
+          "description": "Use one flat bullet per criterion, labeled `AC1`, `AC2`, `AC3`",
+          "type": "string"
+        },
+        "Benefit hypothesis": {
+          "description": "Why this Feature delivers value (a slice of the parent Epic's outcome hypothesis, or the Feature's own rationale when standalone).",
+          "type": "string"
+        },
+        "NFR applicability / trace": {
+          "description": "List the canonical product NFRs from `architecture/nfrs.md` that apply to this Feature, plus any Feature-specific tightening or derived verification notes. Do not redefine the product's canonical NFR set here.",
+          "type": "string"
+        },
+        "Routing classification": {
+          "description": "Risk: low | medium | critical \u2014 consequence of being wrong.",
+          "type": "string"
+        },
+        "Dependencies": {
+          "description": "Other Features, ADRs, external systems. Cross-product coordination is expressed via the shared parent Epic (one Feature per product), never a single cross-product Feature.",
+          "type": "string"
+        },
+        "Work-item relations": {
+          "description": "Use typed work-item relations only when they affect flow, decomposition, or governance.",
+          "type": "string"
+        },
+        "Architecture decision inventory": {
+          "description": "If `structurant: true`, point to the committed architecture inventory artifact that tracks the Feature's decision units, their coverage state, linked ADRs, waivers, and enabler follow-up. If `structurant: false`, set `architecture_inventory: null` and omit this section.",
+          "type": "string"
+        },
+        "Open items": {
+          "description": "The human-readable companion to the `open_items:` frontmatter ledger (the [open-item ledger](../../orchestrator/SKILL.md#open-item-ledger)) \u2014 this Feature's **clarifications** (proactive unknowns surfaced by the CE Discovery turn) and **challenges** (reactive findings from peer review), for...",
+          "type": "string"
+        },
+        "Story breakdown (filled in step 6 by PO)": {
+          "description": "`Story breakdown (filled in step 6 by PO)` section of the artifact body.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "__body": {
+      "description": "Raw Markdown body of the artifact (everything after the frontmatter), injected by the harness.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Stable artifact identifier (matches the filename stem).",
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "description": "funnel | refined | arch-pending | ready | committed | in-progress | done | blocked",
+      "enum": [
+        "funnel",
+        "refined",
+        "arch-pending",
+        "ready",
+        "committed",
+        "in-progress",
+        "done",
+        "blocked"
+      ]
+    },
+    "type": {
+      "description": "Artifact type discriminator.",
+      "enum": [
+        "business"
+      ]
+    },
+    "title": {
+      "description": "Human-readable title of the artifact.",
+      "type": "string",
+      "minLength": 1
+    },
+    "work_item_relations": {
+      "description": "Typed work-item relations (depends_on / enables / related_to / supersedes).",
+      "$ref": "#/definitions/workItemRelations"
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block.",
+      "$ref": "#/definitions/wsjf"
+    },
+    "risk": {
+      "description": "low | medium | critical; set by PM before leaving funnel",
+      "enum": [
+        "low",
+        "medium",
+        "critical"
+      ]
+    },
+    "complexity": {
+      "description": "simple | involved | complex; set by PM before leaving funnel",
+      "enum": [
+        "simple",
+        "involved",
+        "complex"
+      ]
+    },
+    "created": {
+      "description": "Authoring date (YYYY-MM-DD).",
+      "type": "string",
+      "minLength": 1
+    },
+    "open_items": {
+      "description": "clarification + challenge ledger \u2014 see orchestrator \"Open-item ledger\". Each entry: { id, kind, raised_by, owner, blocking, status, \u2026 }; kind: clarification | challenge. status: open | resolved | withdrawn. A blocking+open entry HALTS the \u2605 Feature/Architecture Gate.",
+      "$ref": "#/definitions/openItems"
+    },
+    "cost": {
+      "description": "token cost accounting \u2014 see the cost-snapshot invariant instructions",
+      "$ref": "#/definitions/cost"
+    },
+    "github": {
+      "description": "filled by portfolio/_sync (GitHub Projects board sync); null when authoring",
+      "$ref": "#/definitions/githubSync"
+    },
+    "parent_epic": {
+      "description": "portfolio Epic id, or null for a standalone Feature",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "epic_rationale": {
+      "description": "Why this Feature belongs to its parent Epic.",
+      "type": "string",
+      "minLength": 1
+    },
+    "structurant": {
+      "description": "true \u21d2 requires architecture decisions (one or more ADRs) \u21d2 arch-pending",
+      "type": "boolean"
+    },
+    "architecture_inventory": {
+      "description": "required when structurant=true; path to architecture/decision-inventory-F-N-*.md",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "adrs": {
+      "description": "ADR ids referenced; may contain multiple decisions for one structurant Feature",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pi": {
+      "description": "set on transition to `committed`",
+      "type": [
+        "integer",
+        "number",
+        "string",
+        "null"
+      ]
+    },
+    "owner": {
+      "description": "Accountable owner role/hat for this artifact.",
+      "type": "string",
+      "minLength": 1
+    },
+    "attestations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "Agent-attested judgment booleans (rung-3 pre/post), keyed by condition id."
+    }
+  }
+}

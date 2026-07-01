@@ -1,0 +1,10 @@
+# Python dependencies for the deterministic orchestration harness.
+# Install (from this directory):  pip install -r requirements.txt
+#
+# The harness is a design-time CLI invoked by the three orchestrators (VMO / RTE / SM).
+# It is check-only: CEL is the single, side-effect-free condition language (no per-orchestration
+# Python), so condition logic lives declaratively in each contract.yaml's `cel:` fields.
+
+cel-python>=0.5.0    # CEL evaluation of contract `expr:` conditions (the check language)
+jsonschema>=4.0      # artifact + contract + log JSON Schema validation (Draft-07)
+PyYAML>=6.0          # parse contract.yaml

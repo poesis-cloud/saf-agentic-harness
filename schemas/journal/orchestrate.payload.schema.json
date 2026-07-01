@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/journal/orchestrate.payload.schema.json",
+  "title": "orchestrate command payload (the resolved action)",
+  "description": "The payload of an `orchestrate` journal entry (one base envelope + per-command payload — see journal.schema.json). The driver recomputes the step cursor from the unit's artifacts and returns exactly one action; this payload is that action. The envelope carries run/orchestration/step/unit/actor/status; this payload carries the action verb and its binding (the resolved dispatch model/skills, the halt reason, or the done marker). The ordered `dispatch` entries are the run's step sequence — grouping the journal by `step` reconstructs the run.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["action"],
+  "properties": {
+    "action": {
+      "description": "The single resolved action for this (workflow, unit) at this point in the run.",
+      "type": "string",
+      "enum": ["dispatch", "halt", "done", "error"]
+    },
+    "workflow": {
+      "description": "Workflow (orchestration) id the action was resolved for.",
+      "type": "string"
+    },
+    "reason": {
+      "description": "For halt: gate | blocked | unroutable | off-policy-dispatch. For error: the failure cause.",
+      "type": "string"
+    },
+    "step": {
+      "description": "The step the action targets (the next eligible step on dispatch/halt).",
+      "type": "string"
+    },
+    "actor": {
+      "description": "The agent the step dispatches to.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "The step's kind (author / challenge / verify / commit / gate / delegate / ...).",
+      "type": "string"
+    },
+    "model": {
+      "description": "The model resolved deterministically by ModelRouter from the step's routing metadata.",
+      "type": ["string", "null"]
+    },
+    "config": {
+      "description": "The resolved config profile for the dispatch (deterministic / audit / exploratory / creative).",
+      "type": ["string", "null"]
+    },
+    "skills": {
+      "description": "The skills the dispatched agent loads for this step.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "unit": {
+      "description": "Epic / Feature / Story id the action acts on.",
+      "type": ["string", "null"]
+    },
+    "run": {
+      "description": "Run id the action belongs to.",
+      "type": ["string", "null"]
+    },
+    "output": {
+      "description": "The single artifact kind the dispatched step produces.",
+      "type": ["string", "null"]
+    },
+    "unmet_predecessors": {
+      "description": "For a blocked halt: the `after` predecessors that are not yet complete.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "prompt_context": {
+      "description": "The deterministic context handed to the dispatched agent (workflow / step / unit / instructions).",
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

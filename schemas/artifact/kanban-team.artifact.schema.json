@@ -1,0 +1,303 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/artifacts/kanban-team.artifact.schema.json",
+  "title": "kanban-team artifact schema",
+  "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "nonEmptyString": {
+      "description": "Reusable helper: a string with at least one character.",
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableString": {
+      "description": "Reusable helper: a string or null.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stringArray": {
+      "description": "Reusable helper: an array of strings.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workItemRelations": {
+      "description": "Typed work-item relations between backlog items.",
+      "type": "object",
+      "properties": {
+        "depends_on": {
+          "description": "Hard prerequisite work-item ids that must advance or land before this item.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enables": {
+          "description": "Work-item ids this item intentionally makes possible or materially easier.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "related_to": {
+          "description": "Non-gating semantic or strategic links; never use as a hidden dependency list.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supersedes": {
+          "description": "Work-item ids intentionally replaced by this item.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block used to rank the backlog.",
+      "type": "object",
+      "required": [
+        "user_business_value",
+        "time_criticality",
+        "risk_reduction",
+        "job_size",
+        "score"
+      ],
+      "properties": {
+        "user_business_value": {
+          "description": "Relative user/business value of the work item.",
+          "type": "number"
+        },
+        "time_criticality": {
+          "description": "How time-sensitive the value is (it decays if delayed).",
+          "type": "number"
+        },
+        "risk_reduction": {
+          "description": "Risk reduction / opportunity enablement value.",
+          "type": "number"
+        },
+        "job_size": {
+          "description": "Relative size/effort of the job (the WSJF denominator).",
+          "type": "number"
+        },
+        "score": {
+          "description": "Computed WSJF score = (user_business_value + time_criticality + risk_reduction) / job_size.",
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "cost": {
+      "description": "Token-cost accounting block (see the cost-snapshot invariant instructions).",
+      "type": "object",
+      "required": [
+        "tokens_in",
+        "tokens_out",
+        "tokens_cached",
+        "tokens_self",
+        "tokens_rolled",
+        "dispatches",
+        "source",
+        "committed"
+      ],
+      "properties": {
+        "tokens_in": {
+          "description": "NET-NEW prompt tokens = sum(inputTokens − cachedTokens) of this item's dispatches.",
+          "type": "number"
+        },
+        "tokens_out": {
+          "description": "Sum of outputTokens of those dispatches.",
+          "type": "number"
+        },
+        "tokens_cached": {
+          "description": "Sum of cachedTokens (re-sent context); excluded from tokens_self, kept for billed-cost reconstruction.",
+          "type": "number"
+        },
+        "tokens_self": {
+          "description": "tokens_in + tokens_out — the item's own net cost.",
+          "type": "number"
+        },
+        "tokens_rolled": {
+          "description": "tokens_self plus the rolled cost of child items — the item's end-to-end cost.",
+          "type": "number"
+        },
+        "dispatches": {
+          "description": "Number of subagent dispatches counted into tokens_self (not llm_request turns).",
+          "type": "number"
+        },
+        "source": {
+          "description": "Provenance of the cost figures: measured, estimated, or mixed.",
+          "enum": [
+            "measured",
+            "estimated",
+            "mixed"
+          ]
+        },
+        "committed": {
+          "description": "YYYY-MM-DD the one-time cost snapshot was written; immutable after (null until committed).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "githubSync": {
+      "description": "GitHub Projects sync envelope; filled by portfolio/_sync, null when authoring.",
+      "type": "object",
+      "properties": {
+        "issue_number": {
+          "description": "GitHub issue number; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "integer",
+            "number",
+            "string",
+            "null"
+          ]
+        },
+        "issue_node_id": {
+          "description": "GitHub issue node id; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_item_id": {
+          "description": "GitHub Projects item id; filled by portfolio/_sync, null when authoring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "openItems": {
+      "description": "Clarification + challenge ledger entries (each an object: id, kind, raised_by, owner, blocking, status, ...).",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "x-artifact": {
+    "id": "kanban-team",
+    "kind": "kanban",
+    "template": "layers/team/actors/scrum-master/artifacts/kanban-team.artifact-template.md",
+    "pathPatterns": [
+      "*/kanban/team-sprint-*.md"
+    ],
+    "renderOnly": true
+  },
+  "required": [
+    "__path",
+    "__kind",
+    "__artifact_id",
+    "__frontmatter_present"
+  ],
+  "properties": {
+    "__path": {
+      "description": "Workspace-relative path of the artifact file, injected by the orchestration harness (not authored in frontmatter).",
+      "type": "string",
+      "minLength": 1
+    },
+    "__kind": {
+      "description": "Artifact-kind discriminator injected by the harness; must equal x-artifact.kind.",
+      "const": "kanban"
+    },
+    "__artifact_id": {
+      "description": "Stable artifact id injected by the harness, derived from the file and frontmatter.",
+      "type": "string",
+      "minLength": 1
+    },
+    "__frontmatter_present": {
+      "description": "Harness assertion that YAML frontmatter was found and parsed; always true for a valid artifact.",
+      "type": "boolean"
+    },
+    "__sections": {
+      "description": "Artifact body sections keyed by their `## ` heading — one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
+      "type": "object",
+      "properties": {
+        "Blocked (orthogonal)": {
+          "description": "`Blocked (orthogonal)` section of the artifact body.",
+          "type": "string"
+        },
+        "WIP limits": {
+          "description": "`in-progress`: 1 per pair (current: K / max P)",
+          "type": "string"
+        },
+        "Gate watch": {
+          "description": "**★ PR Gate pending** (Stories awaiting PR approval): S-100 (PR #NNN)",
+          "type": "string"
+        },
+        "Cost (tokens, self)": {
+          "description": "`Cost (tokens, self)` section of the artifact body.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "__body": {
+      "description": "Raw Markdown body of the artifact (everything after the frontmatter), injected by the harness.",
+      "type": "string"
+    },
+    "id": {
+      "description": "Stable artifact identifier (matches the filename stem).",
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "description": "Human-readable title of the artifact.",
+      "type": "string",
+      "minLength": 1
+    },
+    "work_item_relations": {
+      "description": "Typed work-item relations (depends_on / enables / related_to / supersedes).",
+      "$ref": "#/definitions/workItemRelations"
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block.",
+      "$ref": "#/definitions/wsjf"
+    },
+    "risk": {
+      "description": "Risk level — the consequence of being wrong: low | medium | critical.",
+      "enum": [
+        "low",
+        "medium",
+        "critical"
+      ]
+    },
+    "complexity": {
+      "description": "Complexity — cognitive/structural difficulty: simple | involved | complex.",
+      "enum": [
+        "simple",
+        "involved",
+        "complex"
+      ]
+    },
+    "created": {
+      "description": "Authoring date (YYYY-MM-DD).",
+      "type": "string",
+      "minLength": 1
+    },
+    "open_items": {
+      "description": "Clarification + challenge ledger (a blocking open entry halts the relevant gate).",
+      "$ref": "#/definitions/openItems"
+    },
+    "cost": {
+      "description": "Token-cost accounting block (see the cost definition).",
+      "$ref": "#/definitions/cost"
+    },
+    "github": {
+      "description": "GitHub Projects sync envelope, filled by portfolio/_sync (null when authoring).",
+      "$ref": "#/definitions/githubSync"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/journal/hook.payload.schema.json",
+  "title": "hook command payload (the host decision the harness returned)",
+  "description": "The payload of a `hook` journal entry (one base envelope + per-command payload — see journal.schema.json). A host-fired lifecycle event funnels through the harness, which returns an allow/deny decision; this payload records that decision. The envelope carries session/orchestration/actor/status; this payload carries the event, the normalized phase, the permission, and any derived write refs / injected context.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["event", "phase", "permission"],
+  "properties": {
+    "event": {
+      "description": "Host lifecycle event that fired the hook.",
+      "type": "string",
+      "enum": ["sessionStart", "userPromptSubmit", "preToolUse", "postToolUse", "stop", "sessionEnd"]
+    },
+    "phase": {
+      "description": "The event normalized to the workflow's own vocabulary.",
+      "type": "string",
+      "enum": ["session-open", "observe", "precondition", "postcondition", "session-close"]
+    },
+    "permission": {
+      "description": "The allow/deny verdict the harness returned to the host (observe-only phases return allow).",
+      "type": "string",
+      "enum": ["allow", "deny"]
+    },
+    "reason": {
+      "description": "Human-readable explanation of a deny (or empty on allow).",
+      "type": "string"
+    },
+    "outputs": {
+      "description": "Write refs the harness derived from the event (the resources the action would produce/edit).",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "context": {
+      "description": "Deterministic additionalContext the harness injected into the host (session-open skills/instructions, or dispatch routing guidance).",
+      "type": "string"
+    }
+  }
+}

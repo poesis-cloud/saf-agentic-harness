@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/artifacts/architecture-review.artifact.schema.json",
+  "title": "architecture-review artifact schema",
+  "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "findings": {
+      "description": "Architecture findings raised by the review (each an object: id, severity, finding, recommendation).",
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "openItems": {
+      "description": "Blocking/non-blocking open items the owning step must clear (a blocking FAIL halts the relevant gate).",
+      "type": "array",
+      "items": { "type": "object" }
+    }
+  },
+  "x-artifact": {
+    "id": "architecture-review",
+    "kind": "architecture-review",
+    "template": "layers/program/actors/system-architect/artifacts/architecture-review.artifact-template.md",
+    "pathPatterns": [
+      "*/reviews/*architecture-review*.md",
+      "*/sprint-*/reviews/*architecture*.md"
+    ],
+    "renderOnly": false
+  },
+  "required": ["__path", "__kind", "__artifact_id", "__frontmatter_present"],
+  "properties": {
+    "__path": { "description": "Workspace-relative path of the artifact file, injected by the harness.", "type": "string", "minLength": 1 },
+    "__kind": { "description": "Artifact-kind discriminator injected by the harness; must equal x-artifact.kind.", "const": "architecture-review" },
+    "__artifact_id": { "description": "Stable artifact id injected by the harness.", "type": "string", "minLength": 1 },
+    "__frontmatter_present": { "description": "Harness assertion that YAML frontmatter was found and parsed.", "type": "boolean" },
+    "__sections": {
+      "description": "Artifact body sections keyed by their `## ` heading (advisory; additionalProperties permitted).",
+      "type": "object",
+      "properties": {
+        "Subject under review": { "description": "Link / id of what is reviewed; restate the scope.", "type": "string" },
+        "Findings": { "description": "Severity-graded findings table.", "type": "string" },
+        "Verdict": { "description": "PASS | CONCERNS | FAIL.", "type": "string" },
+        "Recommendations": { "description": "Remediation guidance for the owner.", "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "__body": { "description": "Raw Markdown body, injected by the harness.", "type": "string" },
+    "id": { "description": "Stable artifact identifier (matches the filename stem).", "type": "string", "minLength": 1 },
+    "title": { "description": "Human-readable title.", "type": "string", "minLength": 1 },
+    "subject": { "description": "The artifact id or path under review.", "type": "string", "minLength": 1 },
+    "reviewer": { "description": "The reviewing agent handle (`@system-architect` or `@enterprise-architect`).", "type": "string", "minLength": 1 },
+    "verdict": { "description": "Review verdict.", "enum": ["pass", "concerns", "fail"] },
+    "created": { "description": "Authoring date (YYYY-MM-DD).", "type": "string", "minLength": 1 },
+    "findings": { "description": "Architecture findings.", "$ref": "#/definitions/findings" },
+    "open_items": { "description": "Open-item ledger.", "$ref": "#/definitions/openItems" }
+  }
+}

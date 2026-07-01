@@ -1,0 +1,229 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/artifacts/lean-business-case.artifact.schema.json",
+  "title": "lean-business-case artifact schema (native JSON source of truth)",
+  "description": "Validates the native JSON artifact `<epic>-lbc.artifact.json` directly. Decision 1: JSON is the source of truth; the Markdown rendering is produced from it at the final render step and is never re-parsed. `sections` is the hierarchical body \u2014 each key is an H2 heading whose value is a section node ({ body, sections? }); deeper headings nest recursively under each node's `sections`, mirroring the template heading hierarchy.",
+  "type": "object",
+  "additionalProperties": true,
+  "definitions": {
+    "nonEmptyString": {
+      "description": "Reusable helper: a string with at least one character.",
+      "type": "string",
+      "minLength": 1
+    },
+    "section": {
+      "description": "One body section: its own Markdown `body`, plus any nested child sections under `sections` (recursive \u2014 mirrors the template heading hierarchy).",
+      "type": "object",
+      "required": [
+        "body"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "description": "Markdown body directly under this heading (excluding child headings).",
+          "type": "string"
+        },
+        "sections": {
+          "description": "Child sections keyed by their heading text; each value is itself a section node.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/section"
+          }
+        }
+      }
+    },
+    "workItemRelations": {
+      "description": "Typed work-item relations between backlog items.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enables": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "related_to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block used to rank the backlog.",
+      "type": "object",
+      "required": [
+        "user_business_value",
+        "time_criticality",
+        "risk_reduction",
+        "job_size",
+        "score"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "user_business_value": {
+          "type": "number"
+        },
+        "time_criticality": {
+          "type": "number"
+        },
+        "risk_reduction": {
+          "type": "number"
+        },
+        "job_size": {
+          "type": "number"
+        },
+        "score": {
+          "type": "number"
+        }
+      }
+    },
+    "cost": {
+      "description": "Token-cost accounting block (see the cost-snapshot invariant instructions); shape kept lenient here, asserted by the cost actuator.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "openItems": {
+      "description": "Clarification + challenge ledger entries (each an object: id, kind, raised_by, owner, blocking, status, ...).",
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "githubSync": {
+      "description": "GitHub Projects sync envelope; filled by portfolio/_sync, null/empty when authoring.",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "x-artifact": {
+    "id": "lean-business-case",
+    "kind": "lean-business-case",
+    "template": "layers/portfolio/actors/business-owner/artifacts/lean-business-case.artifact-template.md",
+    "pathPatterns": [
+      "epics/*-lbc.artifact.json"
+    ],
+    "renderOnly": false
+  },
+  "required": [
+    "kind",
+    "id",
+    "epic",
+    "status",
+    "sections"
+  ],
+  "properties": {
+    "kind": {
+      "description": "Artifact-kind discriminator; the schema selector for native JSON validation (must equal x-artifact.kind).",
+      "const": "lean-business-case"
+    },
+    "id": {
+      "description": "Stable artifact identifier (matches the filename stem, e.g. E-1-lbc).",
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "epic": {
+      "description": "Id of the Epic this lean business case shapes (e.g. E-1).",
+      "$ref": "#/definitions/nonEmptyString"
+    },
+    "status": {
+      "description": "Authoring lifecycle of the business case.",
+      "enum": [
+        "draft",
+        "challenged",
+        "gate-ready"
+      ]
+    },
+    "funding_state": {
+      "description": "Funding posture proposed by the case (decided at the \u2605 Epic Gate / Participatory Budgeting).",
+      "enum": [
+        "proposed",
+        "funded",
+        "not-funded"
+      ]
+    },
+    "work_item_relations": {
+      "description": "Typed work-item relations (depends_on / enables / related_to / supersedes).",
+      "$ref": "#/definitions/workItemRelations"
+    },
+    "wsjf": {
+      "description": "Weighted Shortest Job First scoring block.",
+      "$ref": "#/definitions/wsjf"
+    },
+    "open_items": {
+      "description": "Clarification + challenge ledger (a blocking open entry halts the relevant gate).",
+      "$ref": "#/definitions/openItems"
+    },
+    "cost": {
+      "description": "Token-cost accounting block (see the cost definition).",
+      "$ref": "#/definitions/cost"
+    },
+    "github": {
+      "description": "GitHub Projects sync envelope, filled by portfolio/_sync (null when authoring).",
+      "$ref": "#/definitions/githubSync"
+    },
+    "sections": {
+      "description": "Hierarchical body and the canonical deterministic structure check. Each key is an H2 heading mirroring the template; deeper headings nest under each node's `sections`. This is the JSON source of truth the Markdown render mirrors.",
+      "type": "object",
+      "required": [
+        "Problem & opportunity",
+        "Solution hypothesis (MVP)",
+        "WSJF",
+        "Leading & lagging indicators",
+        "Cost / effort estimate",
+        "Enabler / runway dependency",
+        "Pivot / persevere / stop criteria",
+        "Challenge findings"
+      ],
+      "additionalProperties": {
+        "$ref": "#/definitions/section"
+      },
+      "properties": {
+        "Problem & opportunity": {
+          "$ref": "#/definitions/section"
+        },
+        "Solution hypothesis (MVP)": {
+          "$ref": "#/definitions/section"
+        },
+        "WSJF": {
+          "$ref": "#/definitions/section"
+        },
+        "Leading & lagging indicators": {
+          "$ref": "#/definitions/section"
+        },
+        "Cost / effort estimate": {
+          "$ref": "#/definitions/section"
+        },
+        "Enabler / runway dependency": {
+          "$ref": "#/definitions/section"
+        },
+        "Pivot / persevere / stop criteria": {
+          "$ref": "#/definitions/section"
+        },
+        "Challenge findings": {
+          "$ref": "#/definitions/section"
+        }
+      }
+    },
+    "attestations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "Agent-attested judgment booleans (rung-3 pre/post), keyed by condition id."
+    }
+  }
+}

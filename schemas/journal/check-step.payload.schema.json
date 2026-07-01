@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/journal/check-step.payload.schema.json",
+  "title": "check-step command payload (the step's evaluated conditions)",
+  "description": "The payload of a `check-step` journal entry (one base envelope + per-command payload — see journal.schema.json). It carries the flat list of condition results the harness evaluated for the step (mirroring the contract's conditions[]) plus the artifact refs the step read/produced and a pass/fail/skipped tally. The envelope carries orchestration/step/unit/actor/status; this payload carries the per-condition evidence. Formerly the standalone per-step log type (log.base.schema.json), now the check-step payload. Canonical term: 'log'.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["conditions"],
+  "properties": {
+    "inputs": {
+      "description": "Artifact references the step read.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "outputs": {
+      "description": "Artifact references the step produced or edited.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "counts": {
+      "description": "Tally of condition results for the step (pass / fail / skipped).",
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "conditions": {
+      "description": "Every check the harness evaluated for this step, each a conditionResult mirroring the contract condition ({kind, type, expression, value, id}) plus its runtime result. Flat list, in evaluation order.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/conditionResult" }
+    }
+  },
+  "definitions": {
+    "conditionResult": {
+      "description": "One check evaluation in a step's log line — the contract condition plus its runtime verdict. `kind` (precondition/postcondition/invariant), `type` (judgment category or structural after/input/output), `expression` (cel/instruction/ref) and `value` (the body) mirror the contract; `id` is set on every condition; `result` is the verdict; when skipped, `reason` says why; `detail` carries evidence.",
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["kind", "type", "expression", "result"],
+      "properties": {
+        "kind": {
+          "description": "When the condition holds: precondition (before the step acts) / postcondition (after) / invariant (throughout).",
+          "type": "string",
+          "enum": ["precondition", "postcondition", "invariant"]
+        },
+        "type": {
+          "description": "What the condition is about: a judgment category (authority/content/clarification/challenge/consistency/transition/state) or a structural dependency (after/input/output).",
+          "type": "string",
+          "enum": ["authority", "content", "clarification", "challenge", "consistency", "transition", "state", "after", "input", "output"]
+        },
+        "id": {
+          "description": "Condition id, matching a steps[].conditions[].id token in the contract.",
+          "type": "string"
+        },
+        "expression": {
+          "description": "The form of `value`: cel (harness-evaluated) / instruction (resolved structurally) / ref (structurally resolved).",
+          "type": "string",
+          "enum": ["cel", "instruction", "ref"]
+        },
+        "value": {
+          "description": "The evaluated body: the CEL expression, the instruction URI, or the ref (artifact path / predecessor step id).",
+          "type": "string"
+        },
+        "result": {
+          "description": "Evaluated outcome of the check.",
+          "type": "string",
+          "enum": ["pass", "fail", "skipped"]
+        },
+        "reason": {
+          "description": "When result is skipped: `unavailable` (an `after` predecessor checked with no `--log` run log supplied) or `logical` (a ref the harness cannot resolve).",
+          "type": "string",
+          "enum": ["unavailable", "logical"]
+        },
+        "detail": {
+          "description": "Optional evidence / explanation for the result (e.g. an attestation note).",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/journal.schema.json",
+  "title": "orchestration run journal entry (envelope + per-command payload)",
+  "description": "One append-only entry in a per-run journal (portfolio/logs/<run>.jsonl). One entry PER COMMAND (a host-fired hook command or an agent-called orchestration command) — never one per step: a step is reconstructed from the command entries its session brackets. A shared ENVELOPE ties every entry to its run + step so the journal replays the workflow (grouping entries by `step` reconstructs each step; the ordered `dispatch` entries are the run's step sequence). A typed PAYLOAD (discriminated union, oneOf on `command`) carries that command's output: a hook command's payload IS its decision/report; an orchestration command's payload IS its action. The journal is the audit + trace, NOT the branching input — sequencing recomputes from artifacts, never from a prior entry. See README invariant 12 and the Logging section.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["command", "payload"],
+  "properties": {
+    "command": {
+      "description": "The harness command that produced this entry (the granularity of the journal).",
+      "type": "string",
+      "enum": ["orchestrate", "check-step", "check-artifact", "hook"]
+    },
+    "trigger": {
+      "description": "What fired the command: an agent-called orchestration command, or a host-fired hook command.",
+      "type": "string",
+      "enum": ["agent", "host"]
+    },
+    "run": {
+      "description": "Run id selecting the per-run journal. May be null on a session-scoped entry not yet correlated to a run (the session→run binding is established by dispatch correlation).",
+      "type": ["string", "null"]
+    },
+    "session": {
+      "description": "Host session id of the entry's session (one session = one step). The dispatched step sessions correlate to the run via this id.",
+      "type": ["string", "null"]
+    },
+    "orchestration": {
+      "description": "Contract id of the orchestration the step belongs to (root orchestration or suborchestration).",
+      "type": ["string", "null"]
+    },
+    "step": {
+      "description": "Structurant step id, matching one steps[].id in the orchestration contract. Grouping entries by `step` reconstructs each step.",
+      "type": ["string", "null"]
+    },
+    "unit": {
+      "description": "Epic / Feature / Story id the step acts on.",
+      "type": ["string", "null"]
+    },
+    "actor": {
+      "description": "Agent that executed the command (matched against acl.yaml for write-authority).",
+      "type": ["string", "null"]
+    },
+    "ts": {
+      "description": "Optional ISO-8601 timestamp; JSONL file order remains the authoritative ordering.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "description": "Outcome at append time: a step outcome (started/completed/blocked/failed), an action verb (dispatch/halt/done/error), or a hook permission (allow/deny), or observed for a no-enforcement phase.",
+      "type": "string",
+      "enum": ["started", "completed", "blocked", "failed", "dispatch", "halt", "done", "error", "allow", "deny", "observed"]
+    },
+    "payload": {
+      "description": "The command's typed output (see the per-command payload schemas selected by the oneOf below).",
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "description": "check-step: the step's evaluated conditions.",
+      "properties": {
+        "command": { "const": "check-step" },
+        "payload": { "$ref": "https://poesis.cloud/safe-agentic-framework/journal/check-step.payload.schema.json" }
+      },
+      "required": ["command"]
+    },
+    {
+      "description": "hook: the host decision the harness returned.",
+      "properties": {
+        "command": { "const": "hook" },
+        "payload": { "$ref": "https://poesis.cloud/safe-agentic-framework/journal/hook.payload.schema.json" }
+      },
+      "required": ["command"]
+    },
+    {
+      "description": "orchestrate: the resolved action.",
+      "properties": {
+        "command": { "const": "orchestrate" },
+        "payload": { "$ref": "https://poesis.cloud/safe-agentic-framework/journal/orchestrate.payload.schema.json" }
+      },
+      "required": ["command"]
+    },
+    {
+      "description": "check-artifact carries a free report payload.",
+      "properties": {
+        "command": { "const": "check-artifact" }
+      },
+      "required": ["command"]
+    }
+  ]
+}

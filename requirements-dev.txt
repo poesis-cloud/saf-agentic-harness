@@ -1,0 +1,9 @@
+# Dev/test dependencies for the orchestration harness.
+# Install (from this directory):  pip install -r requirements-dev.txt
+#
+# The framework constitution (workflow contracts + structural invariants + ACL + hook funnel) is
+# verified by the pytest suite under tests/, gated by `make verify`.
+
+-r requirements.txt
+
+pytest>=7.0          # framework constitution test suite (make verify / make test)

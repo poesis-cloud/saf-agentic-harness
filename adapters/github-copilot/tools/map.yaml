@@ -1,0 +1,23 @@
+# GitHub Copilot CLI / VS Code environment binding (env-specific tool/payload map).
+# The harness core stays env-agnostic and reads this map; another host (Claude Code, Cursor, …)
+# ships its own adapters/<env>/tools/map.yaml. `write`/`delete` map a host tool name to its action;
+# the *_keys lists name the payload fields to probe (first hit wins).
+write_tools:
+  create_file: create
+  create_directory: create
+  replace_string_in_file: update
+  multi_replace_string_in_file: update
+  edit_notebook_file: update
+  insert_edit_into_file: update
+  apply_patch: update
+delete_tools: [delete_file]
+tool_keys: [tool, tool_name, toolName]
+input_keys: [tool_input, toolInput, arguments]
+path_keys: [filePath, path, file]
+actor_keys: [agent, agentName, actor, subagent]
+session_keys: [sessionId, session_id, session]
+# Subagent dispatch (runSubagent): the tool that starts a child step-session. The harness governs the
+# (target agent, model) selection at preToolUse — see ModelRouter.validate_dispatch.
+dispatch_tools: [runSubagent]
+dispatch_agent_keys: [agentName, agent, subagent, name]
+dispatch_model_keys: [model]

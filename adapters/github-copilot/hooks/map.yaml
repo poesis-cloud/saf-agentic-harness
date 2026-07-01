@@ -1,0 +1,48 @@
+# GitHub Copilot CLI hook registration (env-specific) — the source of truth in YAML.
+# Each host lifecycle event funnels through the harness via the shared adapters/dispatch.sh. The
+# host (Copilot CLI) reads JSON at .copilot/hooks.json, so `make install-copilot-hooks` renders this
+# map to that JSON. The harness is the single source of truth; exit 2 from preToolUse/stop blocks
+# the action.
+hooks:
+  sessionStart:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh sessionStart github-copilot,
+      },
+    ]
+  userPromptSubmit:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh userPromptSubmit github-copilot,
+      },
+    ]
+  preToolUse:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh preToolUse github-copilot,
+      },
+    ]
+  postToolUse:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh postToolUse github-copilot,
+      },
+    ]
+  stop:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh stop github-copilot,
+      },
+    ]
+  sessionEnd:
+    [
+      {
+        type: command,
+        command: harness/adapters/dispatch.sh sessionEnd github-copilot,
+      },
+    ]
