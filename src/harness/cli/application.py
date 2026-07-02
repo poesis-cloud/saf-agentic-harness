@@ -17,6 +17,7 @@ from typing import Callable
 from ..models import Report
 from ..persistence import (
     ArtifactRepository,
+    ArtifactValidator,
     LogRepository,
     SchemaRepository,
     Workspace,
@@ -93,14 +94,16 @@ class Application:
 
         # persistence (data-mappers)
         workflows = WorkflowRepository(workspace)
-        artifacts = ArtifactRepository(workspace)
         schemas = SchemaRepository(workspace)
+        self.validator = ArtifactValidator(workspace, schemas)
+        artifacts = ArtifactRepository(workspace, self.validator)
+        self.artifacts = artifacts
         logs = LogRepository(workspace)
         self.logs = logs
 
         # services (in dependency order — no cycles)
         policy = TransitionPolicy()
-        self.schema_checker = SchemaChecker(workspace, schemas)
+        self.schema_checker = SchemaChecker(workspace, schemas, self.validator)
         self.calculation = CalculationService(workspace, artifacts, policy)
         self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker, policy)
         cel = CelEvaluator(workspace, artifacts, schemas)
@@ -157,7 +160,7 @@ class Application:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        hooks = HookService(self.workspace, self.schemas, self.logs, AuthorizationPolicy(), env=args.env)
+        hooks = HookService(self.workspace, self.schemas, self.logs, AuthorizationPolicy(), env=args.env, artifacts=self.artifacts)
         decision = hooks.handle(args.event, payload)
         report = decision.report
         for command in hooks.commands_for(decision.phase):   # map-driven, write-scope only

@@ -20,6 +20,7 @@ check-only: it appends observations, never edits artifacts.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,7 @@ from typing import Any
 import yaml
 
 from models import Report
-from persistence import LogRepository, SchemaRepository, Workspace, WorkflowRepository
+from persistence import ArtifactRepository, LogRepository, SchemaRepository, Workspace, WorkflowRepository
 from .authorization_checker import AuthorizationChecker
 from .authorization_policy import AuthorizationPolicy
 from .model_router import ModelRouter
@@ -67,10 +68,11 @@ class HookService:
     POSTCONDITION_AUTO_RUN = ["check-artifact"]
     SESSION_OPEN_INJECT = ["workflow", "instructions", "skills"]
 
-    def __init__(self, workspace: Workspace, schemas: SchemaRepository, logs: LogRepository, policy: AuthorizationPolicy, env: str = "github-copilot") -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaRepository, logs: LogRepository, policy: AuthorizationPolicy, env: str = "github-copilot", artifacts: ArtifactRepository | None = None) -> None:
         self.workspace = workspace
         self.logs = logs
         self.policy = policy
+        self.artifacts = artifacts
         self.authz = AuthorizationChecker(workspace, schemas, logs, policy)
         self.workflows = WorkflowRepository(workspace)
         self.router = ModelRouter(workspace)
@@ -248,10 +250,58 @@ class HookService:
         return HookDecision(phase="precondition", outputs=outputs)
 
     def _postcondition(self, payload: dict[str, Any]) -> HookDecision:
-        """postToolUse → the workflow's postcondition on the produced artifact: record the observed
-        write to the session ledger (the postcondition checks run via the command map)."""
-        _, outputs = self._write(payload)
+        """postToolUse → enforce the Portfolio Validity Invariant on the just-written artifact:
+        validate it against its schema; if invalid, REVERT the write from the portfolio (restore the
+        last-good version if tracked, else delete the new file) and DENY with the schema findings so
+        the host relays them to the agent, which retries. A valid write is recorded and allowed. This
+        revert is the harness's single deliberate write — everything else stays check-only."""
+        action, outputs = self._write(payload)
+        if self.artifacts is not None and action in ("create", "edit", "write", "update") and outputs:
+            for ref in outputs:
+                abs_path = self._resolve_write_path(ref)
+                artifact = self.artifacts.load_one(abs_path) if abs_path is not None else None
+                if artifact is None:
+                    continue  # not a portfolio artifact — nothing to enforce
+                report = self.artifacts.validator.validate(artifact) if self.artifacts.validator else Report()
+                if report.has_errors():
+                    how = self._revert(abs_path)
+                    reason = f"invalid artifact {how} at write boundary: " + "; ".join(f.message for f in report.findings)
+                    return HookDecision("deny", reason, "postcondition", report=report, outputs=outputs)
         return HookDecision(phase="postcondition", outputs=outputs)
+
+    def _resolve_write_path(self, ref: str) -> Path | None:
+        """Resolve a write ref (host-absolute or framework/portfolio-relative) to a concrete path."""
+        candidate = Path(ref)
+        if candidate.is_absolute():
+            return candidate
+        for base in (self.workspace.framework_root, getattr(self.workspace, "portfolio_base", self.workspace.framework_root)):
+            resolved = base / ref
+            if resolved.exists():
+                return resolved.resolve()
+        return (self.workspace.framework_root / ref).resolve()
+
+    def _revert(self, path: Path) -> str:
+        """Revert an invalid write: restore the last-committed version if the path is git-tracked,
+        else delete the new file. Returns 'restored' or 'deleted'."""
+        work_dir = str(path.parent)
+        try:
+            tracked = subprocess.run(
+                ["git", "-C", work_dir, "ls-files", "--error-unmatch", str(path)],
+                capture_output=True, text=True,
+            ).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            tracked = False
+        if tracked:
+            try:
+                subprocess.run(["git", "-C", work_dir, "checkout", "--", str(path)], capture_output=True, text=True)
+                return "restored"
+            except (OSError, subprocess.SubprocessError):
+                pass
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return "deleted"
 
     def _dispatch(self, payload: dict[str, Any]) -> HookDecision:
         """preToolUse on a subagent dispatch (runSubagent) → govern the (target agent, model) selection

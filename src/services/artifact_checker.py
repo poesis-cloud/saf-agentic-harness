@@ -23,7 +23,7 @@ class ArtifactChecker:
 
     def check_artifact_rules(self, targets: list[Artifact]) -> Report:
         report = Report()
-        universe = self.artifacts.discover()
+        universe = self.artifacts.scan_raw()
         portfolio_root = self.workspace.portfolio_root
         epic_ids = {artifact.artifact_id for artifact in universe if artifact.kind == "epic"}
         feature_ids = {(artifact.product_slug, artifact.artifact_id) for artifact in universe if artifact.kind == "feature"}
@@ -80,7 +80,7 @@ class ArtifactChecker:
             report.error(portfolio_root, "portfolio root does not exist")
             return report
 
-        artifacts = self.artifacts.discover()
+        artifacts = self.artifacts.scan_raw()
         if not artifacts:
             report.warn(portfolio_root, "no Epic, Feature, or Story artifacts found")
         report.extend(self.check_artifact_rules(artifacts))
@@ -111,7 +111,7 @@ class ArtifactChecker:
     def check_gate_packet(self, unit_id: str | None) -> Report:
         report = Report()
         portfolio_root = self.workspace.portfolio_root
-        targets = self.artifacts.discover()
+        targets = self.artifacts.scan_raw()
         if unit_id is not None:
             targets = [artifact for artifact in targets if artifact.artifact_id == unit_id]
         if unit_id and not targets:

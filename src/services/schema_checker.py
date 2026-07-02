@@ -1,9 +1,8 @@
-"""SchemaChecker — validates artifacts against their schemas + the catalog integrity."""
+"""SchemaChecker — reporter over the schema-conformance primitive + catalog + native-JSON checks."""
 
 from __future__ import annotations
 
 import json
-from fnmatch import fnmatch
 from pathlib import Path
 
 try:
@@ -11,73 +10,25 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal Python runtimes
     jsonschema = None
 
-from models import Artifact, ArtifactSchema, Report
-from persistence import SchemaRepository, Workspace
-from text import markdown_body, section_map, section_tree
+from models import Artifact, Report
+from persistence import ArtifactValidator, SchemaRepository, Workspace
 
 
 class SchemaChecker:
-    def __init__(self, workspace: Workspace, schemas: SchemaRepository) -> None:
+    """The reporting surface for artifact schema conformance. The per-artifact check is the
+    persistence-level `ArtifactValidator` (shared with `ArtifactRepository` + the postcondition
+    hook); this service loops it into a report and adds catalog integrity + native-JSON validation."""
+
+    def __init__(self, workspace: Workspace, schemas: SchemaRepository, validator: ArtifactValidator | None = None) -> None:
         self.workspace = workspace
         self.schemas = schemas
-
-    # --- helpers ------------------------------------------------------------
-    def _matches_path(self, artifact: Artifact, artifact_schema: ArtifactSchema) -> bool:
-        portfolio_root = self.workspace.portfolio_root
-        try:
-            relative = artifact.path.relative_to(portfolio_root).as_posix()
-        except ValueError:
-            relative = artifact.path.as_posix()
-        if artifact.kind != artifact_schema.artifact_kind:
-            return False
-        return any(fnmatch(relative, pattern) for pattern in artifact_schema.path_patterns)
-
-    def _schema_data(self, artifact: Artifact) -> dict:
-        text = self.workspace.read_text(artifact.path)
-        data = dict(artifact.fields)
-        data["__path"] = self.workspace.label(artifact.path, self.workspace.portfolio_root)
-        data["__kind"] = artifact.kind
-        data["__artifact_id"] = artifact.artifact_id
-        data["__frontmatter_present"] = bool(artifact.frontmatter)
-        data["__sections"] = section_map(text)
-        data["__section_tree"] = section_tree(text)
-        data["__body"] = markdown_body(text)
-        data["__product"] = artifact.product_slug
-        return data
+        self.validator = validator or ArtifactValidator(workspace, schemas)
 
     # --- checks -------------------------------------------------------------
     def conformance(self, targets: list[Artifact]) -> Report:
         report = Report()
-        schemas = self.schemas.load(report)
-        if not schemas or not targets:
-            return report
         for artifact in targets:
-            path_matches = [schema for schema in schemas if self._matches_path(artifact, schema)]
-            artifact_type = artifact.fields.get("type")
-            if artifact_type in (None, ""):
-                matches = path_matches
-            else:
-                matches = [
-                    schema
-                    for schema in path_matches
-                    if schema.artifact_type is None or str(artifact_type) == schema.artifact_type
-                ]
-            label = self.workspace.label(artifact.path, self.workspace.portfolio_root)
-            if not matches:
-                report.error(label, "no artifact schema matches this artifact")
-                continue
-            if artifact_type in (None, "") and len(matches) > 1:
-                variants = sorted(schema.schema_id for schema in matches)
-                report.error(label, f"frontmatter field 'type' is required to select one artifact schema variant: {variants}")
-                continue
-            if len(matches) > 1:
-                ids = ", ".join(schema.schema_id for schema in matches)
-                report.error(label, f"multiple artifact schemas match this artifact: {ids}")
-                continue
-            artifact_schema = matches[0]
-            validator = jsonschema.Draft7Validator(artifact_schema.schema)
-            for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
-                report.error(label, f"{artifact_schema.schema_id} schema violation: {self.schemas.format_schema_error(error)}")
+            report.extend(self.validator.validate(artifact))
         return report
 
     def catalog(self) -> Report:
