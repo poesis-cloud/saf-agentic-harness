@@ -147,7 +147,8 @@ class StepChecker:
                     record_check(ckind, ctype, "fail", cid=cond_id, descr=f"predecessor '{predecessor_id}' is not logged complete")
 
             elif ctype == "state":
-                # type: state → check portfolio state via set_selector + set_query + set_predicate
+                # type: state → two-CEL pipeline: set_query selects a bounded artifact set,
+                # set_predicate asserts a boolean over that selected set (see CelEvaluator).
                 if not cond_id:
                     report.error(label, f"step '{step_id}': type=state condition is missing its required id")
                     continue
@@ -156,27 +157,11 @@ class StepChecker:
                 if not selector or not predicate_src:
                     report.error(label, f"step '{step_id}' condition '{cond_id}': type=state requires set_selector and set_predicate")
                     continue
-
-                # Step 7a-7b: enumerate artifacts and build list activation
-                artifact_types = selector.get("artifact_types", [])
-                list_activation, enum_err = self.cel.build_list_activation(artifact_types)
-                if enum_err:
-                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set enumeration failed: {enum_err}")
+                outcome, detail = self.cel.evaluate_state(selector, predicate_src)
+                if outcome == "error":
+                    report.error(label, f"step '{step_id}' condition '{cond_id}': {detail}")
                     continue
-
-                # Step 7c: evaluate set_query (list-returning)
-                set_query_src = selector.get("set_query", "")
-                ekind, selected_set = self.cel.evaluate_set_query(set_query_src, list_activation)
-                if ekind == "error":
-                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set_query failed: {selected_set}", selector_summary=set_query_src)
-                    continue
-
-                # Step 7d: evaluate set_predicate (bool over set A)
-                ekind, ok = self.cel.evaluate_set_predicate(predicate_src, list_activation)
-                if ekind == "error":
-                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set_predicate failed: {ok}", selector_summary=set_query_src)
-                    continue
-                record_check(ckind, ctype, "pass" if ok else "fail", cid=cond_id, descr=predicate_src, selector_summary=set_query_src)
+                record_check(ckind, ctype, outcome, cid=cond_id, descr=detail, selector_summary=selector.get("set_query"))
 
             else:
                 # Unknown type (old model still uses expression-based routing for backward compatibility)

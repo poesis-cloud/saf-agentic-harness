@@ -103,7 +103,7 @@ class Application:
         self.schema_checker = SchemaChecker(workspace, schemas)
         self.calculation = CalculationService(workspace, artifacts, policy)
         self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker, policy)
-        cel = CelEvaluator(workspace, artifacts, self.artifact_checker, self.calculation)
+        cel = CelEvaluator(workspace, artifacts, self.artifact_checker, self.calculation, schemas)
         self.step_checker = StepChecker(workspace, workflows, artifacts, logs, cel, self.schema_checker)
         self.schemas = schemas
         self.router = ModelRouter(workspace)

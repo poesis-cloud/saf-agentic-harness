@@ -65,7 +65,7 @@
         "set_query": {
           "type": "string",
           "minLength": 1,
-          "description": "CEL set query yielding the selected set, using only declared aliases."
+          "description": "CEL set query yielding the selected set, using only declared aliases (and runtime constants). Every `<artifact>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
         }
       }
     },
@@ -106,7 +106,7 @@
         "set_predicate": {
           "type": "string",
           "minLength": 1,
-          "description": "For `type: state`: CEL boolean assertion evaluated against the set selected by `set_selector`."
+          "description": "For `type: state`: a CEL boolean assertion evaluated over the set chosen by `set_selector.set_query`, which it references as `selected`. It may also reference the declared aliases. Every `<artifact>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
         },
         "expression": {
           "type": "string",
