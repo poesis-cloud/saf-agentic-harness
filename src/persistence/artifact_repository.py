@@ -65,6 +65,12 @@ class ArtifactRepository:
         matches = [artifact for artifact in self.discover() if artifact.artifact_id == unit_id]
         return matches[0] if matches else None
 
+    def collect_by_schema_id(self, schema_id: str) -> list[Artifact]:
+        """Collect all artifacts matching a schema_id (maps to artifact.kind).
+        Used by CEL set-selector to enumerate artifacts for state conditions.
+        Returns empty list if schema_id doesn't match any known kind (epic, feature, story)."""
+        return [artifact for artifact in self.discover() if artifact.kind == schema_id]
+
     def ambiguity_error(self, report: Report, targets: list[Artifact], unit_id: str | None) -> bool:
         if unit_id and len(targets) > 1:
             locations = sorted(str(target.product_slug or "portfolio") for target in targets)

@@ -145,3 +145,58 @@ class CelEvaluator:
         if isinstance(result, (celtypes.BoolType, bool)):
             return ("bool", bool(result))
         return ("error", f"expr {src!r} must yield a bool, got {type(result).__name__}")
+
+    # --- set-query execution (for state conditions) -------------------------
+    def _enumerate_artifacts(self, artifact_types: list[dict[str, Any]]) -> dict[str, list[Any]]:
+        """Build a dict of {alias: [artifacts]} for each FROM binding in artifact_types.
+        Each entry collects all artifacts matching the schema_id and converts to CEL-friendly dicts.
+        Returns empty dict if any schema_id is unknown."""
+        result: dict[str, list[Any]] = {}
+        for binding in artifact_types:
+            alias = binding.get("alias", "")
+            schema_id = binding.get("schema_id", "")
+            if not alias or not schema_id:
+                continue
+            artifacts = self.artifacts.collect_by_schema_id(schema_id)
+            result[alias] = [{"id": a.artifact_id, "kind": a.kind, "status": a.status} for a in artifacts]
+        return result
+
+    def build_list_activation(self, artifact_types: list[dict[str, Any]]) -> tuple[Any | None, str | None]:
+        """Build a CEL activation binding aliases to artifact lists (for set_query evaluation).
+        Returns (activation, None) on success or (None, error_msg) on failure."""
+        enum_result = self._enumerate_artifacts(artifact_types)
+        if not enum_result:
+            return None, "no valid artifact_types decoded from set_selector"
+        try:
+            # Build facts dict with all aliases + runtime constants
+            facts = dict(enum_result)
+            facts["product"] = None  # add standard runtime constants if needed
+            activation = celpy.json_to_cel(self._jsonable(facts))
+            return activation, None
+        except Exception as exc:
+            return None, f"failed to build list activation: {exc}"
+
+    def evaluate_set_query(self, src: str, activation: Any) -> tuple[str, Any]:
+        """Evaluate a CEL set_query (list-returning expression) against aliases bound in activation.
+        Returns ('list', [items]) if result is list-like, or ('error', msg) on failure."""
+        try:
+            program = self._ENV.program(self._ENV.compile(src))
+        except Exception as exc:
+            return ("error", f"invalid set_query {src!r}: {exc}")
+        try:
+            result = program.evaluate(activation)
+        except celpy.CELEvalError as exc:
+            return ("error", f"set_query {src!r} failed: {exc}")
+        # Accept list, ListType, or any iterable (but not string)
+        if isinstance(result, str):
+            return ("error", f"set_query {src!r} yielded a string; expected list")
+        try:
+            result_list = list(result)
+            return ("list", result_list)
+        except TypeError:
+            return ("error", f"set_query {src!r} must yield a list, got {type(result).__name__}")
+
+    def evaluate_set_predicate(self, src: str, activation: Any) -> tuple[str, Any]:
+        """Evaluate a CEL set_predicate (bool-returning expression) over the selected set.
+        Reuses evaluate_expr but binds to the set-query activation (which includes set aliases)."""
+        return self.evaluate_expr(src, activation, {})
