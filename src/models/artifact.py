@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from text import bool_value, list_value, parse_list_literal, parse_scalar, strip_comment
+
+from .section import Section
 
 
 @dataclass
@@ -18,12 +20,16 @@ class Artifact:
     accessors over both. Structured frontmatter blocks the flat `fields` dict cannot express
     (open_items, wsjf, cost, depends_on) are read from the raw text by the `*_block` / `*field`
     helpers, so behaviour matches the on-disk shape exactly.
+    
+    Body sections are parsed into `sections` (list of top-level Section objects) to enable
+    reconstitution of the original markdown file.
     """
 
     kind: str
     path: Path
     fields: dict[str, Any]
     frontmatter: str
+    sections: list[Section] = field(default_factory=list)
     product_slug: str | None = None
 
     @property
@@ -115,3 +121,38 @@ class Artifact:
         dependency_ids.extend(self.block_list(self.block("depends_on"), "depends_on"))
         dependency_ids.extend(self.block_list(self.block("work_item_relations"), "depends_on"))
         return sorted(set(dependency_ids))
+
+    # --- reconstitution + serialization ----------------------------------------
+    def to_markdown(self) -> str:
+        """Render artifact back to markdown — frontmatter + all sections.
+        
+        Produces byte-stable output (identical to original file, up to whitespace
+        normalization). This makes Artifact a true aggregate root.
+        """
+        lines: list[str] = []
+        
+        # Frontmatter block
+        if self.frontmatter.strip():
+            lines.append("---")
+            lines.append(self.frontmatter.rstrip())
+            lines.append("---")
+        
+        # Body sections
+        for section in self.sections:
+            lines.append(section.to_markdown(include_heading=True))
+        
+        return "\n\n".join(lines) + "\n" if lines else ""
+    
+    def section_by_name(self, name: str) -> Section | None:
+        """Find a top-level section by name."""
+        for section in self.sections:
+            if section.name == name:
+                return section
+        return None
+    
+    def all_sections_flat(self) -> list[Section]:
+        """Return flat list of all sections (top-level + all descendants, depth-first)."""
+        result: list[Section] = []
+        for section in self.sections:
+            result.extend(section.flatten())
+        return result

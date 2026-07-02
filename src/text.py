@@ -159,7 +159,70 @@ def markdown_body(text: str) -> str:
     return text
 
 
+def parse_sections(text: str) -> list:
+    """Parse markdown body into Section objects, preserving hierarchy and raw text.
+    
+    Returns a list of top-level Section objects (##, ###, etc. all included in children).
+    Preserves exact body text to enable byte-stable reconstitution.
+    
+    Requires importing Section here would create a circular import, so we use TYPE_CHECKING.
+    Caller must pass Section class if they want proper typing.
+    """
+    pattern = re.compile(r"^(#{2,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    
+    if not matches:
+        return []
+    
+    # Lazy import to avoid circular dependency
+    from models import Section
+    
+    # Build a list of (level, heading, body_start, body_end) tuples
+    nodes_data: list[tuple[int, str, int, int]] = []
+    for index, match in enumerate(matches):
+        level = len(match.group(1))
+        heading = match.group(2).strip()
+        body_start = match.end()
+        body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        nodes_data.append((level, heading, body_start, body_end))
+    
+    # Build hierarchy: determine parent-child relationships
+    def build_tree(data: list[tuple[int, str, int, int]], parent_level: int = 1) -> list:
+        result = []
+        i = 0
+        while i < len(data):
+            level, heading, body_start, body_end = data[i]
+            if level <= parent_level:
+                break
+            if level > parent_level + 1:
+                # Skip this node (shouldn't happen with well-formed markdown)
+                i += 1
+                continue
+            
+            # Extract body (content until next heading at same or parent level)
+            body_text = text[body_start:body_end].rstrip("\n")
+            
+            # Find children (next nodes with level > current level, before any with level <= current)
+            children_data = []
+            j = i + 1
+            while j < len(data) and data[j][0] > level:
+                children_data.append(data[j])
+                j += 1
+            
+            # Recursively build children
+            children = build_tree(children_data, level) if children_data else []
+            
+            section = Section(level=level, name=heading, body=body_text, children=children)
+            result.append(section)
+            i = j if children_data else i + 1
+        
+        return result
+    
+    return build_tree(nodes_data, parent_level=1)
+
+
 def section_map(text: str) -> dict[str, str]:
+    """Parse markdown headings (## only) into a flat dict. DEPRECATED: use parse_sections()."""
     pattern = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
     matches = list(pattern.finditer(text))
     sections: dict[str, str] = {}
@@ -172,7 +235,7 @@ def section_map(text: str) -> dict[str, str]:
 
 
 def section_tree(text: str) -> dict[str, Any]:
-    """Parse markdown headings (## and deeper) into a nested tree by heading depth."""
+    """Parse markdown headings (## and deeper) into a nested tree by heading depth. DEPRECATED: use parse_sections()."""
     pattern = re.compile(r"^(#{2,6})[ \t]+(.+?)[ \t]*$", re.MULTILINE)
     matches = list(pattern.finditer(text))
     root: dict[str, Any] = {}

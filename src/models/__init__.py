@@ -14,6 +14,7 @@ from .condition import Condition
 from .finding import Finding
 from .log import Log, LogEntry
 from .report import Report
+from .section import Section
 from .section_spec import SectionSpec
 from .step import Step
 from .workflow import Workflow
@@ -26,6 +27,7 @@ __all__ = [
     "Log",
     "LogEntry",
     "Report",
+    "Section",
     "SectionSpec",
     "Step",
     "Workflow",
