@@ -108,7 +108,7 @@
       ],
       "properties": {
         "tokens_in": {
-          "description": "NET-NEW prompt tokens = sum(inputTokens \u2212 cachedTokens) of this item's dispatches.",
+          "description": "NET-NEW prompt tokens = sum(inputTokens − cachedTokens) of this item's dispatches.",
           "type": "number"
         },
         "tokens_out": {
@@ -120,11 +120,11 @@
           "type": "number"
         },
         "tokens_self": {
-          "description": "tokens_in + tokens_out \u2014 the item's own net cost.",
+          "description": "tokens_in + tokens_out — the item's own net cost.",
           "type": "number"
         },
         "tokens_rolled": {
-          "description": "tokens_self plus the rolled cost of child items \u2014 the item's end-to-end cost.",
+          "description": "tokens_self plus the rolled cost of child items — the item's end-to-end cost.",
           "type": "number"
         },
         "dispatches": {
@@ -225,7 +225,7 @@
       "const": true
     },
     "__sections": {
-      "description": "Artifact body sections keyed by their `## ` heading \u2014 one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
+      "description": "Artifact body sections keyed by their `## ` heading — one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
       "type": "object",
       "properties": {
         "Context": {
@@ -295,7 +295,7 @@
       "$ref": "#/definitions/wsjf"
     },
     "risk": {
-      "description": "Risk level \u2014 the consequence of being wrong: low | medium | critical.",
+      "description": "Risk level — the consequence of being wrong: low | medium | critical.",
       "enum": [
         "low",
         "medium",
@@ -303,7 +303,7 @@
       ]
     },
     "complexity": {
-      "description": "Complexity \u2014 cognitive/structural difficulty: simple | involved | complex.",
+      "description": "Complexity — cognitive/structural difficulty: simple | involved | complex.",
       "enum": [
         "simple",
         "involved",
@@ -326,13 +326,6 @@
     "github": {
       "description": "GitHub Projects sync envelope, filled by portfolio/_sync (null when authoring).",
       "$ref": "#/definitions/githubSync"
-    },
-    "attestations": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "boolean"
-      },
-      "description": "Agent-attested judgment booleans (rung-3 pre/post), keyed by condition id."
     }
   }
 }

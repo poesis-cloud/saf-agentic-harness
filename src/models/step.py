@@ -10,8 +10,9 @@ from .condition import Condition
 class Step:
     """A workflow step: one `actor`, one `kind`, and a flat `conditions` list.
 
-    Exposes the structural wiring (`after_ids`, `ref_values`) and the CEL expressions
-    (`cel_exprs`) the checkers read, without leaking the raw mapping shape.
+    Exposes the structural wiring (`after_ids`), step-level guidance (`instructions`,
+    `prompts`), and dispatch metadata (`skills`, `output`) the checkers read, without
+    leaking the raw mapping shape.
     """
 
     def __init__(self, data: dict[str, Any]) -> None:
@@ -75,33 +76,15 @@ class Step:
             return [str(r) for r in raw if r]
         return []
 
-    def ref_values(self, condition_type: str) -> list[str]:
-        """The `value` of every structural condition of the given type (after/input/output)."""
-        return [cond.value for cond in self.conditions if cond.type == condition_type and cond.is_ref and cond.value]
-
     @property
     def after_ids(self) -> list[str]:
-        """Predecessor step ids. Reads the new model (`type: after` → `step_id`) and, for
-        backward compatibility during migration, the legacy `after`/`ref` `value`."""
-        ids = [cond.step_id for cond in self.conditions if cond.type == "after" and cond.step_id]
-        ids.extend(self.ref_values("after"))  # legacy expression: ref, value: <step_id>
-        # preserve order, drop duplicates
+        """Predecessor step ids — the `step_id` of every `type: after` condition (order-preserving,
+        de-duplicated)."""
         seen: dict[str, None] = {}
-        for step_id in ids:
-            seen.setdefault(step_id, None)
-        return list(seen.keys())
-
-    @property
-    def cel_exprs(self) -> list[tuple[str, str]]:
-        """(condition_id, cel_value) for every condition whose `expression` is `cel`."""
-        result: list[tuple[str, str]] = []
         for cond in self.conditions:
-            if not cond.is_cel:
-                continue
-            raw = cond.raw.get("value")
-            if isinstance(raw, str) and raw:
-                result.append((cond.id or "", raw))
-        return result
+            if cond.type == "after" and cond.step_id:
+                seen.setdefault(cond.step_id, None)
+        return list(seen.keys())
 
     @property
     def raw(self) -> dict[str, Any]:

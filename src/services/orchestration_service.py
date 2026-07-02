@@ -147,33 +147,10 @@ class OrchestrationService:
 
     # --- artifact cursor ----------------------------------------------------
     def _completed_steps(self, workflow: Workflow, unit: str | None) -> set[str]:
-        """A step is complete when ALL of its resolvable `output` refs exist on disk for this unit.
-
-        Logical-only outputs (no resolvable path — e.g. ``open_items[kind=...]``) cannot be sensed
-        structurally, so such a step never counts complete via the cursor (it advances once a
-        downstream concrete artifact appears, or is gated by an `after` chain)."""
-        artifact = self.artifacts.resolve_unit(unit) if unit else None
-        product = artifact.product_slug if artifact is not None else None
-        contract_dir = workflow.path.parent if workflow.path is not None else None
-        completed: set[str] = set()
-        for step in workflow.steps:
-            outputs = step.ref_values("output")
-            resolvable = [self._resolve_ref(contract_dir, product, unit, ref) for ref in outputs]
-            concrete = [path for path in resolvable if path is not None]
-            if concrete and all(path.exists() for path in concrete):
-                completed.add(step.id)
-        return completed
-
-    def _resolve_ref(self, contract_dir: Path | None, product: str | None, unit: str | None, ref: str) -> Path | None:
-        """Resolve a structural output ref to a concrete repo path, or None for a logical ref."""
-        if "{product}" in ref and not product:
-            return None
-        ref = ref.replace("{unit_id}", unit or "").replace("{product}", product or "")
-        if "[" in ref or "/" not in ref:
-            return None  # logical ref (epic.artifact.json, raw-idea, open_items[kind=...])
-        if ref.startswith("artifacts/") and contract_dir is not None:
-            return contract_dir / ref
-        return self.workspace.portfolio_base / ref
+        """Completion is run-log driven (the harness logs each `check-step`); with no log in scope
+        the cursor is empty and orchestration starts from the first eligible step. Callers that
+        hold a run log pass the completed set to `next_action` directly."""
+        return set()
 
 
 __all__ = ["OrchestrationService"]

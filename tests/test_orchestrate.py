@@ -24,7 +24,7 @@ def _engine() -> OrchestrationService:
 
 
 def _sample_workflow() -> Workflow:
-    """A four-step linear workflow: author -> challenge -> ★ gate -> commit, with routing metadata."""
+    """A four-step linear workflow: author -> challenge -> ★ gate -> commit, sequenced by `after`."""
     return Workflow(
         {
             "workflow": {
@@ -35,36 +35,28 @@ def _sample_workflow() -> Workflow:
                         "id": "draft",
                         "actor": "@product-manager",
                         "kind": "author",
-                        "role": "product-manager",
                         "output": "feature",
-                        "conditions": [{"kind": "produces", "type": "output", "expression": "ref", "value": "feature"}],
                     },
                     {
                         "id": "review",
                         "actor": "@security-expert",
                         "kind": "challenge",
-                        "role": "security-expert",
-                        "risk": "critical",
-                        "tags": ["deep-reasoning"],
                         "output": "security-review",
                         "conditions": [
-                            {"kind": "after", "type": "after", "expression": "ref", "value": "draft"},
-                            {"kind": "produces", "type": "output", "expression": "ref", "value": "security-review"},
+                            {"id": "after_draft", "kind": "precondition", "type": "after", "step_id": "draft"},
                         ],
                     },
                     {
                         "id": "approve",
                         "actor": "@release-train-engineer",
                         "kind": "gate",
-                        "role": "release-train-engineer",
-                        "conditions": [{"kind": "after", "type": "after", "expression": "ref", "value": "review"}],
+                        "conditions": [{"id": "after_review", "kind": "precondition", "type": "after", "step_id": "review"}],
                     },
                     {
                         "id": "land",
                         "actor": "@release-train-engineer",
                         "kind": "commit",
-                        "role": "release-train-engineer",
-                        "conditions": [{"kind": "after", "type": "after", "expression": "ref", "value": "approve"}],
+                        "conditions": [{"id": "after_approve", "kind": "precondition", "type": "after", "step_id": "approve"}],
                     },
                 ],
             }
@@ -86,13 +78,13 @@ def test_first_step_dispatches_policy_valid() -> None:
     assert engine.router.validate_dispatch("product-manager", action["model"]) is None
 
 
-def test_risk_raises_tier_and_routes() -> None:
+def test_second_step_routes_on_default() -> None:
     engine = _engine()
     wf = _sample_workflow()
     action = engine.next_action(wf, completed={"draft"}, unit="u-1")
     assert action["action"] == "dispatch"
     assert action["step"] == "review"
-    # critical risk + deep-reasoning tag pulls the strongest model; dispatch stays on-policy.
+    # routes on the actor-derived role default; dispatch stays on-policy.
     assert engine.router.validate_dispatch("security-expert", action["model"]) is None
     assert action["routing"]["tier"] == engine.router.models()[action["model"]]["tier"]
 
@@ -117,8 +109,7 @@ def test_blocked_when_predecessor_unmet() -> None:
                         "id": "only",
                         "actor": "@developer",
                         "kind": "author",
-                        "role": "developer",
-                        "conditions": [{"kind": "after", "type": "after", "expression": "ref", "value": "missing"}],
+                        "conditions": [{"id": "after_missing", "kind": "precondition", "type": "after", "step_id": "missing"}],
                     }
                 ],
             }

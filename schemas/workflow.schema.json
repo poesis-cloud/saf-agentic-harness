@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://poesis.cloud/safe-agentic-framework/workflow.schema.json",
   "title": "orchestration workflow schema (the steps model)",
-  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` preconditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by state completion conditions. Each step's obligations are ONE flat `conditions` list. For pre/post checks, `type` is `after` or `state`: `after` binds a predecessor `step_id`; `state` binds a set selector and a predicate (`set_selector` + `set_predicate`). Selector execution is artifact-backed: `set_selector.set_type = artifact`, FROM is declared as `artifact_types` (alias + schema_id), and `set_query` may only reference declared aliases. Invariants remain instruction-based obligations. There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
+  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` preconditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by state completion conditions. Each step's obligations are ONE flat `conditions` list. Every condition is `type: after` or `type: state`: `after` binds a predecessor `step_id`; `state` binds a `set_selector` + `set_predicate` — `set_type: unit` asserts on the acting unit (`unit.<prop>`), `set_type: artifact` asserts over a selected artifact set (`artifact_types` + `set_query` → `selected`). Behavioral guidance lives at the step level (step.instructions / step.prompts). There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -40,19 +40,25 @@
       }
     },
     "setSelector": {
-      "description": "Selector contract for `type: state` conditions. FROM is declared via `artifact_types` aliases; `set_query` is a CEL expression returning the selected set and may only reference declared aliases plus runtime constants (unit/product/run scope).",
+      "description": "Selector for a `type: state` condition. `set_type: unit` asserts on the acting unit (`unit.<prop>`, bounded by `schema_id`). `set_type: artifact` asserts over a cross-artifact set: FROM is declared via `artifact_types` aliases and `set_query` (CEL) yields the selected set (bound to the predicate as `selected`). Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "set_type",
-        "artifact_types",
-        "set_query"
+        "set_type"
       ],
       "properties": {
         "set_type": {
           "type": "string",
-          "const": "artifact",
-          "description": "Current selector backend. Only artifact-backed selection is supported."
+          "enum": [
+            "unit",
+            "artifact"
+          ],
+          "description": "`unit` = assert on the acting unit; `artifact` = assert over a selected cross-artifact set."
+        },
+        "schema_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "For `set_type: unit`: the acting unit's artifact schema id (e.g. epic/feature/story) — bounds `unit.<prop>` validation."
         },
         "artifact_types": {
           "type": "array",
@@ -60,21 +66,53 @@
           "items": {
             "$ref": "#/definitions/artifactTypeRef"
           },
-          "description": "FROM bindings for set selection."
+          "description": "For `set_type: artifact`: FROM bindings for set selection."
         },
         "set_query": {
           "type": "string",
           "minLength": 1,
-          "description": "CEL set query yielding the selected set, using only declared aliases (and runtime constants). Every `<artifact>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
+          "description": "For `set_type: artifact`: CEL set query yielding the selected set, using only declared aliases (and runtime constants)."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "set_type": {
+                "const": "unit"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "schema_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "set_type": {
+                "const": "artifact"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "artifact_types",
+              "set_query"
+            ]
+          }
+        }
+      ]
     },
     "condition": {
-      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). Guidance is now at the step level (step.instructions / step.prompts). During migration, expression/value fields are retained for backward compatibility with old conditions.",
+      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). `type` = WHAT it is: `after` (structural predecessor via `step_id`) or `state` (a portfolio/unit-state assertion via `set_selector` + `set_predicate`). Behavioral guidance lives at the step level (step.instructions / step.prompts).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "kind",
+        "type",
         "id"
       ],
       "properties": {
@@ -82,14 +120,17 @@
           "type": "string",
           "enum": [
             "precondition",
-            "postcondition",
-            "invariant"
+            "postcondition"
           ],
-          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after), or invariant (legacy, being phased out during migration)."
+          "description": "WHEN the condition holds: precondition (before the step acts) or postcondition (after)."
         },
         "type": {
           "type": "string",
-          "description": "WHAT the condition is about: `after` (structural predecessor via `step_id`), `state` (portfolio-state via `set_selector` + `set_predicate`), or legacy types for migration (input, output, content, challenge, etc.)."
+          "enum": [
+            "after",
+            "state"
+          ],
+          "description": "WHAT the condition is about: `after` (structural predecessor via `step_id`) or `state` (a state assertion via `set_selector` + `set_predicate`)."
         },
         "id": {
           "$ref": "#/definitions/conditionId",
@@ -101,36 +142,21 @@
         },
         "set_selector": {
           "$ref": "#/definitions/setSelector",
-          "description": "For `type: state`: defines the artifact set to evaluate."
+          "description": "For `type: state`: selects what to assert on — the acting unit (`set_type: unit`) or a cross-artifact set (`set_type: artifact`)."
         },
         "set_predicate": {
           "type": "string",
           "minLength": 1,
-          "description": "For `type: state`: a CEL boolean assertion evaluated over the set chosen by `set_selector.set_query`, which it references as `selected`. It may also reference the declared aliases. Every `<artifact>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
-        },
-        "expression": {
-          "type": "string",
-          "description": "Legacy field for migration: ref | cel | instruction. Will be removed when all workflows are migrated."
-        },
-        "value": {
-          "description": "Legacy field for migration: condition value (depends on expression type). Will be removed when all workflows are migrated."
+          "description": "For `type: state`: a CEL boolean over the selection — `unit.<prop>` in unit mode, or the `selected` set in artifact mode. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
         }
       },
       "allOf": [
         {
           "if": {
-            "required": [
-              "type"
-            ],
             "properties": {
               "type": {
                 "const": "after"
               }
-            },
-            "not": {
-              "required": [
-                "expression"
-              ]
             }
           },
           "then": {
@@ -141,18 +167,10 @@
         },
         {
           "if": {
-            "required": [
-              "type"
-            ],
             "properties": {
               "type": {
                 "const": "state"
               }
-            },
-            "not": {
-              "required": [
-                "expression"
-              ]
             }
           },
           "then": {
@@ -208,7 +226,7 @@
           "minLength": 1
         },
         "conditions": {
-          "description": "The step's flat obligations list — each condition is either an `after` dependency, a `state` set-assertion, or an instruction-based invariant.",
+          "description": "The step's flat obligations list — each condition is either an `after` dependency or a `state` assertion.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/condition"

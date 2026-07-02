@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://poesis.cloud/safe-agentic-framework/artifacts/lean-business-case.artifact.schema.json",
   "title": "lean-business-case artifact schema (native JSON source of truth)",
-  "description": "Validates the native JSON artifact `<epic>-lbc.artifact.json` directly. Decision 1: JSON is the source of truth; the Markdown rendering is produced from it at the final render step and is never re-parsed. `sections` is the hierarchical body \u2014 each key is an H2 heading whose value is a section node ({ body, sections? }); deeper headings nest recursively under each node's `sections`, mirroring the template heading hierarchy.",
+  "description": "Validates the native JSON artifact `<epic>-lbc.artifact.json` directly. Decision 1: JSON is the source of truth; the Markdown rendering is produced from it at the final render step and is never re-parsed. `sections` is the hierarchical body — each key is an H2 heading whose value is a section node ({ body, sections? }); deeper headings nest recursively under each node's `sections`, mirroring the template heading hierarchy.",
   "type": "object",
   "additionalProperties": true,
   "definitions": {
@@ -12,7 +12,7 @@
       "minLength": 1
     },
     "section": {
-      "description": "One body section: its own Markdown `body`, plus any nested child sections under `sections` (recursive \u2014 mirrors the template heading hierarchy).",
+      "description": "One body section: its own Markdown `body`, plus any nested child sections under `sections` (recursive — mirrors the template heading hierarchy).",
       "type": "object",
       "required": [
         "body"
@@ -148,7 +148,7 @@
       ]
     },
     "funding_state": {
-      "description": "Funding posture proposed by the case (decided at the \u2605 Epic Gate / Participatory Budgeting).",
+      "description": "Funding posture proposed by the case (decided at the ★ Epic Gate / Participatory Budgeting).",
       "enum": [
         "proposed",
         "funded",
@@ -217,13 +217,6 @@
           "$ref": "#/definitions/section"
         }
       }
-    },
-    "attestations": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "boolean"
-      },
-      "description": "Agent-attested judgment booleans (rung-3 pre/post), keyed by condition id."
     }
   }
 }

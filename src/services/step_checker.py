@@ -13,10 +13,10 @@ from .schema_checker import SchemaChecker
 
 
 class StepChecker:
-    """Evaluates one step's flat `conditions` list in authored order, routing each by
-    `expression`: structural `ref` (after/input/output) resolved here, `cel` delegated to
-    the `CelEvaluator`, `instruction` (an invariant's obligation file) resolved here. It
-    then records the canonical run-log line via the `LogRepository`."""
+    """Evaluates one step's flat `conditions` list in authored order. Each condition is either
+    `type: after` (a predecessor `step_id` that must be logged complete, resolved here) or
+    `type: state` (a state assertion delegated to the `CelEvaluator`). It then records the
+    canonical run-log line via the `LogRepository`."""
 
     def __init__(
         self,
@@ -33,42 +33,6 @@ class StepChecker:
         self.logs = logs
         self.cel = cel
         self.schema_checker = schema_checker
-
-    # --- structural ref resolution -----------------------------------------
-    def _resolve_ref(self, contract_dir: Path | None, product: str | None, unit_id: str, ref: str) -> Path | None:
-        """Resolve a reads/writes ref to a concrete repo path, or None for a logical ref."""
-        if "{product}" in ref and not product:
-            return None  # product-scoped ref with no product in scope — assert via a `cel` predicate
-        ref = ref.replace("{unit_id}", unit_id).replace("{product}", product or "")
-        if "[" in ref or "/" not in ref:
-            return None  # logical ref (epic.artifact.json, raw-idea, open_items[kind=...])
-        if ref.startswith("artifacts/") and contract_dir is not None:
-            return contract_dir / ref  # suborchestration-local template
-        return self.workspace.portfolio_base / ref  # repo-root-relative (portfolio/...)
-
-    def _ref_status(self, contract_dir: Path | None, product: str | None, unit_id: str, ref: str) -> tuple[str, str | None]:
-        """Structural existence check for a `reads`/`writes` ref. Returns (result, reason)."""
-        resolved = self._resolve_ref(contract_dir, product, unit_id, ref)
-        if resolved is None:
-            return ("skipped", "logical")
-        is_dir_ref = ref.endswith("/")
-        exists = resolved.is_dir() if is_dir_ref else resolved.is_file()
-        if not exists:
-            return ("fail", None)
-        if not is_dir_ref and resolved.name.endswith(".artifact.json"):
-            if self.schema_checker.check_json(resolved).has_errors():
-                return ("fail", None)
-        return ("pass", None)
-
-    @staticmethod
-    def _suggest(ctype: str, value: str | None) -> str:
-        if ctype == "after":
-            return f"run and log step '{value}' to completion before this step"
-        if ctype == "input":
-            return f"ensure input {value} exists before this step"
-        if ctype == "output":
-            return f"this step must produce {value}"
-        return ""
 
     # --- the check-step router ---------------------------------------------
     def check_step(
@@ -97,12 +61,9 @@ class StepChecker:
         artifact = self.artifacts.resolve_unit(unit_id)
         if artifact is None:
             report.warn("check-step", f"unit {unit_id!r} not found; state conditions evaluate against an empty unit")
-        product = artifact.product_slug if artifact is not None else None
 
         log = self.logs.read(log_path)
         executed_steps = log.executed_steps() if log is not None else None
-        activation, functions = self.cel.build_activation(unit_id, product, artifact)
-        contract_dir = workflow.path.parent
 
         results: list[dict[str, Any]] = []
         counts = {"pass": 0, "fail": 0, "skipped": 0}
@@ -147,8 +108,8 @@ class StepChecker:
                     record_check(ckind, ctype, "fail", cid=cond_id, descr=f"predecessor '{predecessor_id}' is not logged complete")
 
             elif ctype == "state":
-                # type: state → two-CEL pipeline: set_query selects a bounded artifact set,
-                # set_predicate asserts a boolean over that selected set (see CelEvaluator).
+                # type: state → CelEvaluator asserts on the acting unit (set_type: unit) or over a
+                # selected artifact set (set_type: artifact).
                 if not cond_id:
                     report.error(label, f"step '{step_id}': type=state condition is missing its required id")
                     continue
@@ -157,50 +118,14 @@ class StepChecker:
                 if not selector or not predicate_src:
                     report.error(label, f"step '{step_id}' condition '{cond_id}': type=state requires set_selector and set_predicate")
                     continue
-                outcome, detail = self.cel.evaluate_state(selector, predicate_src)
+                outcome, detail = self.cel.evaluate_state(selector, predicate_src, artifact)
                 if outcome == "error":
                     report.error(label, f"step '{step_id}' condition '{cond_id}': {detail}")
                     continue
-                record_check(ckind, ctype, outcome, cid=cond_id, descr=detail, selector_summary=selector.get("set_query"))
+                record_check(ckind, ctype, outcome, cid=cond_id, descr=detail, selector_summary=selector.get("set_predicate"))
 
             else:
-                # Unknown type (old model still uses expression-based routing for backward compatibility)
-                expression = condition.expression
-                value = condition.value
-                if expression == "ref":
-                    # Old model: structural ref checks (legacy, not in new model)
-                    if ctype == "after":
-                        if executed_steps is None:
-                            record_check(ckind, ctype, "skipped", reason="unavailable", descr=f"predecessor '{value}' (legacy ref, no run log supplied)")
-                        elif value in executed_steps:
-                            record_check(ckind, ctype, "pass")
-                        else:
-                            record_check(ckind, ctype, "fail", descr=f"predecessor '{value}' is not logged complete")
-                    else:
-                        result, reason = self._ref_status(contract_dir, product, unit_id, value)
-                        record_check(ckind, ctype, result, reason=reason, descr=f"{ctype} {value}")
-                elif expression == "cel":
-                    # Old model: CEL on unit facts (legacy)
-                    if not cond_id:
-                        report.error(label, f"step '{step_id}': {ctype or 'untyped'} cel condition is missing its required id")
-                        continue
-                    ekind, ok = self.cel.evaluate_expr(value, activation, functions)
-                    if ekind == "error":
-                        report.error(label, f"step '{step_id}' condition '{cond_id}': {ok}")
-                        continue
-                    record_check(ckind, ctype, "pass" if ok else "fail", cid=cond_id, descr=value)
-                elif expression == "instruction":
-                    # Old model: obligation files (legacy)
-                    if not cond_id:
-                        report.error(label, f"step '{step_id}': instruction condition is missing its required id")
-                        continue
-                    resolved = contract_dir / value
-                    if resolved.is_file():
-                        record_check(ckind, ctype, "pass", cid=cond_id, descr=value)
-                    else:
-                        record_check(ckind, ctype, "fail", cid=cond_id, descr=f"obligation file not found: {value}")
-                else:
-                    report.error(label, f"step '{step_id}': condition has unknown type/expression {ctype!r}/{expression!r}")
+                report.error(label, f"step '{step_id}' condition '{cond_id}': unknown condition type {ctype!r} (expected after|state)")
 
         print(f"check-step {orchestration_id}/{step_id} unit={unit_id}: pass={counts['pass']}, fail={counts['fail']}, skipped={counts['skipped']}", file=sys.stderr)
         for entry in results:

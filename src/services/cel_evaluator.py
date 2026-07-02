@@ -36,14 +36,10 @@ class CelEvaluator:
         self,
         workspace: Workspace,
         artifacts: ArtifactRepository,
-        artifact_checker,
-        calculation,
         schemas: SchemaRepository | None = None,
     ) -> None:
         self.workspace = workspace
         self.artifacts = artifacts
-        self.artifact_checker = artifact_checker
-        self.calculation = calculation
         self.schemas = schemas
         self._schema_prop_index: dict[str, set[str]] | None = None
 
@@ -53,106 +49,8 @@ class CelEvaluator:
         """Coerce YAML-loaded values (dates, etc.) into JSON-native types for json_to_cel."""
         return json.loads(json.dumps(obj, default=str))
 
-    @staticmethod
-    def _unit_view(artifact: Artifact) -> dict[str, Any]:
-        return {"id": artifact.artifact_id, "kind": artifact.kind, "status": artifact.status}
-
-    # --- derived facts ------------------------------------------------------
-    def _depends_on_met(self, artifact: Artifact | None) -> bool:
-        if artifact is None:
-            return True
-        for dep_id in artifact.dependency_ids():
-            deps = self.artifacts.resolve_dependency(dep_id)
-            if len(deps) != 1 or deps[0].status != "done":
-                return False
-        return True
-
-    def _all_children_done(self, artifact: Artifact | None) -> bool:
-        if artifact is None:
-            return False
-        children = self.artifacts.child_stories(artifact)
-        return bool(children) and all(child.status == "done" for child in children)
-
-    def _child_qa_signoffs_present(self, artifact: Artifact | None) -> bool:
-        if artifact is None:
-            return False
-        children = self.artifacts.child_stories(artifact)
-        return bool(children) and all(self.artifacts.find_qa_signoff(child) is not None for child in children)
-
-    def _blocked_route_ok(self, artifact: Artifact | None) -> bool:
-        if artifact is None or artifact.status != "blocked":
-            return True
-        has_reason = artifact.field_value("block_reason") is not None or artifact.field_value("blocked_reason") is not None
-        return has_reason or artifact.has_blocking_open_items()
-
-    def _gate_packet_ok(self, unit_id: str) -> bool:
-        return not self.artifact_checker.check_gate_packet(unit_id).has_errors()
-
-    def _inventory_complete(self, artifact: Artifact | None) -> bool:
-        if artifact is None or artifact.kind != "feature":
-            return True
-        if not artifact.bool_field("structurant"):
-            return True
-        inventory = artifact.field("architecture_inventory")
-        if inventory in (None, "null", ""):
-            return False
-        base = self.artifacts.product_root(artifact)
-        if not (base / str(inventory)).is_file():
-            return False
-        return all(self.artifacts.find_adr(base, adr_id) is not None for adr_id in artifact.list_field("adrs"))
-
-    def _wsjf_correct(self, artifact: Artifact | None) -> bool:
-        if artifact is None:
-            return True
-        computed, stored = self.calculation.compute_wsjf_score(artifact)
-        if computed is None:
-            return True
-        return abs(self.calculation.coerce_number(stored) - computed) < 1e-9
-
-    def _cost_rollup_correct(self, artifact: Artifact | None) -> bool:
-        if artifact is None:
-            return True
-        cost = self.calculation.cost_block(artifact)
-        if cost is None or cost.get("tokens_self") is None:
-            return True
-        return self.calculation.coerce_number(cost["tokens_self"]) == cost["tokens_in"] + cost["tokens_out"]
-
-    # --- activation + evaluation -------------------------------------------
-    def build_activation(self, unit_id: str, product: str | None, artifact: Artifact | None) -> tuple[Any, dict[str, Any]]:
-        """Assemble the read-only CEL fact set + functions for one unit. Every fact is always
-        in scope, so an unbound reference in a cel value is a contract typo (hard error)."""
-        facts: dict[str, Any] = {
-            "status": artifact.status if artifact else None,
-            "unit": dict(artifact.fields) if artifact else {},
-            "child_features": [self._unit_view(a) for a in (self.artifacts.child_features(artifact) if artifact else [])],
-            "child_stories": [self._unit_view(a) for a in (self.artifacts.child_stories(artifact) if artifact else [])],
-            "product": product,
-            "unit_id": unit_id,
-            "open_items_clear": (not artifact.has_blocking_open_items()) if artifact else True,
-            "depends_on_met": self._depends_on_met(artifact),
-            "all_children_done": self._all_children_done(artifact),
-            "child_qa_signoffs_present": self._child_qa_signoffs_present(artifact),
-            "blocked_route_ok": self._blocked_route_ok(artifact),
-            "gate_packet_ok": self._gate_packet_ok(unit_id),
-            "inventory_complete": self._inventory_complete(artifact),
-            "wsjf_correct": self._wsjf_correct(artifact),
-            "cost_rollup_correct": self._cost_rollup_correct(artifact),
-        }
-        activation = celpy.json_to_cel(self._jsonable(facts))
-        return activation, {}
-
-    @classmethod
-    def compile_expr(cls, src: str) -> tuple[bool | None, str | None]:
-        """Compile a CEL `src` for syntax (used by check-contracts). (True, None) or (None, msg)."""
-        try:
-            cls._ENV.compile(src)
-            return True, None
-        except Exception as exc:  # parse / syntax error
-            return None, str(exc)
-
     def evaluate_expr(self, src: str, activation: Any, functions: dict[str, Any]) -> tuple[str, Any]:
-        """Evaluate one CEL condition against the always-present fact set. ('bool', x) or
-        ('error', msg) — an unbound reference is a contract typo, since every fact is in scope."""
+        """Evaluate one bool CEL expression against an activation. ('bool', x) or ('error', msg)."""
         try:
             program = self._ENV.program(self._ENV.compile(src), functions=functions)
         except Exception as exc:
@@ -339,22 +237,37 @@ class CelEvaluator:
         return self.evaluate_expr(src, activation, {})
 
     def validate_state_condition(self, selector: dict[str, Any] | None, predicate_src: str | None) -> str | None:
-        """Design-time (no-portfolio) static validation of a `type: state` condition: resolve the
-        FROM aliases against the schema catalog, then check that every `<artifact>.<property>`
-        reference in `set_query` and `set_predicate` is a property declared by that alias's schema
-        (the predicate also gets `selected`, the query result). Returns an error message or None.
-
-        This is the static half of `evaluate_state`, isolated so the workflow-constitution gate can
-        assert authored state CEL against the schemas at test time — without a portfolio to run over.
+        """Design-time (no-portfolio) static validation of a `type: state` condition. Two selector
+        modes:
+          - `set_type: unit`   → asserts on the acting unit (`unit.<prop>`); needs `schema_id`.
+          - `set_type: artifact` → asserts over a selected artifact set (`set_query` → `selected`);
+            needs `artifact_types` + `set_query`.
+        Every `<alias>.<property>` reference is checked against that alias's schema — an undeclared
+        property is a hard error. Returns an error message or None.
         """
-        artifact_types = (selector or {}).get("artifact_types") or []
-        set_query = (selector or {}).get("set_query") or ""
+        selector = selector or {}
+        set_type = selector.get("set_type") or "artifact"
+        if not predicate_src:
+            return "set_predicate is required"
+
+        if set_type == "unit":
+            schema_id = selector.get("schema_id") or ""
+            if not schema_id:
+                return "set_selector.schema_id is required for set_type: unit"
+            index = self._schema_properties_index()
+            if schema_id not in index:
+                return f"unknown schema_id {schema_id!r} in set_selector (no artifact schema declares it)"
+            predicate_err = self._validate_field_refs(predicate_src, {"unit": index[schema_id]})
+            if predicate_err:
+                return f"set_predicate: {predicate_err}"
+            return None
+
+        artifact_types = selector.get("artifact_types") or []
+        set_query = selector.get("set_query") or ""
         if not artifact_types:
             return "set_selector.artifact_types is required"
         if not set_query:
             return "set_selector.set_query is required"
-        if not predicate_src:
-            return "set_predicate is required"
         alias_props, err = self._alias_props(artifact_types)
         if err or alias_props is None:
             return err or "could not resolve set_selector aliases"
@@ -369,25 +282,35 @@ class CelEvaluator:
             return f"set_predicate: {predicate_err}"
         return None
 
-    def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None) -> tuple[str, str]:
-        """Run the full two-CEL state pipeline: SELECT a set via `set_query`, then ASSERT
-        `set_predicate` over that selected set. Returns ('pass'|'fail'|'error', detail).
+    def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None, artifact: Artifact | None = None) -> tuple[str, str]:
+        """Evaluate a `type: state` condition. Returns ('pass'|'fail'|'error', detail).
 
-        Semantics:
-          - `set_selector.artifact_types` declares the FROM bindings (alias → schema_id); each
-            artifact is exposed as a closed map of its schema's declared properties.
-          - `set_selector.set_query` is a CEL list expression yielding the SELECTED set.
-          - `set_predicate` is a CEL boolean over that set, which it references as `selected`.
-          - Field references in BOTH expressions are statically validated against the aliases'
-            schemas — an undeclared property is an error (invalidation), not a silent null.
+          - `set_type: unit`   → bind the acting `unit` (a closed map of its schema's properties)
+            and assert `set_predicate` over it (`unit.status == "funnel"`).
+          - `set_type: artifact` → SELECT a set via `set_query`, then ASSERT `set_predicate` over it
+            (bound as `selected`).
+        Field references are statically validated against the schemas before evaluation.
         """
-        # static schema validation (aliases + field references in query and predicate)
         static_err = self.validate_state_condition(selector, predicate_src)
         if static_err:
             return ("error", static_err)
 
-        artifact_types = (selector or {}).get("artifact_types") or []
-        set_query = (selector or {}).get("set_query") or ""
+        selector = selector or {}
+        set_type = selector.get("set_type") or "artifact"
+
+        if set_type == "unit":
+            schema_id = selector.get("schema_id") or ""
+            props = self._schema_properties_index().get(schema_id, set())
+            unit_view = self._artifact_view(artifact, props) if artifact is not None else {p: None for p in props}
+            activation = celpy.json_to_cel(self._jsonable(self._with_constants({"unit": unit_view})))
+            pkind, ok = self.evaluate_expr(predicate_src or "", activation, {})
+            if pkind == "error":
+                return ("error", ok)
+            unit_label = artifact.artifact_id if artifact is not None else "(absent)"
+            return ("pass" if ok else "fail", f"unit {unit_label}")
+
+        artifact_types = selector.get("artifact_types") or []
+        set_query = selector.get("set_query") or ""
         alias_props, _ = self._alias_props(artifact_types)
         assert alias_props is not None  # guaranteed by validate_state_condition above
 

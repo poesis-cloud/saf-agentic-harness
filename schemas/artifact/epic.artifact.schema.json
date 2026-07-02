@@ -108,7 +108,7 @@
       ],
       "properties": {
         "tokens_in": {
-          "description": "NET-NEW prompt tokens = sum(inputTokens \u2212 cachedTokens) of this item's dispatches.",
+          "description": "NET-NEW prompt tokens = sum(inputTokens − cachedTokens) of this item's dispatches.",
           "type": "number"
         },
         "tokens_out": {
@@ -120,11 +120,11 @@
           "type": "number"
         },
         "tokens_self": {
-          "description": "tokens_in + tokens_out \u2014 the item's own net cost.",
+          "description": "tokens_in + tokens_out — the item's own net cost.",
           "type": "number"
         },
         "tokens_rolled": {
-          "description": "tokens_self plus the rolled cost of child items \u2014 the item's end-to-end cost.",
+          "description": "tokens_self plus the rolled cost of child items — the item's end-to-end cost.",
           "type": "number"
         },
         "dispatches": {
@@ -240,7 +240,7 @@
       "const": true
     },
     "__sections": {
-      "description": "Artifact body sections keyed by their `## ` heading \u2014 one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
+      "description": "Artifact body sections keyed by their `## ` heading — one property per template section; the value is the raw Markdown under that heading. Authored artifacts may add or omit sections, so this is advisory (additionalProperties is permitted) and no section is individually required.",
       "type": "object",
       "properties": {
         "Epic hypothesis statement": {
@@ -268,7 +268,7 @@
           "type": "string"
         },
         "MVP & pivot/persevere": {
-          "description": "The smallest Feature set (`mvp_features`) that validates the hypothesis. After the MVP, the Business Owner decides pivot / persevere / stop at \u2605 Epic Gate review or Inspect & Adapt.",
+          "description": "The smallest Feature set (`mvp_features`) that validates the hypothesis. After the MVP, the Business Owner decides pivot / persevere / stop at ★ Epic Gate review or Inspect & Adapt.",
           "type": "string"
         },
         "Dependencies / constraints": {
@@ -280,7 +280,7 @@
           "type": "string"
         },
         "Open items": {
-          "description": "The human-readable companion to the `open_items:` frontmatter ledger (the [open-item ledger](../../../../orchestrator/SKILL.md#open-item-ledger)) \u2014 this Epic's **clarifications** (proactive unknowns surfaced by the CE Discovery turn) and **challenges** (reactive findings from peer review), formal...",
+          "description": "The human-readable companion to the `open_items:` frontmatter ledger (the [open-item ledger](../../../../orchestrator/SKILL.md#open-item-ledger)) — this Epic's **clarifications** (proactive unknowns surfaced by the CE Discovery turn) and **challenges** (reactive findings from peer review), formal...",
           "type": "string"
         }
       },
@@ -348,11 +348,11 @@
       "minLength": 1
     },
     "open_items": {
-      "description": "clarification + challenge ledger \u2014 see orchestrator \"Open-item ledger\". Each entry: { id, kind, raised_by, owner, blocking, status, \u2026 }; kind: clarification | challenge. status: open | resolved | withdrawn. A blocking+open entry HALTS the \u2605 Epic Gate.",
+      "description": "clarification + challenge ledger — see orchestrator \"Open-item ledger\". Each entry: { id, kind, raised_by, owner, blocking, status, … }; kind: clarification | challenge. status: open | resolved | withdrawn. A blocking+open entry HALTS the ★ Epic Gate.",
       "$ref": "#/definitions/openItems"
     },
     "cost": {
-      "description": "token cost accounting \u2014 see the cost-snapshot invariant instructions",
+      "description": "token cost accounting — see the cost-snapshot invariant instructions",
       "$ref": "#/definitions/cost"
     },
     "github": {
@@ -388,13 +388,6 @@
       "items": {
         "type": "string"
       }
-    },
-    "attestations": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "boolean"
-      },
-      "description": "Agent-attested judgment booleans (rung-3 pre/post), keyed by condition id."
     }
   }
 }

@@ -170,12 +170,8 @@ class HookService:
                 parts.append("load skill " + ", ".join(skills))
         if "resources" in wants or "instructions" in wants:
             if step is not None:
-                # New model: read from step properties
                 instr = list(step.instructions) if hasattr(step, 'instructions') else []
                 prompts = list(step.prompts) if hasattr(step, 'prompts') else []
-                # Fallback: old model still uses conditions with expression: instruction
-                if not instr:
-                    instr = sorted({c.value for c in step.conditions if c.is_instruction})
                 if instr:
                     parts.append("follow instructions " + ", ".join(instr))
                 if prompts:
@@ -199,20 +195,14 @@ class HookService:
 
     def _aggregate_guidance(self, wf: Any, guidance_type: str) -> list[str]:
         """Collect guidance refs (instructions or prompts) from all steps in the workflow.
-        Supports both new model (step properties) and old model (conditions with expression: instruction)
-        during migration. guidance_type is either 'instructions' or 'prompts'."""
+        guidance_type is either 'instructions' or 'prompts'."""
         refs: set[str] = set()
         if hasattr(wf, 'steps'):
             for step in wf.steps:
-                # New model: read from step properties
                 if guidance_type == "instructions" and hasattr(step, 'instructions'):
                     refs.update(step.instructions)
                 elif guidance_type == "prompts" and hasattr(step, 'prompts'):
                     refs.update(step.prompts)
-                # Fallback: old model still uses conditions with expression: instruction
-                # (only for instructions, prompts didn't exist in old model)
-                if guidance_type == "instructions" and hasattr(step, 'conditions'):
-                    refs.update({c.value for c in step.conditions if c.is_instruction})
         return sorted(refs)
 
     def _workflow_by_id(self, wid: Any) -> Any:

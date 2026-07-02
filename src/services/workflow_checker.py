@@ -30,7 +30,7 @@ class WorkflowChecker:
         self.workflows = workflows
         self.schemas = schemas
         # schema-only evaluator (no portfolio) for design-time state-CEL validation
-        self._cel = CelEvaluator(workspace, None, None, None, schemas)
+        self._cel = CelEvaluator(workspace, None, schemas)
 
     def check(self) -> Report:
         report = Report()
@@ -73,10 +73,6 @@ class WorkflowChecker:
                 for dep in step.after_ids:
                     if dep not in id_set:
                         report.error(label, f"step {sid!r}: after references unknown step {dep!r}")
-                for cid, expr in step.cel_exprs:
-                    _program, err = CelEvaluator.compile_expr(expr)
-                    if err:
-                        report.error(label, f"step {sid!r} condition {cid!r}: invalid expr: {err}")
             # `type: state` conditions: statically validate set_query / set_predicate against the
             # aliased artifact schemas (aliases resolve, CEL compiles, and every property reference
             # is declared by its schema — an off-schema property is a hard error).

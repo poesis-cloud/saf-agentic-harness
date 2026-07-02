@@ -108,26 +108,11 @@ def violations_legacy_header_keys_absent(workspace: Workspace) -> list[str]:
     return out
 
 
-def violations_instruction_uri_resolves(workspace: Workspace) -> list[str]:
-    out: list[str] = []
-    for workflow in _workflows(workspace):
-        label = workspace.label(workflow.path, workspace.skills_root)
-        for step in workflow.steps:
-            for cond in step.conditions:
-                if not cond.is_instruction:
-                    continue
-                uri = cond.value
-                if not (workflow.path.parent / uri).is_file():
-                    out.append(f"{label}: step {step.raw_id!r} condition {cond.id!r} instruction URI {uri!r} → no file")
-    return out
-
-
 _CHECKS = (
     ("root-completeness", violations_root_completeness),
     ("one-actor-per-step (Invariant 1)", violations_one_actor),
     ("delegates_to resolves", violations_delegates_to),
     ("legacy-header cleanup", violations_legacy_header_keys_absent),
-    ("instruction URI resolves", violations_instruction_uri_resolves),
 )
 
 
@@ -149,11 +134,6 @@ def test_delegates_to_resolves() -> None:
 
 def test_legacy_header_keys_absent() -> None:
     violations = violations_legacy_header_keys_absent(_workspace())
-    assert not violations, "\n".join(violations)
-
-
-def test_instruction_uri_resolves() -> None:
-    violations = violations_instruction_uri_resolves(_workspace())
     assert not violations, "\n".join(violations)
 
 
