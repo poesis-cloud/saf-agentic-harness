@@ -147,6 +147,13 @@ class SchemaRepository:
         if report.findings and any(finding.path == label and finding.severity == "error" for finding in report.findings):
             return None
 
+        # Load section spec if defined
+        sections_data = metadata.get("sections")
+        sections_spec = None
+        if sections_data:
+            from models import SectionSpec
+            sections_spec = SectionSpec.from_dict(sections_data)
+
         return ArtifactSchema(
             path=path,
             schema_id=schema_id,
@@ -156,6 +163,7 @@ class SchemaRepository:
             template_path=template_path,
             path_patterns=path_patterns,
             render_only=bool_value(metadata.get("renderOnly", False)),
+            sections_spec=sections_spec,
         )
 
     def load(self, report: Report | None = None) -> list[ArtifactSchema]:

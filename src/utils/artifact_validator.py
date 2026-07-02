@@ -104,7 +104,80 @@ class ArtifactValidator:
         validator = jsonschema.Draft7Validator(artifact_schema.schema)
         for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{artifact_schema.schema_id} schema violation: {self.schemas.format_schema_error(error)}")
+        
+        # Validate body section structure if sections_spec is defined
+        if artifact_schema.sections_spec:
+            section_report = self._validate_sections(artifact, artifact_schema)
+            report.extend(section_report)
+        
         return report
+
+    def _validate_sections(self, artifact: Artifact, artifact_schema: ArtifactSchema) -> Report:
+        """Validate body section structure against the schema's sections_spec."""
+        from models import SectionSpec
+
+        report = Report()
+        label = self.workspace.label(artifact.path, self.workspace.portfolio_root)
+        spec = artifact_schema.sections_spec
+        if not spec:
+            return report
+
+        text = self.workspace.read_text(artifact.path)
+        sections = section_map(text)
+        section_tree_data = section_tree(text)
+
+        # Check depth: all headings must be at or above max_depth
+        def check_depth(tree: dict, depth: int) -> None:
+            for heading, node in tree.items():
+                if isinstance(node, dict):
+                    level = node.get("__level", 2)
+                    if level > spec.max_depth + 1:  # +1 because h1 is depth 0
+                        report.warn(
+                            label,
+                            f"section '{heading}' is at depth {level} (max allowed: {spec.max_depth + 1})",
+                        )
+                    check_depth(node, depth + 1)
+
+        check_depth(section_tree_data, 1)
+
+        # Check required sections
+        for required_section in spec.required:
+            if required_section not in sections:
+                report.error(label, f"required section '{required_section}' is missing")
+
+        # Check no unknown sections
+        if not spec.allow_unknown:
+            unknown = set(sections.keys()) - spec.all_sections
+            for unknown_section in unknown:
+                report.warn(label, f"unknown section '{unknown_section}' (allowed: {', '.join(sorted(spec.all_sections))})")
+
+        # Check content patterns if defined
+        if spec.patterns:
+            for section_name, pattern in spec.patterns.items():
+                if section_name in sections:
+                    self._validate_section_pattern(label, section_name, sections[section_name], pattern, report)
+
+        return report
+
+    def _validate_section_pattern(self, label: str, section_name: str, content: str, pattern: str, report: Report) -> None:
+        """Validate content against expected pattern (e.g., bullet_list, code_block, table)."""
+        lines = content.strip().split("\n")
+        
+        if pattern == "bullet_list":
+            # Expected format: lines starting with "- " or "* "
+            bullet_lines = [line for line in lines if line.strip() and (line.strip().startswith("- ") or line.strip().startswith("* "))]
+            if not bullet_lines:
+                report.warn(label, f"section '{section_name}' should contain bullet points (pattern: {pattern})")
+        elif pattern == "table":
+            # Expected format: lines with pipe separators |
+            table_lines = [line for line in lines if "|" in line]
+            if not table_lines:
+                report.warn(label, f"section '{section_name}' should contain a table (pattern: {pattern})")
+        elif pattern == "code_block":
+            # Expected format: code blocks with ``` markers
+            if "```" not in content:
+                report.warn(label, f"section '{section_name}' should contain code blocks (pattern: {pattern})")
+        # Add more patterns as needed
 
     def is_valid(self, artifact: Artifact) -> bool:
         return not self.validate(artifact).has_errors()

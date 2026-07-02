@@ -195,7 +195,16 @@
       "*/sprint-*/stories/*.md"
     ],
     "renderOnly": false,
-    "type": "enabler"
+    "type": "enabler",
+    "sections": {
+      "required": ["Acceptance Criteria"],
+      "optional": ["Preconditions", "Implementation Notes", "Open Items"],
+      "maxDepth": 2,
+      "allowUnknown": false,
+      "patterns": {
+        "Acceptance Criteria": "bullet_list"
+      }
+    }
   },
   "required": [
     "__path",

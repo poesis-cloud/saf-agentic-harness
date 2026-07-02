@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .section_spec import SectionSpec
 
 
 @dataclass
@@ -17,3 +20,4 @@ class ArtifactSchema:
     template_path: Path
     path_patterns: list[str]
     render_only: bool
+    sections_spec: SectionSpec | None = None

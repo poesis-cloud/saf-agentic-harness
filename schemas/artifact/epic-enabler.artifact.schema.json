@@ -194,7 +194,12 @@
     "pathPatterns": [
       "epics/*.md"
     ],
-    "renderOnly": false,
+    "sections": {
+      "required": ["Overview"],
+      "optional": ["Program Themes", "Features", "Implementation Notes", "Open Items"],
+      "maxDepth": 3,
+      "allowUnknown": false
+    },
     "type": "enabler"
   },
   "required": [
