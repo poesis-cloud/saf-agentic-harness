@@ -118,7 +118,7 @@ class StepChecker:
                 if not selector or not predicate_src:
                     report.error(label, f"step '{step_id}' condition '{cond_id}': type=state requires set_selector and set_predicate")
                     continue
-                outcome, detail = self.cel.evaluate_state(selector, predicate_src, artifact)
+                outcome, detail = self.cel.evaluate_state(selector, predicate_src, unit_id)
                 if outcome == "error":
                     report.error(label, f"step '{step_id}' condition '{cond_id}': {detail}")
                     continue

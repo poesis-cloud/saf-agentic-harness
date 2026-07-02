@@ -205,12 +205,11 @@ class CelEvaluator:
 
     # --- runtime constants + evaluation -------------------------------------
     @staticmethod
-    def _with_constants(facts: dict[str, Any]) -> dict[str, Any]:
-        """Add the always-in-scope runtime constants so a set expression may reference them
-        without an unbound-name error. State conditions are portfolio-wide, so these are null
-        unless a caller threads a unit/product scope in."""
+    def _with_constants(facts: dict[str, Any], unit_id: str | None = None) -> dict[str, Any]:
+        """Bind the always-in-scope runtime constants so a set expression may reference them without
+        an unbound-name error. `unit_id` scopes a query to the acting unit; `product` is reserved."""
         facts.setdefault("product", None)
-        facts.setdefault("unit_id", None)
+        facts.setdefault("unit_id", unit_id)
         return facts
 
     def evaluate_set_query(self, src: str, activation: Any) -> tuple[str, Any]:
@@ -237,31 +236,15 @@ class CelEvaluator:
         return self.evaluate_expr(src, activation, {})
 
     def validate_state_condition(self, selector: dict[str, Any] | None, predicate_src: str | None) -> str | None:
-        """Design-time (no-portfolio) static validation of a `type: state` condition. Two selector
-        modes:
-          - `set_type: unit`   → asserts on the acting unit (`unit.<prop>`); needs `schema_id`.
-          - `set_type: artifact` → asserts over a selected artifact set (`set_query` → `selected`);
-            needs `artifact_types` + `set_query`.
-        Every `<alias>.<property>` reference is checked against that alias's schema — an undeclared
+        """Design-time (no-portfolio) static validation of a `type: state` condition: the
+        artifact-backed selector declares `artifact_types` (alias → schema_id) and a CEL `set_query`
+        yielding the `selected` set the `set_predicate` asserts over. Every `<alias>.<property>`
+        reference (in query and predicate) is checked against that alias's schema — an undeclared
         property is a hard error. Returns an error message or None.
         """
         selector = selector or {}
-        set_type = selector.get("set_type") or "artifact"
         if not predicate_src:
             return "set_predicate is required"
-
-        if set_type == "unit":
-            schema_id = selector.get("schema_id") or ""
-            if not schema_id:
-                return "set_selector.schema_id is required for set_type: unit"
-            index = self._schema_properties_index()
-            if schema_id not in index:
-                return f"unknown schema_id {schema_id!r} in set_selector (no artifact schema declares it)"
-            predicate_err = self._validate_field_refs(predicate_src, {"unit": index[schema_id]})
-            if predicate_err:
-                return f"set_predicate: {predicate_err}"
-            return None
-
         artifact_types = selector.get("artifact_types") or []
         set_query = selector.get("set_query") or ""
         if not artifact_types:
@@ -282,33 +265,17 @@ class CelEvaluator:
             return f"set_predicate: {predicate_err}"
         return None
 
-    def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None, artifact: Artifact | None = None) -> tuple[str, str]:
-        """Evaluate a `type: state` condition. Returns ('pass'|'fail'|'error', detail).
-
-          - `set_type: unit`   → bind the acting `unit` (a closed map of its schema's properties)
-            and assert `set_predicate` over it (`unit.status == "funnel"`).
-          - `set_type: artifact` → SELECT a set via `set_query`, then ASSERT `set_predicate` over it
-            (bound as `selected`).
-        Field references are statically validated against the schemas before evaluation.
+    def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None, unit_id: str | None = None) -> tuple[str, str]:
+        """Evaluate a `type: state` condition. SELECT a set via `set_query` (the `unit_id` runtime
+        constant is in scope, so `epic.filter(e, e.id == unit_id)` scopes to the acting unit), then
+        ASSERT `set_predicate` over that set (bound as `selected`). Field references are statically
+        validated against the schemas before evaluation. Returns ('pass'|'fail'|'error', detail).
         """
         static_err = self.validate_state_condition(selector, predicate_src)
         if static_err:
             return ("error", static_err)
 
         selector = selector or {}
-        set_type = selector.get("set_type") or "artifact"
-
-        if set_type == "unit":
-            schema_id = selector.get("schema_id") or ""
-            props = self._schema_properties_index().get(schema_id, set())
-            unit_view = self._artifact_view(artifact, props) if artifact is not None else {p: None for p in props}
-            activation = celpy.json_to_cel(self._jsonable(self._with_constants({"unit": unit_view})))
-            pkind, ok = self.evaluate_expr(predicate_src or "", activation, {})
-            if pkind == "error":
-                return ("error", ok)
-            unit_label = artifact.artifact_id if artifact is not None else "(absent)"
-            return ("pass" if ok else "fail", f"unit {unit_label}")
-
         artifact_types = selector.get("artifact_types") or []
         set_query = selector.get("set_query") or ""
         alias_props, _ = self._alias_props(artifact_types)
@@ -317,7 +284,7 @@ class CelEvaluator:
         # 1. evaluate the selector → the SELECTED set
         universe = self._enumerate_artifacts(artifact_types, alias_props)
         total = sum(len(v) for v in universe.values())
-        query_activation = celpy.json_to_cel(self._jsonable(self._with_constants(dict(universe))))
+        query_activation = celpy.json_to_cel(self._jsonable(self._with_constants(dict(universe), unit_id)))
         qkind, selected = self.evaluate_set_query(set_query, query_activation)
         if qkind == "error":
             return ("error", selected)
@@ -326,7 +293,7 @@ class CelEvaluator:
         # 2. evaluate the predicate over the selected set, bound as `selected`
         predicate_facts = dict(universe)
         predicate_facts["selected"] = selected_py
-        predicate_activation = celpy.json_to_cel(self._jsonable(self._with_constants(predicate_facts)))
+        predicate_activation = celpy.json_to_cel(self._jsonable(self._with_constants(predicate_facts, unit_id)))
         pkind, ok = self.evaluate_set_predicate(predicate_src or "", predicate_activation)
         if pkind == "error":
             return ("error", ok)

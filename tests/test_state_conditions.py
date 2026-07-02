@@ -150,20 +150,21 @@ def main() -> int:
     check("multi-alias query + predicate pass", outcome == "pass", f"got {outcome}: {detail}")
     check("multi-alias detail counts full universe", "of 3" in detail, f"got {detail}")
 
-    # (h) unit-mode state: assert on the acting unit (status == "funnel" is a proper state condition)
-    print("(h) unit-mode state")
-    cel = _cel([])
-    unit_sel = {"set_type": "unit", "schema_id": "epic"}
-    outcome, detail = cel.evaluate_state(unit_sel, "unit.status == 'funnel'", _epic("E-1", "funnel"))
-    check("unit status pass", outcome == "pass", f"got {outcome}: {detail}")
-    outcome, detail = cel.evaluate_state(unit_sel, "unit.status == 'funnel'", _epic("E-2", "done"))
-    check("unit status fail", outcome == "fail", f"got {outcome}: {detail}")
-    outcome, detail = cel.evaluate_state(unit_sel, "unit.status == 'done' && has(unit.cost)", _epic("E-3", "done", cost={"x": 1}))
-    check("unit compound field pass", outcome == "pass", f"got {outcome}: {detail}")
-    bad = cel.validate_state_condition(unit_sel, "unit.nonexistent == 1")
-    check("unit undeclared prop rejected", bad is not None and "nonexistent" in bad, f"got {bad}")
-    bad2 = cel.validate_state_condition({"set_type": "unit"}, "unit.status == 'x'")
-    check("unit missing schema_id rejected", bad2 is not None and "schema_id" in bad2, f"got {bad2}")
+    # (h) acting-unit state via artifact selection (filter by the unit_id runtime constant)
+    print("(h) acting-unit state (artifact-mode, filter by unit_id)")
+    cel = _cel([_epic("E-1", "funnel"), _epic("E-2", "done")])
+    unit_sel = {
+        "set_type": "artifact",
+        "artifact_types": [{"alias": "epic", "schema_id": "epic"}],
+        "set_query": "epic.filter(x, x.id == unit_id)",
+    }
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="E-1")
+    check("acting-unit status pass", outcome == "pass", f"got {outcome}: {detail}")
+    check("acting-unit selects one of two", "selected 1 of 2" in detail, f"got {detail}")
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="E-2")
+    check("acting-unit status fail", outcome == "fail", f"got {outcome}: {detail}")
+    bad = cel.validate_state_condition(unit_sel, "selected.all(x, x.nonexistent == 1)")
+    check("acting-unit undeclared prop rejected", bad is not None and "nonexistent" in bad, f"got {bad}")
 
     if failures:
         print(f"\n{len(failures)} test violation(s)")

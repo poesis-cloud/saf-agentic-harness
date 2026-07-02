@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://poesis.cloud/safe-agentic-framework/workflow.schema.json",
   "title": "orchestration workflow schema (the steps model)",
-  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` preconditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by state completion conditions. Each step's obligations are ONE flat `conditions` list. Every condition is `type: after` or `type: state`: `after` binds a predecessor `step_id`; `state` binds a `set_selector` + `set_predicate` — `set_type: unit` asserts on the acting unit (`unit.<prop>`), `set_type: artifact` asserts over a selected artifact set (`artifact_types` + `set_query` → `selected`). Behavioral guidance lives at the step level (step.instructions / step.prompts). There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
+  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` preconditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by state completion conditions. Each step's obligations are ONE flat `conditions` list. Every condition is `type: after` or `type: state`: `after` binds a predecessor `step_id`; `state` binds a `set_selector` + `set_predicate` — selection is artifact-backed (`artifact_types` + `set_query` → `selected`), and to assert on the acting unit the query filters by the `unit_id` runtime constant. Behavioral guidance lives at the step level (step.instructions / step.prompts). There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -40,25 +40,19 @@
       }
     },
     "setSelector": {
-      "description": "Selector for a `type: state` condition. `set_type: unit` asserts on the acting unit (`unit.<prop>`, bounded by `schema_id`). `set_type: artifact` asserts over a cross-artifact set: FROM is declared via `artifact_types` aliases and `set_query` (CEL) yields the selected set (bound to the predicate as `selected`). Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error.",
+      "description": "Selector for a `type: state` condition. Selection is artifact-backed: `artifact_types` declares the FROM bindings (alias + schema_id) and `set_query` (CEL) yields the selected set, bound to the predicate as `selected`. To assert on the acting unit, filter by the `unit_id` runtime constant — e.g. `epic.filter(e, e.id == unit_id)`. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "set_type"
+        "set_type",
+        "artifact_types",
+        "set_query"
       ],
       "properties": {
         "set_type": {
           "type": "string",
-          "enum": [
-            "unit",
-            "artifact"
-          ],
-          "description": "`unit` = assert on the acting unit; `artifact` = assert over a selected cross-artifact set."
-        },
-        "schema_id": {
-          "type": "string",
-          "minLength": 1,
-          "description": "For `set_type: unit`: the acting unit's artifact schema id (e.g. epic/feature/story) — bounds `unit.<prop>` validation."
+          "const": "artifact",
+          "description": "Selection backend — artifact-backed (the only mode)."
         },
         "artifact_types": {
           "type": "array",
@@ -66,45 +60,14 @@
           "items": {
             "$ref": "#/definitions/artifactTypeRef"
           },
-          "description": "For `set_type: artifact`: FROM bindings for set selection."
+          "description": "FROM bindings for set selection (alias + schema_id)."
         },
         "set_query": {
           "type": "string",
           "minLength": 1,
-          "description": "For `set_type: artifact`: CEL set query yielding the selected set, using only declared aliases (and runtime constants)."
+          "description": "CEL set query yielding the selected set, using only declared aliases plus the runtime constants (`unit_id`, `product`). Filter by `unit_id` to scope to the acting unit."
         }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "set_type": {
-                "const": "unit"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "schema_id"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "set_type": {
-                "const": "artifact"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "artifact_types",
-              "set_query"
-            ]
-          }
-        }
-      ]
+      }
     },
     "condition": {
       "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). `type` = WHAT it is: `after` (structural predecessor via `step_id`) or `state` (a portfolio/unit-state assertion via `set_selector` + `set_predicate`). Behavioral guidance lives at the step level (step.instructions / step.prompts).",
@@ -142,12 +105,12 @@
         },
         "set_selector": {
           "$ref": "#/definitions/setSelector",
-          "description": "For `type: state`: selects what to assert on — the acting unit (`set_type: unit`) or a cross-artifact set (`set_type: artifact`)."
+          "description": "For `type: state`: the artifact-backed selector (`artifact_types` + `set_query`) yielding the `selected` set to assert on. Filter by `unit_id` to assert on the acting unit."
         },
         "set_predicate": {
           "type": "string",
           "minLength": 1,
-          "description": "For `type: state`: a CEL boolean over the selection — `unit.<prop>` in unit mode, or the `selected` set in artifact mode. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
+          "description": "For `type: state`: a CEL boolean over the `selected` set. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error."
         }
       },
       "allOf": [
