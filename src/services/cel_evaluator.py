@@ -10,7 +10,7 @@ import lark
 from celpy import celtypes
 
 from models import Artifact
-from mappers import ArtifactRepository, SchemaRepository, Workspace
+from mappers import ArtifactMapper, SchemaMapper, Workspace
 
 
 class CelEvaluator:
@@ -35,8 +35,8 @@ class CelEvaluator:
     def __init__(
         self,
         workspace: Workspace,
-        artifacts: ArtifactRepository,
-        schemas: SchemaRepository | None = None,
+        artifacts: ArtifactMapper,
+        schemas: SchemaMapper | None = None,
     ) -> None:
         self.workspace = workspace
         self.artifacts = artifacts

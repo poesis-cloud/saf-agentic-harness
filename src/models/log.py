@@ -72,7 +72,7 @@ class LogEntry:
 class Log:
     """The event plane: the parsed lines of one run's JSONL journal.
 
-    The `LogRepository` maps the file to this entity (or to None when no log is supplied).
+    The `LogMapper` maps the file to this entity (or to None when no log is supplied).
     `executed_steps` applies latest-wins replay semantics — a step's latest line decides
     whether it currently counts as complete. `by_step` / `replay_steps` reconstruct the run
     from the journal by grouping command entries under their step.

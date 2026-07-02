@@ -1,24 +1,24 @@
 """Mappers layer — the access layer + data-mappers (model ⇄ filesystem).
 
-`Workspace` is the shared filesystem context; each repository maps one entity to its files:
-`WorkflowRepository` ⇄ workflow.yaml, `ArtifactRepository` ⇄ the portfolio, `SchemaRepository`
-⇄ JSON schemas, `LogRepository` ⇄ run logs. Repositories depend on models + the text kernel
+`Workspace` is the shared filesystem context; each mapper maps one entity to its files:
+`WorkflowMapper` ⇄ workflow.yaml, `ArtifactMapper` ⇄ the portfolio, `SchemaMapper`
+⇄ JSON schemas, `LogMapper` ⇄ run logs. Mappers depend on models + the text kernel
 — never on services or the CLI.
 """
 
 from __future__ import annotations
 
-from .artifact_repository import ArtifactRepository, InvalidArtifactError
-from .log_repository import LogRepository
-from .schema_repository import SchemaRepository
-from .workflow_repository import WorkflowRepository
+from .artifact_mapper import ArtifactMapper, InvalidArtifactError
+from .log_mapper import LogMapper
+from .schema_mapper import SchemaMapper
+from .workflow_mapper import WorkflowMapper
 from .workspace import Workspace
 
 __all__ = [
-    "ArtifactRepository",
+    "ArtifactMapper",
     "InvalidArtifactError",
-    "LogRepository",
-    "SchemaRepository",
-    "WorkflowRepository",
+    "LogMapper",
+    "SchemaMapper",
+    "WorkflowMapper",
     "Workspace",
 ]

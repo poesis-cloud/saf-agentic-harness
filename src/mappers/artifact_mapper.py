@@ -1,4 +1,4 @@
-"""ArtifactRepository — discovers portfolio artifacts and resolves their relations."""
+"""ArtifactMapper — discovers portfolio artifacts and resolves their relations."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class InvalidArtifactError(Exception):
         super().__init__(f"invalid artifact {path}: {detail}")
 
 
-class ArtifactRepository:
+class ArtifactMapper:
     """The data-mapper for the portfolio (Epic/Feature/Story).
 
     Two universe doors: `scan_raw()` returns every parsed artifact WITHOUT validation (for the

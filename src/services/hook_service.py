@@ -28,7 +28,7 @@ from typing import Any
 import yaml
 
 from models import Report
-from mappers import ArtifactRepository, LogRepository, SchemaRepository, Workspace, WorkflowRepository
+from mappers import ArtifactMapper, LogMapper, SchemaMapper, Workspace, WorkflowMapper
 from .authorization_checker import AuthorizationChecker
 from .authorization_policy import AuthorizationPolicy
 from .model_router import ModelRouter
@@ -68,13 +68,13 @@ class HookService:
     POSTCONDITION_AUTO_RUN = ["check-artifact"]
     SESSION_OPEN_INJECT = ["workflow", "instructions", "skills"]
 
-    def __init__(self, workspace: Workspace, schemas: SchemaRepository, logs: LogRepository, policy: AuthorizationPolicy, env: str = "github-copilot", artifacts: ArtifactRepository | None = None) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaMapper, logs: LogMapper, policy: AuthorizationPolicy, env: str = "github-copilot", artifacts: ArtifactMapper | None = None) -> None:
         self.workspace = workspace
         self.logs = logs
         self.policy = policy
         self.artifacts = artifacts
         self.authz = AuthorizationChecker(workspace, schemas, logs, policy)
-        self.workflows = WorkflowRepository(workspace)
+        self.workflows = WorkflowMapper(workspace)
         self.router = ModelRouter(workspace)
         self.binding = self._load_binding(env)
 

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest
 
-from mappers import ArtifactRepository, WorkflowRepository, Workspace
+from mappers import ArtifactMapper, WorkflowMapper, Workspace
 from services import ModelRouter, OrchestrationService
 
 
@@ -27,12 +27,12 @@ def _workspace() -> Workspace:
 
 
 def _engine(ws: Workspace) -> OrchestrationService:
-    return OrchestrationService(ws, WorkflowRepository(ws), ArtifactRepository(ws), ModelRouter(ws))
+    return OrchestrationService(ws, WorkflowMapper(ws), ArtifactMapper(ws), ModelRouter(ws))
 
 
 def _all_workflows():
     ws = _workspace()
-    return [(str(wf.id), wf) for wf in WorkflowRepository(ws).all()]
+    return [(str(wf.id), wf) for wf in WorkflowMapper(ws).all()]
 
 
 _WORKFLOWS = _all_workflows()

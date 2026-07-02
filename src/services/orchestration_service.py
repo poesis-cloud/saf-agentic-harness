@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from models import Workflow
-from mappers import ArtifactRepository, WorkflowRepository, Workspace
+from mappers import ArtifactMapper, WorkflowMapper, Workspace
 from .model_router import ModelRouter
 
 
@@ -32,8 +32,8 @@ class OrchestrationService:
     def __init__(
         self,
         workspace: Workspace,
-        workflows: WorkflowRepository,
-        artifacts: ArtifactRepository,
+        workflows: WorkflowMapper,
+        artifacts: ArtifactMapper,
         router: ModelRouter,
     ) -> None:
         self.workspace = workspace

@@ -17,7 +17,7 @@ ROOT_IDS = frozenset({"lpm", "art", "scrum"})
 class Workflow:
     """The single `workflow` root node of a workflow.yaml: header fields + a steps model.
 
-    A Workflow abstracts one workflow.yaml file. The `WorkflowRepository` maps the file
+    A Workflow abstracts one workflow.yaml file. The `WorkflowMapper` maps the file
     to this entity; checkers read the header (`id`/`facilitator`) and the `steps`
     (each a `Step`) through it, plus the `after` DAG cycle check.
     """

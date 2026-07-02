@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Artifact
-from mappers import ArtifactRepository, SchemaRepository, Workspace
+from mappers import ArtifactMapper, SchemaMapper, Workspace
 from services import CelEvaluator
 
 
@@ -33,8 +33,8 @@ def _feature(artifact_id: str, status: str = "done", product: str = "p1", **extr
     return Artifact("feature", Path(f"/tmp/{product}/features/{artifact_id}.md"), fields, "", product)
 
 
-class _StubArtifactRepository(ArtifactRepository):
-    """ArtifactRepository whose universe is injected programmatically (no filesystem scan)."""
+class _StubArtifactMapper(ArtifactMapper):
+    """ArtifactMapper whose universe is injected programmatically (no filesystem scan)."""
 
     def __init__(self, workspace: Workspace, artifacts: list[Artifact]) -> None:
         super().__init__(workspace)
@@ -46,8 +46,8 @@ class _StubArtifactRepository(ArtifactRepository):
 
 def _cel(artifacts: list[Artifact]) -> CelEvaluator:
     ws = Workspace.detect()
-    repo = _StubArtifactRepository(ws, artifacts)
-    schemas = SchemaRepository(ws)
+    repo = _StubArtifactMapper(ws, artifacts)
+    schemas = SchemaMapper(ws)
     return CelEvaluator(ws, repo, schemas)
 
 

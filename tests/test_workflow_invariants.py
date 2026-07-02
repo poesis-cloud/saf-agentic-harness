@@ -15,7 +15,7 @@ orthogonal ``orchestrator-mediation`` edge rule — participant→participant ``
 
 These checks read only the Poesis-owned workflows (never user portfolio data), so they live apart
 from the runtime harness services and run via ``make test`` — separate from the ``make verify``
-contract gate. They consume the harness's OOP API: a ``Workspace`` and the ``WorkflowRepository``
+contract gate. They consume the harness's OOP API: a ``Workspace`` and the ``WorkflowMapper``
 mapping each workflow.yaml to a ``Workflow`` entity.
 
 Run:  ``python3 harness/tests/test_workflow_invariants.py``   (from the framework root)
@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Workflow
-from mappers import Workspace, WorkflowRepository
+from mappers import Workspace, WorkflowMapper
 
 ROOT_ORCHESTRATIONS = (
     "layers/portfolio/workflow",
@@ -48,7 +48,7 @@ def _workspace() -> Workspace:
 
 
 def _workflows(workspace: Workspace) -> list[Workflow]:
-    return WorkflowRepository(workspace).all()
+    return WorkflowMapper(workspace).all()
 
 
 def _norm(actor: object) -> str:
@@ -58,7 +58,7 @@ def _norm(actor: object) -> str:
 # --- the structural checks (each returns a list of human-readable violations) -------------------
 def violations_root_completeness(workspace: Workspace) -> list[str]:
     out: list[str] = []
-    repo = WorkflowRepository(workspace)
+    repo = WorkflowMapper(workspace)
     for oid in ROOT_ORCHESTRATIONS:
         path = workspace.skills_root / oid / "workflow.yaml"
         if not path.is_file():

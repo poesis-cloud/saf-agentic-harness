@@ -16,11 +16,11 @@ from typing import Callable
 
 from models import Report
 from mappers import (
-    ArtifactRepository,
-    LogRepository,
-    SchemaRepository,
+    ArtifactMapper,
+    LogMapper,
+    SchemaMapper,
     Workspace,
-    WorkflowRepository,
+    WorkflowMapper,
 )
 from utils import ArtifactValidator
 from services import (
@@ -93,12 +93,12 @@ class Application:
         self.workspace = workspace
 
         # mappers (data-mappers)
-        workflows = WorkflowRepository(workspace)
-        schemas = SchemaRepository(workspace)
+        workflows = WorkflowMapper(workspace)
+        schemas = SchemaMapper(workspace)
         self.validator = ArtifactValidator(workspace, schemas)
-        artifacts = ArtifactRepository(workspace, self.validator)
+        artifacts = ArtifactMapper(workspace, self.validator)
         self.artifacts = artifacts
-        logs = LogRepository(workspace)
+        logs = LogMapper(workspace)
         self.logs = logs
 
         # services (in dependency order — no cycles)

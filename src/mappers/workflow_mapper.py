@@ -1,4 +1,4 @@
-"""WorkflowRepository — maps workflow.yaml files to `Workflow` entities."""
+"""WorkflowMapper — maps workflow.yaml files to `Workflow` entities."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from text import parse_contract
 from .workspace import Workspace
 
 
-class WorkflowRepository:
+class WorkflowMapper:
     """The data-mapper for the workflow constitution.
 
     `load`/`all`/`find` deserialize workflow.yaml into `Workflow` entities (lenient

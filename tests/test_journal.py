@@ -17,13 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import jsonschema
 
-from mappers import LogRepository, SchemaRepository, Workspace
+from mappers import LogMapper, SchemaMapper, Workspace
 
 
 def _validator() -> jsonschema.Draft7Validator:
     """The envelope validator with a $ref resolver over the per-command payload schemas."""
     ws = Workspace.detect()
-    schemas = SchemaRepository(ws)
+    schemas = SchemaMapper(ws)
     envelope = schemas.journal_schema()
     assert envelope is not None, "journal.schema.json must exist"
     store = schemas.journal_payload_store()
@@ -78,7 +78,7 @@ def main() -> int:
 
     # 4. Replay: append a run's entries to a journal, read it back, and reconstruct the steps.
     ws = Workspace.detect()
-    logs = LogRepository(ws)
+    logs = LogMapper(ws)
     with tempfile.TemporaryDirectory() as tmp:
         journal = Path(tmp) / "R-01.jsonl"
         # the run's step sequence (draft -> review -> commit), each bracketed by several commands

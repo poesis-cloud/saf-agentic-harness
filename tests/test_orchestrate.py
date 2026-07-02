@@ -14,13 +14,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Workflow
-from mappers import ArtifactRepository, Workspace, WorkflowRepository
+from mappers import ArtifactMapper, Workspace, WorkflowMapper
 from services import ModelRouter, OrchestrationService
 
 
 def _engine() -> OrchestrationService:
     ws = Workspace.detect()
-    return OrchestrationService(ws, WorkflowRepository(ws), ArtifactRepository(ws), ModelRouter(ws))
+    return OrchestrationService(ws, WorkflowMapper(ws), ArtifactMapper(ws), ModelRouter(ws))
 
 
 def _sample_workflow() -> Workflow:
@@ -137,7 +137,7 @@ def test_real_root_workflow_drives_from_id() -> None:
     """Smoke: a real root workflow resolves to a concrete first action from its id alone (no unit
     artifacts on disk -> the cursor is empty -> the first authored step dispatches or halts at a gate)."""
     engine = _engine()
-    wf = next((w for w in WorkflowRepository(Workspace.detect()).all() if w.is_root), None)
+    wf = next((w for w in WorkflowMapper(Workspace.detect()).all() if w.is_root), None)
     assert wf is not None, "expected at least one root workflow"
     action = engine.orchestrate(str(wf.id), unit=None)
     assert action["action"] in {"dispatch", "halt", "done"}

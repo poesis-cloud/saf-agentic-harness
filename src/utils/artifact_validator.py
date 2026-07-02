@@ -2,7 +2,7 @@
 
 Answers one question: does an `Artifact` conform to its matched artifact schema? It owns the
 schema matching (path + `type` disambiguation), the `__`-injected validation view, and the
-Draft-07 check. Shared by `SchemaChecker` (the reporter), `ArtifactRepository` (valid-by-
+Draft-07 check. Shared by `SchemaChecker` (the reporter), `ArtifactMapper` (valid-by-
 construction: `discover()` raises on any invalid artifact), and the postcondition hook (enforce +
 revert). It logs nothing and knows nothing about commands — reporting stays a caller concern.
 
@@ -26,17 +26,17 @@ from models import Artifact, Report
 from text import markdown_body, section_map, section_tree
 
 if TYPE_CHECKING:
-    from mappers import SchemaRepository, Workspace
+    from mappers import SchemaMapper, Workspace
 
 
 class ArtifactValidator:
     """Schema-conformance for one artifact against the cataloged artifact schemas.
     
     Uses raw schema dicts (Alternative 1) instead of ArtifactSchema objects.
-    Dependencies (Workspace, SchemaRepository) are injected to avoid circular imports.
+    Dependencies (Workspace, SchemaMapper) are injected to avoid circular imports.
     """
 
-    def __init__(self, workspace: Workspace, schemas: SchemaRepository) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaMapper) -> None:
         self.workspace = workspace
         self.schemas = schemas
         self._catalog: dict[str, dict[str, Any]] | None = None

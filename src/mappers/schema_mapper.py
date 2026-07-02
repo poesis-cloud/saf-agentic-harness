@@ -1,4 +1,4 @@
-"""SchemaRepository — loads and validates the artifact-schema catalog + the harness schemas."""
+"""SchemaMapper — loads and validates the artifact-schema catalog + the harness schemas."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from text import bool_value, list_value
 from .workspace import Workspace
 
 
-class SchemaRepository:
+class SchemaMapper:
     """The data-mapper for JSON schemas.
 
     `load_raw` returns artifact schemas as raw dicts (schema_id -> full schema dict with

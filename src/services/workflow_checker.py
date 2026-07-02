@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from models import Report, Workflow
-from mappers import SchemaRepository, WorkflowRepository, Workspace
+from mappers import SchemaMapper, WorkflowMapper, Workspace
 from .cel_evaluator import CelEvaluator
 
 
@@ -25,7 +25,7 @@ class WorkflowChecker:
     `type: state` condition's `set_query` / `set_predicate` referencing only properties
     declared by the aliased artifact schemas."""
 
-    def __init__(self, workspace: Workspace, workflows: WorkflowRepository, schemas: SchemaRepository) -> None:
+    def __init__(self, workspace: Workspace, workflows: WorkflowMapper, schemas: SchemaMapper) -> None:
         self.workspace = workspace
         self.workflows = workflows
         self.schemas = schemas

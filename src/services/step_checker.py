@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from models import Finding, Report
-from mappers import ArtifactRepository, LogRepository, WorkflowRepository, Workspace
+from mappers import ArtifactMapper, LogMapper, WorkflowMapper, Workspace
 from .cel_evaluator import CelEvaluator
 from .schema_checker import SchemaChecker
 
@@ -16,14 +16,14 @@ class StepChecker:
     """Evaluates one step's flat `conditions` list in authored order. Each condition is either
     `type: after` (a predecessor `step_id` that must be logged complete, resolved here) or
     `type: state` (a state assertion delegated to the `CelEvaluator`). It then records the
-    canonical run-log line via the `LogRepository`."""
+    canonical run-log line via the `LogMapper`."""
 
     def __init__(
         self,
         workspace: Workspace,
-        workflows: WorkflowRepository,
-        artifacts: ArtifactRepository,
-        logs: LogRepository,
+        workflows: WorkflowMapper,
+        artifacts: ArtifactMapper,
+        logs: LogMapper,
         cel: CelEvaluator,
         schema_checker: SchemaChecker,
     ) -> None:

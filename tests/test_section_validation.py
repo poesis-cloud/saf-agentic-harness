@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import SchemaRepository, Workspace
+from mappers import SchemaMapper, Workspace
 from models import Artifact
 from utils import ArtifactValidator
 
@@ -24,7 +24,7 @@ def test_story_missing_acceptance_criteria(tmp_path, monkeypatch):
     monkeypatch.setattr(Workspace, "detect", classmethod(detect_override))
 
     workspace = Workspace.detect()
-    schemas = SchemaRepository(workspace)
+    schemas = SchemaMapper(workspace)
     validator = ArtifactValidator(workspace, schemas)
 
     story_path = tmp_path / "portfolio" / "epics" / "E1" / "features" / "F1" / "sprint-1" / "stories" / "story-bad.md"
@@ -93,7 +93,7 @@ def test_story_invalid_acceptance_criteria_format(tmp_path, monkeypatch):
     monkeypatch.setattr(Workspace, "detect", classmethod(detect_override))
 
     workspace = Workspace.detect()
-    schemas = SchemaRepository(workspace)
+    schemas = SchemaMapper(workspace)
     validator = ArtifactValidator(workspace, schemas)
 
     story_path = tmp_path / "portfolio" / "epics" / "E1" / "features" / "F1" / "sprint-1" / "stories" / "story-prose.md"

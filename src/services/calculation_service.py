@@ -11,13 +11,13 @@ import re
 from typing import Any
 
 from models import Artifact, Report
-from mappers import ArtifactRepository, Workspace
+from mappers import ArtifactMapper, Workspace
 from text import parse_scalar
 from .transition_policy import TransitionPolicy
 
 
 class CalculationService:
-    def __init__(self, workspace: Workspace, artifacts: ArtifactRepository, policy: TransitionPolicy) -> None:
+    def __init__(self, workspace: Workspace, artifacts: ArtifactMapper, policy: TransitionPolicy) -> None:
         self.workspace = workspace
         self.artifacts = artifacts
         self.policy = policy

@@ -1,4 +1,4 @@
-"""LogRepository — reads a run log into a `Log`, and appends step lines to it."""
+"""LogMapper — reads a run log into a `Log`, and appends step lines to it."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from models import Log
 from .workspace import Workspace
 
 
-class LogRepository:
+class LogMapper:
     """The data-mapper for the JSONL run log (the event plane).
 
     `read` returns a `Log` (parsed lines, latest-wins) or `None` when no log is supplied —

@@ -6,7 +6,7 @@ import fnmatch
 from pathlib import Path
 
 from models import Report
-from mappers import LogRepository, SchemaRepository, Workspace
+from mappers import LogMapper, SchemaMapper, Workspace
 from text import frontmatter, parse_frontmatter
 from .authorization_policy import AuthorizationPolicy
 
@@ -23,7 +23,7 @@ class AuthorizationChecker:
     Read-only and deterministic: it never mutates artifacts; it reports the ungranted write so the
     orchestration reverts it through a privileged author and re-runs."""
 
-    def __init__(self, workspace: Workspace, schemas: SchemaRepository, logs: LogRepository, policy: AuthorizationPolicy) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaMapper, logs: LogMapper, policy: AuthorizationPolicy) -> None:
         self.workspace = workspace
         self.schemas = schemas
         self.logs = logs

@@ -16,13 +16,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Workflow
-from mappers import SchemaRepository, WorkflowRepository, Workspace
+from mappers import SchemaMapper, WorkflowMapper, Workspace
 from services import WorkflowChecker
 
 
 def _checker() -> WorkflowChecker:
     ws = Workspace.detect()
-    return WorkflowChecker(ws, WorkflowRepository(ws), SchemaRepository(ws))
+    return WorkflowChecker(ws, WorkflowMapper(ws), SchemaMapper(ws))
 
 
 def test_workflow_contracts() -> None:

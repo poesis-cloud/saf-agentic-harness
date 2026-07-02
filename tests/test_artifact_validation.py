@@ -2,7 +2,7 @@
 
 Covers:
   - ArtifactValidator flags a schema-invalid artifact;
-  - ArtifactRepository.discover() RAISES InvalidArtifactError on an invalid universe, while
+  - ArtifactMapper.discover() RAISES InvalidArtifactError on an invalid universe, while
     scan_raw() tolerates it (so check-artifact can report), and an empty portfolio is fine;
   - load_one() infers an artifact's kind from its portfolio path;
   - the postcondition hook REVERTS an invalid write (deletes the untracked new file) and DENIES
@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import ArtifactRepository, InvalidArtifactError, LogRepository, SchemaRepository, Workspace
+from mappers import ArtifactMapper, InvalidArtifactError, LogMapper, SchemaMapper, Workspace
 from services import AuthorizationPolicy, HookService
 from utils import ArtifactValidator
 
@@ -31,8 +31,8 @@ def _ws(tmp: str) -> Workspace:
     return Workspace.detect(portfolio_root=Path(tmp))
 
 
-def _repo(ws: Workspace) -> ArtifactRepository:
-    return ArtifactRepository(ws, ArtifactValidator(ws, SchemaRepository(ws)))
+def _repo(ws: Workspace) -> ArtifactMapper:
+    return ArtifactMapper(ws, ArtifactValidator(ws, SchemaMapper(ws)))
 
 
 def main() -> int:
@@ -55,7 +55,7 @@ def main() -> int:
         check("scan_raw tolerates invalid", len(repo.scan_raw()) == 1)
         art = repo.load_one(bad)
         check("load_one infers epic kind", art is not None and art.kind == "epic")
-        report = ArtifactValidator(ws, SchemaRepository(ws)).validate(art)
+        report = ArtifactValidator(ws, SchemaMapper(ws)).validate(art)
         check("validator flags invalid artifact", report.has_errors(), str([f.message for f in report.findings][:1]))
 
         raised = False
@@ -79,7 +79,7 @@ def main() -> int:
         bad = Path(tmp) / "epics" / "bad-epic.md"
         bad.write_text(INVALID_EPIC)
         repo = _repo(ws)
-        hooks = HookService(ws, SchemaRepository(ws), LogRepository(ws), AuthorizationPolicy(), artifacts=repo)
+        hooks = HookService(ws, SchemaMapper(ws), LogMapper(ws), AuthorizationPolicy(), artifacts=repo)
 
         payload = {"tool": "create_file", "tool_input": {"filePath": str(bad)}}
         decision = hooks._postcondition(payload)

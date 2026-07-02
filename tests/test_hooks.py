@@ -14,13 +14,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import LogRepository, SchemaRepository, Workspace
+from mappers import LogMapper, SchemaMapper, Workspace
 from services import AuthorizationPolicy, HookService
 
 
 def _svc() -> HookService:
     ws = Workspace.detect()
-    return HookService(ws, SchemaRepository(ws), LogRepository(ws), AuthorizationPolicy())
+    return HookService(ws, SchemaMapper(ws), LogMapper(ws), AuthorizationPolicy())
 
 
 def main() -> int:
@@ -91,8 +91,8 @@ def main() -> int:
     #    step's procedure skill (per-step injection), NOT the orchestrator's root+sub map.
     with tempfile.TemporaryDirectory() as tmp:
         ws2 = Workspace.detect(portfolio_root=Path(tmp))
-        svc2 = HookService(ws2, SchemaRepository(ws2), LogRepository(ws2), AuthorizationPolicy())
-        LogRepository(ws2).append_entry(
+        svc2 = HookService(ws2, SchemaMapper(ws2), LogMapper(ws2), AuthorizationPolicy())
+        LogMapper(ws2).append_entry(
             ws2.run_journal("R-child"), command="orchestrate",
             payload={"action": "dispatch", "step": "discovery-and-draft"},
             run="R-child", orchestration="epic-lean-business-case", step="discovery-and-draft",

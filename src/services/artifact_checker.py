@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from models import Artifact, Report
-from mappers import ArtifactRepository, Workspace
+from mappers import ArtifactMapper, Workspace
 from .schema_checker import SchemaChecker
 from .transition_policy import TransitionPolicy
 
@@ -12,10 +12,10 @@ class ArtifactChecker:
     """Validates every Epic/Feature/Story's verifiable state: status FSM, parent linkage,
     blocking open_items across gates (`check_artifact_rules` / `check_all`), and staged
     gate-packet evidence (`check_gate_packet`). Schema conformance is delegated to the
-    `SchemaChecker`; the artifact universe + relations come from the `ArtifactRepository`.
+    `SchemaChecker`; the artifact universe + relations come from the `ArtifactMapper`.
     """
 
-    def __init__(self, workspace: Workspace, artifacts: ArtifactRepository, schema_checker: SchemaChecker, policy: TransitionPolicy) -> None:
+    def __init__(self, workspace: Workspace, artifacts: ArtifactMapper, schema_checker: SchemaChecker, policy: TransitionPolicy) -> None:
         self.workspace = workspace
         self.artifacts = artifacts
         self.schema_checker = schema_checker

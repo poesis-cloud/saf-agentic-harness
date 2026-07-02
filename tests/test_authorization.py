@@ -15,13 +15,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import LogRepository, SchemaRepository, Workspace
+from mappers import LogMapper, SchemaMapper, Workspace
 from services import AuthorizationChecker, AuthorizationPolicy
 
 
 def _check(lines: list[dict]) -> tuple[int, int]:
     workspace = Workspace.detect()
-    checker = AuthorizationChecker(workspace, SchemaRepository(workspace), LogRepository(workspace), AuthorizationPolicy())
+    checker = AuthorizationChecker(workspace, SchemaMapper(workspace), LogMapper(workspace), AuthorizationPolicy())
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
         for line in lines:
             handle.write(json.dumps(line) + "\n")
