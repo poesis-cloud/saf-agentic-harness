@@ -166,11 +166,6 @@
           "type": "string",
           "minLength": 1
         },
-        "gate": {
-          "description": "Human ★-gate label for a `kind: gate` step (e.g. '★ Epic Gate'). Authoring metadata naming which gate this step represents; the functional trigger is `kind: gate`.",
-          "type": "string",
-          "minLength": 1
-        },
         "delegates_to": {
           "description": "For kind: delegate — the sub-workflow this step runs (path under workflows/).",
           "type": "string",
