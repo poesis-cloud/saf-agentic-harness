@@ -72,7 +72,7 @@
     "condition": {
       "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). Guidance is now at the step level (step.instructions / step.prompts). During migration, expression/value fields are retained for backward compatibility with old conditions.",
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "kind",
         "id"
@@ -167,7 +167,7 @@
     "step": {
       "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for portfolio-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition).",
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "id",
         "kind",
@@ -182,6 +182,11 @@
           "minLength": 1
         },
         "actor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gate": {
+          "description": "Human ★-gate label for a `kind: gate` step (e.g. '★ Epic Gate'). Authoring metadata naming which gate this step represents; the functional trigger is `kind: gate`.",
           "type": "string",
           "minLength": 1
         },
@@ -298,7 +303,7 @@
     "workflow": {
       "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`/`parent`) plus the `steps` that constitute it. Root workflows are identified by id ∈ {lpm, art, scrum} and carry no parent; sub-workflows declare kind/parent.",
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": [
         "id",
         "steps"
@@ -317,15 +322,6 @@
         "facilitator": {
           "type": "string",
           "minLength": 1
-        },
-        "cdp_stage": {
-          "type": "string"
-        },
-        "delivers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         },
         "steps": {
           "description": "The structurant steps constituting this workflow (one actor per step; fork/merge/loop via `after`).",
