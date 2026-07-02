@@ -7,6 +7,8 @@ construction: `discover()` raises on any invalid artifact), and the postconditio
 revert). It logs nothing and knows nothing about commands — reporting stays a caller concern.
 
 Dependencies are injected to avoid circular imports.
+
+REFACTORED for Alternative 1: Works with raw schema dicts instead of ArtifactSchema objects.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal Python runtimes
     jsonschema = None
 
-from models import Artifact, ArtifactSchema, Report
+from models import Artifact, Report
 from text import markdown_body, section_map, section_tree
 
 if TYPE_CHECKING:
@@ -30,29 +32,46 @@ if TYPE_CHECKING:
 class ArtifactValidator:
     """Schema-conformance for one artifact against the cataloged artifact schemas.
     
+    Uses raw schema dicts (Alternative 1) instead of ArtifactSchema objects.
     Dependencies (Workspace, SchemaRepository) are injected to avoid circular imports.
     """
 
     def __init__(self, workspace: Workspace, schemas: SchemaRepository) -> None:
         self.workspace = workspace
         self.schemas = schemas
-        self._catalog: list[ArtifactSchema] | None = None
+        self._catalog: dict[str, dict[str, Any]] | None = None
 
-    def _schema_catalog(self) -> list[ArtifactSchema]:
+    def _schema_catalog(self) -> dict[str, dict[str, Any]]:
+        """Load raw artifact schemas (id -> full schema dict)."""
         if self._catalog is None:
-            self._catalog = self.schemas.load(Report())
+            self._catalog = self.schemas.load_raw(Report())
         return self._catalog
 
     # --- matching + validation view -----------------------------------------
-    def _matches_path(self, artifact: Artifact, artifact_schema: ArtifactSchema) -> bool:
+    def _extract_metadata(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Extract x-artifact metadata from schema dict."""
+        metadata = schema.get("x-artifact")
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _matches_path(self, artifact: Artifact, schema: dict[str, Any]) -> bool:
+        """Check if artifact path matches this schema's path patterns."""
         portfolio_root = self.workspace.portfolio_root
         try:
             relative = artifact.path.relative_to(portfolio_root).as_posix()
         except ValueError:
             relative = artifact.path.as_posix()
-        if artifact.kind != artifact_schema.artifact_kind:
+        
+        metadata = self._extract_metadata(schema)
+        artifact_kind = str(metadata.get("kind") or "")
+        
+        if artifact.kind != artifact_kind:
             return False
-        return any(fnmatch(relative, pattern) for pattern in artifact_schema.path_patterns)
+        
+        path_patterns = metadata.get("pathPatterns", [])
+        if not isinstance(path_patterns, list):
+            path_patterns = [path_patterns]
+        
+        return any(fnmatch(relative, pattern) for pattern in path_patterns)
 
     def _schema_data(self, artifact: Artifact) -> dict:
         text = self.workspace.read_text(artifact.path)
@@ -67,28 +86,40 @@ class ArtifactValidator:
         data["__product"] = artifact.product_slug
         return data
 
-    def match(self, artifact: Artifact) -> tuple[ArtifactSchema | None, str | None]:
-        """Resolve the single artifact schema for this artifact, or (None, reason)."""
+    def match(self, artifact: Artifact) -> tuple[dict[str, Any] | None, str | None, str | None]:
+        """Resolve the single artifact schema for this artifact, or (None, reason, schema_id).
+        
+        Returns:
+            (schema_dict, error_reason, schema_id) tuple.
+            If match succeeds, schema_dict and schema_id are set, reason is None.
+            If match fails, schema_dict is None, reason explains why.
+        """
         schemas = self._schema_catalog()
-        path_matches = [schema for schema in schemas if self._matches_path(artifact, schema)]
+        path_matches = [(sid, sch) for sid, sch in schemas.items() if self._matches_path(artifact, sch)]
+        
         artifact_type = artifact.fields.get("type")
         if artifact_type in (None, ""):
             matches = path_matches
         else:
-            matches = [
-                schema
-                for schema in path_matches
-                if schema.artifact_type is None or str(artifact_type) == schema.artifact_type
-            ]
+            filtered = []
+            for sid, sch in path_matches:
+                metadata = self._extract_metadata(sch)
+                sch_type = metadata.get("type")
+                if sch_type is None or str(artifact_type) == sch_type:
+                    filtered.append((sid, sch))
+            matches = filtered
+        
         if not matches:
-            return None, "no artifact schema matches this artifact"
+            return None, "no artifact schema matches this artifact", None
         if artifact_type in (None, "") and len(matches) > 1:
-            variants = sorted(schema.schema_id for schema in matches)
-            return None, f"frontmatter field 'type' is required to select one artifact schema variant: {variants}"
+            variants = sorted(sid for sid, _ in matches)
+            return None, f"frontmatter field 'type' is required to select one artifact schema variant: {variants}", None
         if len(matches) > 1:
-            ids = ", ".join(schema.schema_id for schema in matches)
-            return None, f"multiple artifact schemas match this artifact: {ids}"
-        return matches[0], None
+            ids = ", ".join(sid for sid, _ in matches)
+            return None, f"multiple artifact schemas match this artifact: {ids}", None
+        
+        schema_id, schema_dict = matches[0]
+        return schema_dict, None, schema_id
 
     def validate(self, artifact: Artifact) -> Report:
         """Return a Report of schema violations for one artifact (empty Report ⇒ valid)."""
@@ -97,31 +128,36 @@ class ArtifactValidator:
         if jsonschema is None:
             report.error(label, "jsonschema is required to validate artifacts")
             return report
-        artifact_schema, reason = self.match(artifact)
-        if artifact_schema is None:
+        
+        schema, reason, schema_id = self.match(artifact)
+        if schema is None:
             report.error(label, reason or "no artifact schema matches this artifact")
             return report
-        validator = jsonschema.Draft7Validator(artifact_schema.schema)
-        for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
-            report.error(label, f"{artifact_schema.schema_id} schema violation: {self.schemas.format_schema_error(error)}")
         
-        # Validate body section structure if sections_spec is defined
-        if artifact_schema.sections_spec:
-            section_report = self._validate_sections(artifact, artifact_schema)
+        validator = jsonschema.Draft7Validator(schema)
+        for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
+            report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(error)}")
+        
+        # Validate body section structure if sections metadata is defined
+        metadata = self._extract_metadata(schema)
+        sections_spec_data = metadata.get("sections")
+        if sections_spec_data:
+            section_report = self._validate_sections(artifact, sections_spec_data)
             report.extend(section_report)
         
         return report
 
-    def _validate_sections(self, artifact: Artifact, artifact_schema: ArtifactSchema) -> Report:
-        """Validate body section structure against the schema's sections_spec."""
-        from models import SectionSpec
-
+    def _validate_sections(self, artifact: Artifact, sections_spec_data: dict[str, Any]) -> Report:
+        """Validate body section structure against sections spec metadata."""
         report = Report()
         label = self.workspace.label(artifact.path, self.workspace.portfolio_root)
-        spec = artifact_schema.sections_spec
-        if not spec:
-            return report
-
+        
+        required = sections_spec_data.get("required", [])
+        optional = sections_spec_data.get("optional", [])
+        max_depth = sections_spec_data.get("maxDepth", 2)
+        allow_unknown = sections_spec_data.get("allowUnknown", False)
+        patterns = sections_spec_data.get("patterns", {})
+        
         text = self.workspace.read_text(artifact.path)
         sections = section_map(text)
         section_tree_data = section_tree(text)
@@ -131,29 +167,30 @@ class ArtifactValidator:
             for heading, node in tree.items():
                 if isinstance(node, dict):
                     level = node.get("__level", 2)
-                    if level > spec.max_depth + 1:  # +1 because h1 is depth 0
+                    if level > max_depth + 1:  # +1 because h1 is depth 0
                         report.warn(
                             label,
-                            f"section '{heading}' is at depth {level} (max allowed: {spec.max_depth + 1})",
+                            f"section '{heading}' is at depth {level} (max allowed: {max_depth + 1})",
                         )
                     check_depth(node, depth + 1)
 
         check_depth(section_tree_data, 1)
 
         # Check required sections
-        for required_section in spec.required:
+        for required_section in required:
             if required_section not in sections:
                 report.error(label, f"required section '{required_section}' is missing")
 
         # Check no unknown sections
-        if not spec.allow_unknown:
-            unknown = set(sections.keys()) - spec.all_sections
+        if not allow_unknown:
+            all_allowed = set(required) | set(optional)
+            unknown = set(sections.keys()) - all_allowed
             for unknown_section in unknown:
-                report.warn(label, f"unknown section '{unknown_section}' (allowed: {', '.join(sorted(spec.all_sections))})")
+                report.warn(label, f"unknown section '{unknown_section}' (allowed: {', '.join(sorted(all_allowed))})")
 
         # Check content patterns if defined
-        if spec.patterns:
-            for section_name, pattern in spec.patterns.items():
+        if patterns:
+            for section_name, pattern in patterns.items():
                 if section_name in sections:
                     self._validate_section_pattern(label, section_name, sections[section_name], pattern, report)
 

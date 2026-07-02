@@ -79,14 +79,19 @@ class CelEvaluator:
         if self._schema_prop_index is None:
             index: dict[str, set[str]] = {}
             if self.schemas is not None:
-                for artifact_schema in self.schemas.load():
+                from models import Report
+                schemas = self.schemas.load_raw(Report())
+                for schema_id, schema_dict in schemas.items():
                     props = {
                         key
-                        for key in artifact_schema.schema.get("properties", {}).keys()
+                        for key in schema_dict.get("properties", {}).keys()
                         if not key.startswith("__")
                     }
-                    index[artifact_schema.schema_id] = props
-                    index[artifact_schema.artifact_kind] = props
+                    metadata = schema_dict.get("x-artifact", {})
+                    index[schema_id] = props
+                    kind = metadata.get("kind")
+                    if kind:
+                        index[kind] = props
             self._schema_prop_index = index
         return self._schema_prop_index
 

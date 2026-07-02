@@ -35,27 +35,35 @@ class AuthorizationChecker:
         path; when several schemas match, disambiguate by the artifact's `type` frontmatter so the
         enabler schema (`epic-enabler`, ...) is selected. First match wins when type is silent."""
         candidate = path.replace("{product}", "*").replace("{unit_id}", "*")
-        matches = [
-            schema
-            for schema in self.schemas.load()
-            for pattern in schema.path_patterns
-            if (lambda g: fnmatch.fnmatch(candidate, g) or fnmatch.fnmatch(candidate, f"*/{g}"))(
-                pattern.replace("{product}", "*").replace("{unit_id}", "*")
-            )
-        ]
+        schemas = self.schemas.load_raw(Report())
+        matches = []
+        for schema_id, schema_dict in schemas.items():
+            metadata = schema_dict.get("x-artifact", {})
+            path_patterns = metadata.get("pathPatterns", [])
+            if not isinstance(path_patterns, list):
+                path_patterns = [path_patterns]
+            for pattern in path_patterns:
+                pattern_wildcard = pattern.replace("{product}", "*").replace("{unit_id}", "*")
+                if fnmatch.fnmatch(candidate, pattern_wildcard) or fnmatch.fnmatch(candidate, f"*/{pattern_wildcard}"):
+                    matches.append((schema_id, schema_dict))
+                    break
+        
         if not matches:
             return None
         if len(matches) > 1:
             file = self.workspace.portfolio_base / path
             if file.is_file():
                 wanted = str(parse_frontmatter(frontmatter(self.workspace.read_text(file))).get("type") or "").strip()
-                for schema in matches:
-                    if schema.artifact_type == wanted:
-                        return schema.schema_id
-            for schema in matches:  # default to the business variant when type is silent
-                if schema.artifact_type == "business":
-                    return schema.schema_id
-        return matches[0].schema_id
+                for schema_id, schema_dict in matches:
+                    metadata = schema_dict.get("x-artifact", {})
+                    if metadata.get("type") == wanted:
+                        return schema_id
+            # default to the business variant when type is silent
+            for schema_id, schema_dict in matches:
+                metadata = schema_dict.get("x-artifact", {})
+                if metadata.get("type") == "business":
+                    return schema_id
+        return matches[0][0]
 
     def check_log(self, log_path: Path) -> Report:
         report = Report()

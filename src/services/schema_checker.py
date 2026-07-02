@@ -35,14 +35,20 @@ class SchemaChecker:
     def catalog(self) -> Report:
         report = Report()
         root = self.workspace.skills_root
-        schemas = self.schemas.load(report)
+        schemas = self.schemas.load_raw(report)
         template_suffix = self.schemas.ARTIFACT_TEMPLATE_SUFFIX
         schema_suffix = self.schemas.ARTIFACT_SCHEMA_SUFFIX
         # Every artifact template colocated with a role/orchestration (`**/artifacts/`) must be
         # claimed by exactly one registry schema whose x-artifact.template points at it. The
         # registry (harness/schemas/artifact) is the single home for schemas; templates stay next
         # to the workflow that renders them.
-        claimed = {schema.template_path.resolve() for schema in schemas if schema.template_path}
+        claimed = set()
+        for schema_id, schema_dict in schemas.items():
+            metadata = schema_dict.get("x-artifact", {})
+            template_path_str = metadata.get("template")
+            if template_path_str:
+                template_full_path = (root / template_path_str).resolve()
+                claimed.add(template_full_path)
         for template_path in sorted(root.glob(f"**/artifacts/*{template_suffix}")):
             if template_path.resolve() not in claimed:
                 report.error(self.workspace.label(template_path, root.parent), "no registry artifact schema declares this template via x-artifact.template")
@@ -85,15 +91,21 @@ class SchemaChecker:
         if not isinstance(kind, str) or not kind:
             report.error(label, "artifact JSON has no string 'kind' field to select a schema")
             return report
-        schemas = self.schemas.load(report)
-        matches = [schema for schema in schemas if schema.artifact_kind == kind]
+        schemas = self.schemas.load_raw(report)
+        matches = []
+        for schema_id, schema_dict in schemas.items():
+            metadata = schema_dict.get("x-artifact", {})
+            if metadata.get("kind") == kind:
+                matches.append((schema_id, schema_dict))
         if not matches:
             report.error(label, f"no artifact schema declares x-artifact.kind {kind!r}")
             return report
         if len(matches) > 1:
-            report.error(label, f"multiple artifact schemas declare kind {kind!r}: {', '.join(schema.schema_id for schema in matches)}")
+            schema_ids = ", ".join(sid for sid, _ in matches)
+            report.error(label, f"multiple artifact schemas declare kind {kind!r}: {schema_ids}")
             return report
-        validator = jsonschema.Draft7Validator(matches[0].schema)
+        schema_id, schema_dict = matches[0]
+        validator = jsonschema.Draft7Validator(schema_dict)
         for err in sorted(validator.iter_errors(data), key=lambda item: list(item.absolute_path)):
-            report.error(label, f"{matches[0].schema_id} schema violation: {self.schemas.format_schema_error(err)}")
+            report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(err)}")
         return report
