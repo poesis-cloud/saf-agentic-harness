@@ -376,8 +376,24 @@
             "$ref": "#/definitions/condition"
           }
         },
-        "instruction": {
+        "instructions": {
           "description": "Step-level guidance injected to the agent at session-open (once preconditions pass). Carries behavioral guidance refs (e.g., authority obligations, discovery lenses). A single string or array of strings, each a contract/repo-relative ref to a `.instructions.md` file.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ]
+        },
+        "prompts": {
+          "description": "Step-level prompt guidance injected to the agent at session-open (once preconditions pass). A single string or array of strings, each a contract/repo-relative ref to a `.prompt.md` file.",
           "oneOf": [
             {
               "type": "string",
