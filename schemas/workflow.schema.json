@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://poesis.cloud/safe-agentic-framework/workflow.schema.json",
   "title": "orchestration workflow schema (the steps model)",
-  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` conditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by a `consistency`/completion condition. Each step's obligations are ONE flat `conditions` list, isomorphic to the run log's conditions[]: each condition has `kind` (precondition / postcondition / invariant), `type` (a judgment category authority/content/clarification/challenge/consistency/transition/state, or a structural dependency after/input/output), `expression` (`cel` harness-evaluated / `instruction` resolved structurally / `ref` structurally resolved), and `value`. Structural refs (after/input/output) are checked STRUCTURALLY, never via CEL; after/input are preconditions, output a postcondition. There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
+  "description": "Defines the canonical shape of a workflow.yaml. The single root node is `workflow`; its `steps` constitute the flow. Steps form a flow with three shapes, all expressed through `after` preconditions: FORK = sibling steps sharing one `after`; MERGE = a step with several `after`s; ITERATION/LOOP = the acyclic step body re-executed per item at runtime — the `after` DAG stays acyclic (no graph cycles), the run log tolerates repeated step executions (replay = latest-line-wins, ordering uses first-occurrence), and the loop is bounded by state completion conditions. Each step's obligations are ONE flat `conditions` list. For pre/post checks, `type` is `after` or `state`: `after` binds a predecessor `step_id`; `state` binds a set selector and a predicate (`set_selector` + `set_predicate`). Selector execution is artifact-backed: `set_selector.set_type = artifact`, FROM is declared as `artifact_types` (alias + schema_id), and `set_query` may only reference declared aliases. Invariants remain instruction-based obligations. There is no per-workflow Python. Mediation is an implicit harness function — there is no `facilitate` step kind; participant→participant `after` edges are legal and the harness sequences them. See the harness README Logging section.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,15 +19,63 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*$"
     },
+    "artifactTypeRef": {
+      "description": "One FROM binding for artifact selection: alias + schema id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alias",
+        "schema_id"
+      ],
+      "properties": {
+        "alias": {
+          "$ref": "#/definitions/identifier",
+          "description": "Alias exposed to `set_query` (e.g. `feature`, `story`)."
+        },
+        "schema_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Artifact schema identifier selected by this alias."
+        }
+      }
+    },
+    "setSelector": {
+      "description": "Selector contract for `type: state` conditions. FROM is declared via `artifact_types` aliases; `set_query` is a CEL expression returning the selected set and may only reference declared aliases plus runtime constants (unit/product/run scope).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "set_type",
+        "artifact_types",
+        "set_query"
+      ],
+      "properties": {
+        "set_type": {
+          "type": "string",
+          "const": "artifact",
+          "description": "Current selector backend. Only artifact-backed selection is supported."
+        },
+        "artifact_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/artifactTypeRef"
+          },
+          "description": "FROM bindings for set selection."
+        },
+        "set_query": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL set query yielding the selected set, using only declared aliases."
+        }
+      }
+    },
     "condition": {
-      "description": "One entry in a step's flat `conditions` list. Four orthogonal attributes: `kind` = WHEN it holds (precondition / postcondition / invariant); `type` = WHAT it is about — a judgment category (authority / content / clarification / challenge / consistency / transition / state) or a structural dependency (`after` a predecessor step, `input` a consumed artifact, `output` a produced artifact); `expression` = the FORM of `value` (`cel` a harness-evaluated predicate, `instruction` a relative URI to a `.instructions.md` obligation file the harness resolves structurally, `ref` a path/step-id the harness resolves structurally); `value` = the body itself. Coherence is enforced by the schema: every condition carries an `id`; structural types (after/input/output) use `expression: ref`; `after`/`input` are preconditions and `output` a postcondition; a precondition/postcondition judgment uses `expression: cel` and an invariant uses `expression: instruction`. Isomorphic to the run log's conditions[].",
+      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition / invariant). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). For invariants, instruction-based obligations are preserved (`expression: instruction` + `value`).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "kind",
         "type",
-        "expression",
-        "value",
         "id"
       ],
       "properties": {
@@ -43,22 +91,27 @@
         "type": {
           "type": "string",
           "enum": [
-            "authority",
-            "content",
-            "clarification",
-            "challenge",
-            "consistency",
-            "transition",
             "state",
-            "after",
-            "input",
-            "output"
+            "after"
           ],
-          "description": "WHAT the condition is about: a judgment category (authority/content/clarification/challenge/consistency/transition/state) or a structural dependency — `after` (a predecessor step that must be logged complete), `input` (an artifact consumed before the step), `output` (an artifact produced after the step)."
+          "description": "WHAT the condition is about: `after` is a structural predecessor dependency, `state` is a portfolio-state assertion over a selected artifact set."
         },
         "id": {
           "$ref": "#/definitions/conditionId",
-          "description": "Stable id, required on EVERY condition — the handle in the run log, findings, and check-step. Structural refs use a generated id (e.g. after_<step>); for `instruction` it keys the obligation file."
+          "description": "Stable id, required on EVERY condition — the handle in the run log, findings, and check-step."
+        },
+        "step_id": {
+          "$ref": "#/definitions/identifier",
+          "description": "Required for `type: after`: predecessor step id that must be complete."
+        },
+        "set_selector": {
+          "$ref": "#/definitions/setSelector",
+          "description": "Required for `type: state` pre/post checks."
+        },
+        "set_predicate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "CEL boolean assertion evaluated against the set selected by `set_selector`."
         },
         "expression": {
           "type": "string",
@@ -79,66 +132,72 @@
         {
           "if": {
             "required": [
+              "kind",
               "type"
             ],
-            "properties": {
-              "type": {
-                "enum": [
-                  "after",
-                  "input",
-                  "output"
-                ]
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "expression"
-            ],
-            "properties": {
-              "expression": {
-                "const": "ref"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "type"
-            ],
-            "properties": {
-              "type": {
-                "enum": [
-                  "after",
-                  "input"
-                ]
-              }
-            }
-          },
-          "then": {
             "properties": {
               "kind": {
                 "const": "precondition"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "type"
-            ],
-            "properties": {
+              },
               "type": {
-                "const": "output"
+                "const": "after"
               }
             }
           },
           "then": {
+            "required": [
+              "step_id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "set_selector"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_predicate"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "kind",
+              "type"
+            ],
             "properties": {
               "kind": {
-                "const": "postcondition"
+                "enum": [
+                  "precondition",
+                  "postcondition"
+                ]
+              },
+              "type": {
+                "const": "state"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "set_selector",
+              "set_predicate"
+            ],
+            "not": {
+              "required": [
+                "step_id"
+              ]
+            },
+            "properties": {
+              "expression": {
+                "not": {}
+              },
+              "value": {
+                "not": {}
               }
             }
           }
@@ -146,21 +205,55 @@
         {
           "if": {
             "required": [
-              "type",
+              "kind",
+              "type"
+            ],
+            "properties": {
+              "kind": {
+                "const": "invariant"
+              },
+              "type": {
+                "const": "state"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "expression",
+              "value"
+            ],
+            "properties": {
+              "expression": {
+                "const": "instruction"
+              }
+            },
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "step_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_selector"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_predicate"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
               "kind"
             ],
             "properties": {
-              "type": {
-                "enum": [
-                  "authority",
-                  "content",
-                  "clarification",
-                  "challenge",
-                  "consistency",
-                  "transition",
-                  "state"
-                ]
-              },
               "kind": {
                 "enum": [
                   "precondition",
@@ -170,48 +263,26 @@
             }
           },
           "then": {
-            "properties": {
-              "expression": {
-                "const": "cel"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "type",
-              "kind"
-            ],
-            "properties": {
-              "type": {
-                "enum": [
-                  "authority",
-                  "content",
-                  "clarification",
-                  "challenge",
-                  "consistency",
-                  "transition",
-                  "state"
-                ]
-              },
-              "kind": {
-                "const": "invariant"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "expression": {
-                "const": "instruction"
-              }
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "expression"
+                  ]
+                },
+                {
+                  "required": [
+                    "value"
+                  ]
+                }
+              ]
             }
           }
         }
       ]
     },
     "step": {
-      "description": "One structurant step (one actor's turn). Its obligations are ONE flat `conditions` list — each entry a {kind, type, expression, value, id} record (structural refs + cel/instruction judgments), isomorphic to the run log's conditions[]. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. Conventional authoring order groups conditions by kind: preconditions (after, input, judgment preconditions), invariants, postconditions (output, judgment postconditions). NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition/invariant).",
+      "description": "One structurant step (one actor's turn). Its obligations are ONE flat `conditions` list. Precondition/postcondition checks use `type: after|state`: `after` binds `step_id`; `state` binds `set_selector` + `set_predicate`. Invariants remain instruction-based obligations (`expression: instruction` + `value`). Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition/invariant).",
       "type": "object",
       "additionalProperties": true,
       "required": [
@@ -299,11 +370,27 @@
           "minLength": 1
         },
         "conditions": {
-          "description": "The step's flat obligations list — {kind, type, expression, value} records. Isomorphic to the run log's conditions[].",
+          "description": "The step's flat obligations list — each condition is either an `after` dependency, a `state` set-assertion, or an instruction-based invariant.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/condition"
           }
+        },
+        "instruction": {
+          "description": "Step-level guidance injected to the agent at session-open (once preconditions pass). Carries behavioral guidance refs (e.g., authority obligations, discovery lenses). A single string or array of strings, each a contract/repo-relative ref to a `.instructions.md` file.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          ]
         }
       }
     }

@@ -84,6 +84,17 @@ class Step:
         raw = self._data.get("conditions")
         return [Condition(cond) for cond in raw if isinstance(cond, dict)] if isinstance(raw, list) else []
 
+    @property
+    def instruction(self) -> list[str]:
+        """Step-level guidance injected at session-open. Normalizes string-or-array to a list of refs.
+        Each ref is a contract/repo-relative path to a `.instructions.md` file."""
+        raw = self._data.get("instruction")
+        if isinstance(raw, str) and raw:
+            return [raw]
+        if isinstance(raw, list):
+            return [str(r) for r in raw if r]
+        return []
+
     def ref_values(self, condition_type: str) -> list[str]:
         """The `value` of every structural condition of the given type (after/input/output)."""
         return [cond.value for cond in self.conditions if cond.type == condition_type and cond.is_ref and cond.value]

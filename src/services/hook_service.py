@@ -119,7 +119,7 @@ class HookService:
 
     def _inject_orchestrator(self, actor: str, wants: list[str]) -> str:
         """The orchestrator session's context: the root it facilitates + the suborchestration skill
-        map (each sub-id → procedure skill + invariants), so the driver loads the right procedure
+        map (each sub-id → procedure skill + instructions), so the driver loads the right procedure
         skill the moment it enters a sub. The active actor scopes it to the root it facilitates."""
         all_wf = self.workflows.all()
         blocks: list[str] = []
@@ -129,18 +129,19 @@ class HookService:
             if "workflow" in wants:
                 blocks.append(f"orchestration {wf.id}: facilitate {wf.facilitator}")
             if "instructions" in wants:
-                refs = self._invariant_refs(wf)
+                # Aggregate instruction refs from all steps in the root workflow
+                refs = self._aggregate_instructions(wf)
                 if refs:
-                    blocks.append("follow invariants: " + ", ".join(refs))
+                    blocks.append("follow instructions: " + ", ".join(refs))
             subs = [s for s in all_wf if s.parent == wf.id]
             for sub in sorted(subs, key=lambda s: str(s.id)):
                 parts: list[str] = []
                 if "skills" in wants and sub.id:
                     parts.append("load skill " + str(sub.id))
                 if "instructions" in wants:
-                    refs = self._invariant_refs(sub)
+                    refs = self._aggregate_instructions(sub)
                     if refs:
-                        parts.append("follow invariants " + ", ".join(refs))
+                        parts.append("follow instructions " + ", ".join(refs))
                 if parts:
                     blocks.append(f"on suborchestration {sub.id}: " + "; ".join(parts))
         return "\n".join(blocks)
@@ -149,7 +150,8 @@ class HookService:
         """A dispatched child step session inherits the step it was dispatched for and loads that
         step's skills (per-step injection). The skill resolves in precedence: an explicit step-level
         `skills`, else the target suborchestration id as its procedure skill (a delegate step IS the
-        sub). Instruction refs are scoped to that one step."""
+        sub). Instruction refs come from the step's `instruction` property (new model) or from scanning
+        conditions for `expression: instruction` invariants (old model, during migration)."""
         orchestration = frame.orchestration
         step_id = frame.step
         wf = self._workflow_by_id(orchestration)
@@ -162,9 +164,13 @@ class HookService:
             if skills:
                 parts.append("load skill " + ", ".join(skills))
         if "instructions" in wants and step is not None:
-            refs = sorted({c.value for c in step.conditions if c.is_instruction})
+            # New model: read from step.instruction property
+            refs = list(step.instruction) if hasattr(step, 'instruction') else []
+            # Fallback: old model still uses conditions with expression: instruction
+            if not refs:
+                refs = sorted({c.value for c in step.conditions if c.is_instruction})
             if refs:
-                parts.append("follow invariants " + ", ".join(refs))
+                parts.append("follow instructions " + ", ".join(refs))
         if not parts:
             return ""
         scope = f"step {step_id} (orchestration {orchestration}"
@@ -181,6 +187,22 @@ class HookService:
             if target is not None and target.id:
                 return [str(target.id)]
         return []
+
+    @staticmethod
+    def _aggregate_instructions(wf: Any) -> list[str]:
+        """Collect all instruction refs from all steps in the workflow, deduplicated and sorted.
+        Supports both new model (step.instruction property) and old model (conditions with expression: instruction)
+        during migration."""
+        refs: set[str] = set()
+        if hasattr(wf, 'steps'):
+            for step in wf.steps:
+                # New model: read from step.instruction property
+                if hasattr(step, 'instruction'):
+                    refs.update(step.instruction)
+                # Fallback: old model still uses conditions with expression: instruction
+                if hasattr(step, 'conditions'):
+                    refs.update({c.value for c in step.conditions if c.is_instruction})
+        return sorted(refs)
 
     def _workflow_by_id(self, wid: Any) -> Any:
         if not wid:
@@ -205,10 +227,6 @@ class HookService:
                         and entry.actor and entry.actor.lstrip("@") == target):
                     best = entry
         return best
-
-    @staticmethod
-    def _invariant_refs(wf: Any) -> list[str]:
-        return sorted({c.value for s in wf.steps for c in s.conditions if c.is_instruction})
 
     def _precondition(self, payload: dict[str, Any]) -> HookDecision:
         """preToolUse → the workflow's precondition + authorization on the write: the actor must hold
