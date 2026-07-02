@@ -1,4 +1,4 @@
-"""WorkflowChecker — validates the workflow constitution and pins it to workflows.lock."""
+"""WorkflowChecker — validates the workflow constitution (the `make verify` contract gate)."""
 
 from __future__ import annotations
 
@@ -20,9 +20,10 @@ from .cel_evaluator import CelEvaluator
 class WorkflowChecker:
     """The workflow-constitution check (run by the pytest suite). Validates every
     workflow.yaml against workflow.schema.json plus the semantic rules JSON Schema can't
-    express — unique step ids, resolvable `after` references, an acyclic `after` DAG, every
-    `cel` expression compiling, and every `type: state` condition's `set_query` / `set_predicate`
-    referencing only properties declared by the aliased artifact schemas."""
+    express — unique step ids, unique condition ids within a step, resolvable `after`
+    references, an acyclic `after` DAG, every `cel` expression compiling, and every
+    `type: state` condition's `set_query` / `set_predicate` referencing only properties
+    declared by the aliased artifact schemas."""
 
     def __init__(self, workspace: Workspace, workflows: WorkflowRepository, schemas: SchemaRepository) -> None:
         self.workspace = workspace
@@ -81,6 +82,10 @@ class WorkflowChecker:
             # is declared by its schema — an off-schema property is a hard error).
             for sid, message in self.state_condition_findings(workflow):
                 report.error(label, f"step {sid!r} {message}")
+            # condition ids are the run-log / findings / check-step handle, so they must be unique
+            # within a step (they may legitimately recur across different steps).
+            for sid, cid in self.duplicate_condition_ids(workflow):
+                report.error(label, f"step {sid!r}: duplicate condition id {cid!r} (condition ids must be unique within a step)")
             cycle = workflow.cycle()
             if cycle:
                 report.error(label, f"`after` graph has a cycle: {' -> '.join(cycle)}")
@@ -99,3 +104,20 @@ class WorkflowChecker:
                     if error:
                         findings.append((step.id, f"condition {condition.id!r}: {error}"))
         return findings
+
+    def duplicate_condition_ids(self, workflow: Workflow) -> list[tuple[str, str]]:
+        """(step_id, condition_id) for every condition id that repeats WITHIN a single step. A
+        condition id is the handle used in the run log, findings, and check-step, so it must be
+        unique within its step (ids may legitimately recur across different steps). Presence of
+        the id itself is enforced by the schema (condition.required = [kind, id])."""
+        dupes: list[tuple[str, str]] = []
+        for step in workflow.steps:
+            seen: set[str] = set()
+            for condition in step.conditions:
+                cid = condition.id
+                if cid is None:
+                    continue
+                if cid in seen:
+                    dupes.append((step.id, cid))
+                seen.add(cid)
+        return dupes

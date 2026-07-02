@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from models import Workflow
 from persistence import SchemaRepository, WorkflowRepository, Workspace
 from services import WorkflowChecker
 
@@ -28,6 +29,31 @@ def test_workflow_contracts() -> None:
     report = _checker().check()
     errors = [f for f in report.findings if f.severity == "error"]
     assert not errors, "\n".join(f"{f.path}: {f.message}" for f in errors)
+
+
+def test_duplicate_condition_id_detected() -> None:
+    """The gate flags two conditions in the same step that share an id (the run-log handle)."""
+    workflow = Workflow(
+        {
+            "workflow": {
+                "id": "synthetic",
+                "facilitator": "@x",
+                "steps": [
+                    {
+                        "id": "s1",
+                        "kind": "author",
+                        "actor": "@x",
+                        "conditions": [
+                            {"id": "dup", "kind": "precondition", "type": "after", "step_id": "s0"},
+                            {"id": "dup", "kind": "postcondition", "type": "after", "step_id": "s0"},
+                        ],
+                    }
+                ],
+            }
+        },
+        Path("synthetic/workflow.yaml"),
+    )
+    assert _checker().duplicate_condition_ids(workflow) == [("s1", "dup")]
 
 
 def main() -> int:
