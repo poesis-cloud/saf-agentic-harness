@@ -37,21 +37,43 @@ class Section:
         
         Returns:
             Markdown text with all nested sections.
+            
+        Note: Heading and body are joined with newline. If body starts with \\n,
+              that preserves the blank line between heading and content.
+              When this section has no body, its heading directly abuts the
+              first child heading (single newline) — a heading with no body
+              text before a subheading has no blank line in the source either.
+              Later siblings are still separated by a blank line.
         """
-        lines: list[str] = []
+        has_body = bool(self.body.strip())
+        blocks: list[str] = []
         
         if include_heading:
             heading = "#" * self.level + " " + self.name
-            lines.append(heading)
+            blocks.append(heading)
         
-        if self.body.strip():
-            lines.append(self.body)
+        if has_body:
+            body = self.body
+            
+            if blocks:
+                # Heading exists, join with single newline
+                # (if body starts with \\n, that creates the blank line)
+                result = "\n".join(blocks) + "\n" + body
+                blocks = [result]
+            else:
+                blocks.append(body)
         
-        for child in self.children:
-            # Children render with their own headings
-            lines.append(child.to_markdown(include_heading=True))
+        # Render children (they add their own heading and spacing)
+        for index, child in enumerate(self.children):
+            child_md = child.to_markdown(include_heading=True)
+            if index == 0 and not has_body and blocks:
+                # No body separated this heading from its first child in the
+                # source — abut them with a single newline, not a blank line.
+                blocks[-1] = blocks[-1] + "\n" + child_md
+            else:
+                blocks.append(child_md)
         
-        return "\n\n".join(lines)
+        return "\n\n".join(blocks)
     
     def flatten(self) -> list[Section]:
         """Return flat list of all sections (self + all descendants, depth-first)."""

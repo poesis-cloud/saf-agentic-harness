@@ -31,6 +31,7 @@ class Artifact:
     frontmatter: str
     sections: list[Section] = field(default_factory=list)
     product_slug: str | None = None
+    heading: str | None = None  # File-level heading (# Title) for complete round-trip
 
     @property
     def artifact_id(self) -> str:
@@ -124,24 +125,30 @@ class Artifact:
 
     # --- reconstitution + serialization ----------------------------------------
     def to_markdown(self) -> str:
-        """Render artifact back to markdown — frontmatter + all sections.
+        """Render artifact back to markdown — frontmatter + heading + all sections.
         
         Produces byte-stable output (identical to original file, up to whitespace
         normalization). This makes Artifact a true aggregate root.
         """
-        lines: list[str] = []
+        blocks: list[str] = []
         
-        # Frontmatter block
+        # Frontmatter block (consecutive lines)
         if self.frontmatter.strip():
-            lines.append("---")
-            lines.append(self.frontmatter.rstrip())
-            lines.append("---")
+            blocks.append("---")
+            blocks.append(self.frontmatter.rstrip())
+            blocks.append("---")
+            frontmatter_block = "\n".join(blocks)
+            blocks = [frontmatter_block]
+        
+        # File-level heading (if present)
+        if self.heading:
+            blocks.append(self.heading)
         
         # Body sections
         for section in self.sections:
-            lines.append(section.to_markdown(include_heading=True))
+            blocks.append(section.to_markdown(include_heading=True))
         
-        return "\n\n".join(lines) + "\n" if lines else ""
+        return "\n\n".join(blocks) + "\n" if blocks else ""
     
     def section_by_name(self, name: str) -> Section | None:
         """Find a top-level section by name."""

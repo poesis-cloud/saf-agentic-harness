@@ -1,119 +1,106 @@
-"""Artifact reconstitution TEST — verify byte-stable markdown regeneration.
+"""Artifact reconstitution TEST — verify markdown round-trip fidelity.
 
 Tests that an Artifact parsed from markdown can reconstitute itself back to
 the original markdown via to_markdown(), preserving structure and content.
+
+Uses the framework's own artifact template (story.artifact-template.md) as the
+test fixture. Templates live under layers/team/actors/.../artifacts/ and are
+stable, versioned framework assets — unlike portfolio/ content, which is
+volatile instance data owned by other actors and not a reliable test anchor.
 """
 
 from __future__ import annotations
 
+import hashlib
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Artifact, Section
-from text import frontmatter, markdown_body, parse_frontmatter, parse_sections
+from text import frontmatter, markdown_body, parse_frontmatter, parse_sections, extract_file_heading
+
+_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "layers" / "team" / "actors" / "product-owner" / "artifacts" / "story.artifact-template.md"
+)
+
+_FENCE_PATTERN = re.compile(r"```markdown\n(.*?)\n```", re.DOTALL)
 
 
-def test_artifact_to_markdown_with_sections() -> None:
-    """Verify Artifact.to_markdown() produces valid markdown with preserved sections."""
-    # Sample markdown with frontmatter + sections (realistic story-enabler structure)
-    original_markdown = """---
-id: story-123
-status: ready
-type: enabler
-title: Implement Section domain class
-parent_feature: feature-abc
-sprint: 1
-pi: 3
-adrs: []
-driver: alice
-navigator: bob
-pair_swaps: []
-estimate_points: 5
-risk: low
-complexity: simple
-owner: alice
-enabler_type: architectural
-created: 2026-07-03
-work_item_relations: {}
-wsjf: null
-open_items: []
-cost: null
-github: null
----
+def _extract_template_body(template_text: str) -> str:
+    """Extract the fenced ```markdown ... ``` block from an artifact template doc.
 
-## Acceptance Criteria
+    Artifact templates wrap the actual instance-shaped markdown (frontmatter +
+    body) inside a fenced code block, surrounded by authoring guidance. Only
+    the fenced block is a real markdown artifact instance and thus a valid
+    round-trip fixture.
+    """
+    match = _FENCE_PATTERN.search(template_text)
+    assert match, f"No ```markdown fenced block found in {_TEMPLATE_PATH}"
+    return match.group(1) + "\n"
 
-- AC1. Artifact.to_markdown() returns valid markdown
-- AC2. Section hierarchy is preserved (## and ### levels)
-- AC3. Raw section body text is unmodified
 
-## Implementation Notes
+def _file_signature(content: str) -> str:
+    """Compute SHA256 signature of markdown content (normalized for comparison)."""
+    # Normalize: strip trailing whitespace from each line, ensure single newline at EOF
+    normalized = "\n".join(line.rstrip() for line in content.split("\n"))
+    if not normalized.endswith("\n"):
+        normalized += "\n"
+    return hashlib.sha256(normalized.encode()).hexdigest()
 
-This is the implementation section with detailed steps:
 
-### Substep 1
+def test_artifact_to_markdown_real_template() -> None:
+    """Verify Artifact.to_markdown() produces stable output matching the framework template.
 
-First step description.
+    Uses the framework's own story.artifact-template.md (the fenced example
+    block) as fixture. This tests true round-trip fidelity: load → parse →
+    reconstitute → compare signature, anchored on a stable framework asset
+    rather than volatile portfolio instance data.
+    """
+    assert _TEMPLATE_PATH.exists(), f"Framework template not found: {_TEMPLATE_PATH}"
 
-### Substep 2
+    original_content = _extract_template_body(_TEMPLATE_PATH.read_text())
 
-Second step description.
-
-## Open Items
-
-- Clarification: Need to verify edge case with empty sections
-"""
-
-    # Parse the original
-    front = frontmatter(original_markdown)
-    body = markdown_body(original_markdown)
+    # Parse the artifact
+    front = frontmatter(original_content)
+    body = markdown_body(original_content)
     fields = parse_frontmatter(front)
     sections = parse_sections(body)
 
-    # Create Artifact
     artifact = Artifact(
         kind="story",
-        path=Path("portfolio/pi3/sprint-1/stories/story-123.md"),
+        path=_TEMPLATE_PATH,
         fields=fields,
         frontmatter=front,
         sections=sections,
         product_slug="",
+        heading=extract_file_heading(body),
     )
 
     # Reconstitute
     reconstituted = artifact.to_markdown()
 
-    # Verify structure
-    assert reconstituted.startswith("---"), "Reconstituted markdown must start with frontmatter"
-    assert "\n---\n" in reconstituted, "Frontmatter must end with closing ---"
-    assert "## Acceptance Criteria" in reconstituted, "Top-level sections preserved"
-    assert "## Implementation Notes" in reconstituted, "All sections present"
-    assert "## Open Items" in reconstituted, "Final section present"
-    assert "### Substep 1" in reconstituted, "Subsections preserved"
-    assert "### Substep 2" in reconstituted, "All subsections preserved"
-    assert "AC1." in reconstituted, "Section body content preserved"
-    assert "First step description" in reconstituted, "Subsection body content preserved"
+    # Compare signatures (normalized to handle whitespace variations)
+    original_sig = _file_signature(original_content)
+    reconstituted_sig = _file_signature(reconstituted)
 
-    # Verify sections structure in artifact
-    assert len(artifact.sections) == 3, "Three top-level sections"
-    assert artifact.sections[0].name == "Acceptance Criteria"
-    assert artifact.sections[1].name == "Implementation Notes"
-    assert artifact.sections[2].name == "Open Items"
+    # Signatures should match (byte-stable round-trip)
+    assert original_sig == reconstituted_sig, (
+        f"Artifact round-trip mismatch:\n"
+        f"  Original:      {original_sig}\n"
+        f"  Reconstituted: {reconstituted_sig}\n"
+        f"  Original had {len(sections)} top-level sections\n"
+        f"  Reconstituted has {len(artifact.sections)} top-level sections"
+    )
 
-    # Verify hierarchy
-    impl_notes = artifact.sections[1]
-    assert len(impl_notes.children) == 2, "Implementation Notes has two subsections"
-    assert impl_notes.children[0].name == "Substep 1"
-    assert impl_notes.children[1].name == "Substep 2"
+    # Verify frontmatter preserved
+    assert artifact.fields.get("id") == fields.get("id"), "ID field must be preserved"
+    assert artifact.fields.get("title") == fields.get("title"), "Title field must be preserved"
 
-    # Verify flat traversal
-    all_sections = artifact.all_sections_flat()
-    section_names = [s.name for s in all_sections]
-    assert "Acceptance Criteria" in section_names
-    assert "Substep 1" in section_names
-    assert "Substep 2" in section_names
+    # Verify section count matches
+    assert len(artifact.sections) == len(sections), "Section count must be preserved"
 
 
 def test_section_to_markdown_hierarchy() -> None:

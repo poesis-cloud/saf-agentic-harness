@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from models import Artifact, Report
-from text import frontmatter, parse_frontmatter, parse_sections, markdown_body
+from text import frontmatter, parse_frontmatter, parse_sections, markdown_body, extract_file_heading
 from utils import ArtifactValidator
 from .workspace import Workspace
 
@@ -45,7 +45,8 @@ class ArtifactMapper:
         front = frontmatter(text)
         body = markdown_body(text)
         sections = parse_sections(body)
-        return Artifact(kind, path, parse_frontmatter(front), front, sections, product_slug)
+        heading = extract_file_heading(body)
+        return Artifact(kind, path, parse_frontmatter(front), front, sections, product_slug, heading)
 
     def scan_raw(self) -> list[Artifact]:
         """Every parsed portfolio artifact, WITHOUT schema validation (cached). Used by the

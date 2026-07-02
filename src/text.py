@@ -159,6 +159,18 @@ def markdown_body(text: str) -> str:
     return text
 
 
+def extract_file_heading(text: str) -> str | None:
+    """Extract file-level heading (single #) from markdown body.
+    
+    Returns the heading line (including the #) or None if not present.
+    """
+    pattern = re.compile(r"^#[ \t]+(.+?)[ \t]*$", re.MULTILINE)
+    match = pattern.search(text)
+    if match:
+        return match.group(0)  # Return the full matched line
+    return None
+
+
 def parse_sections(text: str) -> list:
     """Parse markdown body into Section objects, preserving hierarchy and raw text.
     
@@ -200,7 +212,13 @@ def parse_sections(text: str) -> list:
                 continue
             
             # Extract body (content until next heading at same or parent level)
-            body_text = text[body_start:body_end].rstrip("\n")
+            # Strip trailing newlines but preserve leading blank lines if present
+            # (regex match.end() leaves one leading newline; if there are 2+, a blank line exists)
+            raw_body = text[body_start:body_end]
+            # Remove ONE leading newline (from regex match.end()), but keep extra blank lines
+            if raw_body.startswith("\n"):
+                raw_body = raw_body[1:]
+            body_text = raw_body.rstrip("\n")
             
             # Find children (next nodes with level > current level, before any with level <= current)
             children_data = []
