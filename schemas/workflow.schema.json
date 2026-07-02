@@ -70,12 +70,11 @@
       }
     },
     "condition": {
-      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). No expression/value fields — guidance is now at the step level (step.instructions / step.prompts).",
+      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). Guidance is now at the step level (step.instructions / step.prompts). During migration, expression/value fields are retained for backward compatibility with old conditions.",
       "type": "object",
-      "additionalProperties": false,
+      "additionalProperties": true,
       "required": [
         "kind",
-        "type",
         "id"
       ],
       "properties": {
@@ -83,17 +82,14 @@
           "type": "string",
           "enum": [
             "precondition",
-            "postcondition"
+            "postcondition",
+            "invariant"
           ],
-          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after)."
+          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after), or invariant (legacy, being phased out during migration)."
         },
         "type": {
           "type": "string",
-          "enum": [
-            "state",
-            "after"
-          ],
-          "description": "WHAT the condition is about: `after` is a structural predecessor dependency, `state` is a portfolio-state assertion over a selected artifact set."
+          "description": "WHAT the condition is about: `after` (structural predecessor via `step_id`), `state` (portfolio-state via `set_selector` + `set_predicate`), or legacy types for migration (input, output, content, challenge, etc.)."
         },
         "id": {
           "$ref": "#/definitions/conditionId",
@@ -101,82 +97,69 @@
         },
         "step_id": {
           "$ref": "#/definitions/identifier",
-          "description": "Required for `type: after`: predecessor step id that must be complete."
+          "description": "For `type: after`: predecessor step id that must be complete."
         },
         "set_selector": {
           "$ref": "#/definitions/setSelector",
-          "description": "Required for `type: state`: defines the artifact set to evaluate."
+          "description": "For `type: state`: defines the artifact set to evaluate."
         },
         "set_predicate": {
           "type": "string",
           "minLength": 1,
-          "description": "Required for `type: state`: CEL boolean assertion evaluated against the set selected by `set_selector`."
+          "description": "For `type: state`: CEL boolean assertion evaluated against the set selected by `set_selector`."
+        },
+        "expression": {
+          "type": "string",
+          "description": "Legacy field for migration: ref | cel | instruction. Will be removed when all workflows are migrated."
+        },
+        "value": {
+          "description": "Legacy field for migration: condition value (depends on expression type). Will be removed when all workflows are migrated."
         }
       },
       "allOf": [
         {
           "if": {
             "required": [
-              "kind",
               "type"
             ],
             "properties": {
-              "kind": {
-                "const": "precondition"
-              },
               "type": {
                 "const": "after"
               }
+            },
+            "not": {
+              "required": [
+                "expression"
+              ]
             }
           },
           "then": {
             "required": [
               "step_id"
-            ],
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "set_selector"
-                  ]
-                },
-                {
-                  "required": [
-                    "set_predicate"
-                  ]
-                }
-              ]
-            }
+            ]
           }
         },
         {
           "if": {
             "required": [
-              "kind",
               "type"
             ],
             "properties": {
-              "kind": {
-                "enum": [
-                  "precondition",
-                  "postcondition"
-                ]
-              },
               "type": {
                 "const": "state"
               }
+            },
+            "not": {
+              "required": [
+                "expression"
+              ]
             }
           },
           "then": {
             "required": [
               "set_selector",
               "set_predicate"
-            ],
-            "not": {
-              "required": [
-                "step_id"
-              ]
-            }
+            ]
           }
         }
       ]
