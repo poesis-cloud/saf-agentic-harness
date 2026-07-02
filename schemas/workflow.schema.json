@@ -70,7 +70,7 @@
       }
     },
     "condition": {
-      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition / invariant). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). For invariants, instruction-based obligations are preserved (`expression: instruction` + `value`).",
+      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). For pre/post checks: `type` is either `after` (structural predecessor via `step_id`) or `state` (portfolio-state assertion via `set_selector` + `set_predicate`). No expression/value fields — guidance is now at the step level (step.instructions / step.prompts).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -83,10 +83,9 @@
           "type": "string",
           "enum": [
             "precondition",
-            "postcondition",
-            "invariant"
+            "postcondition"
           ],
-          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after), invariant (throughout)."
+          "description": "WHEN the condition holds: precondition (before the step acts), postcondition (after)."
         },
         "type": {
           "type": "string",
@@ -106,26 +105,12 @@
         },
         "set_selector": {
           "$ref": "#/definitions/setSelector",
-          "description": "Required for `type: state` pre/post checks."
+          "description": "Required for `type: state`: defines the artifact set to evaluate."
         },
         "set_predicate": {
           "type": "string",
           "minLength": 1,
-          "description": "CEL boolean assertion evaluated against the set selected by `set_selector`."
-        },
-        "expression": {
-          "type": "string",
-          "enum": [
-            "cel",
-            "instruction",
-            "ref"
-          ],
-          "description": "The form of `value`: `cel` (a CEL predicate the harness evaluates against the read-only fact set — every precondition/postcondition); `instruction` (a relative URI to a `.instructions.md` obligation file the harness resolves structurally — every invariant; the agent follows it); `ref` (a repo path / {unit_id}/{product} template / predecessor step id — structural after/input/output)."
-        },
-        "value": {
-          "type": "string",
-          "minLength": 1,
-          "description": "The body: a CEL expression (e.g. `status == \"funnel\"`, `has(unit.wsjf)`, `gate_packet_ok`), a natural-language judgment, or a ref (e.g. `portfolio/epics/{unit_id}.md`, or a predecessor step id when type: after)."
+          "description": "Required for `type: state`: CEL boolean assertion evaluated against the set selected by `set_selector`."
         }
       },
       "allOf": [
@@ -191,98 +176,13 @@
               "required": [
                 "step_id"
               ]
-            },
-            "properties": {
-              "expression": {
-                "not": {}
-              },
-              "value": {
-                "not": {}
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "kind",
-              "type"
-            ],
-            "properties": {
-              "kind": {
-                "const": "invariant"
-              },
-              "type": {
-                "const": "state"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "expression",
-              "value"
-            ],
-            "properties": {
-              "expression": {
-                "const": "instruction"
-              }
-            },
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "step_id"
-                  ]
-                },
-                {
-                  "required": [
-                    "set_selector"
-                  ]
-                },
-                {
-                  "required": [
-                    "set_predicate"
-                  ]
-                }
-              ]
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "enum": [
-                  "precondition",
-                  "postcondition"
-                ]
-              }
-            }
-          },
-          "then": {
-            "not": {
-              "anyOf": [
-                {
-                  "required": [
-                    "expression"
-                  ]
-                },
-                {
-                  "required": [
-                    "value"
-                  ]
-                }
-              ]
             }
           }
         }
       ]
     },
     "step": {
-      "description": "One structurant step (one actor's turn). Its obligations are ONE flat `conditions` list. Precondition/postcondition checks use `type: after|state`: `after` binds `step_id`; `state` binds `set_selector` + `set_predicate`. Invariants remain instruction-based obligations (`expression: instruction` + `value`). Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition/invariant).",
+      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for portfolio-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition).",
       "type": "object",
       "additionalProperties": true,
       "required": [
