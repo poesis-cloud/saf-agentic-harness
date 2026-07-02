@@ -20,13 +20,16 @@ from .cel_evaluator import CelEvaluator
 class WorkflowChecker:
     """The workflow-constitution check (run by the pytest suite). Validates every
     workflow.yaml against workflow.schema.json plus the semantic rules JSON Schema can't
-    express — unique step ids, resolvable `after` references, an acyclic `after` DAG, and
-    every `cel` expression compiling."""
+    express — unique step ids, resolvable `after` references, an acyclic `after` DAG, every
+    `cel` expression compiling, and every `type: state` condition's `set_query` / `set_predicate`
+    referencing only properties declared by the aliased artifact schemas."""
 
     def __init__(self, workspace: Workspace, workflows: WorkflowRepository, schemas: SchemaRepository) -> None:
         self.workspace = workspace
         self.workflows = workflows
         self.schemas = schemas
+        # schema-only evaluator (no portfolio) for design-time state-CEL validation
+        self._cel = CelEvaluator(workspace, None, None, None, schemas)
 
     def check(self) -> Report:
         report = Report()
@@ -73,7 +76,26 @@ class WorkflowChecker:
                     _program, err = CelEvaluator.compile_expr(expr)
                     if err:
                         report.error(label, f"step {sid!r} condition {cid!r}: invalid expr: {err}")
+            # `type: state` conditions: statically validate set_query / set_predicate against the
+            # aliased artifact schemas (aliases resolve, CEL compiles, and every property reference
+            # is declared by its schema — an off-schema property is a hard error).
+            for sid, message in self.state_condition_findings(workflow):
+                report.error(label, f"step {sid!r} {message}")
             cycle = workflow.cycle()
             if cycle:
                 report.error(label, f"`after` graph has a cycle: {' -> '.join(cycle)}")
         return report
+
+    def state_condition_findings(self, workflow: Workflow) -> list[tuple[str, str]]:
+        """(step_id, message) for every `type: state` condition whose `set_selector` /
+        `set_predicate` fails static schema validation — unknown alias schema, uncompilable CEL,
+        or a property reference not declared by the aliased artifact schema. Reusable by the
+        constitution gate and its tests; needs no portfolio (design-time schema check only)."""
+        findings: list[tuple[str, str]] = []
+        for step in workflow.steps:
+            for condition in step.conditions:
+                if condition.type == "state" and condition.set_selector is not None:
+                    error = self._cel.validate_state_condition(condition.set_selector, condition.set_predicate)
+                    if error:
+                        findings.append((step.id, f"condition {condition.id!r}: {error}"))
+        return findings

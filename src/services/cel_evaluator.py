@@ -338,6 +338,37 @@ class CelEvaluator:
         `selected` in the activation). Returns ('bool', x) or ('error', msg)."""
         return self.evaluate_expr(src, activation, {})
 
+    def validate_state_condition(self, selector: dict[str, Any] | None, predicate_src: str | None) -> str | None:
+        """Design-time (no-portfolio) static validation of a `type: state` condition: resolve the
+        FROM aliases against the schema catalog, then check that every `<artifact>.<property>`
+        reference in `set_query` and `set_predicate` is a property declared by that alias's schema
+        (the predicate also gets `selected`, the query result). Returns an error message or None.
+
+        This is the static half of `evaluate_state`, isolated so the workflow-constitution gate can
+        assert authored state CEL against the schemas at test time — without a portfolio to run over.
+        """
+        artifact_types = (selector or {}).get("artifact_types") or []
+        set_query = (selector or {}).get("set_query") or ""
+        if not artifact_types:
+            return "set_selector.artifact_types is required"
+        if not set_query:
+            return "set_selector.set_query is required"
+        if not predicate_src:
+            return "set_predicate is required"
+        alias_props, err = self._alias_props(artifact_types)
+        if err or alias_props is None:
+            return err or "could not resolve set_selector aliases"
+        query_err = self._validate_field_refs(set_query, alias_props)
+        if query_err:
+            return f"set_query: {query_err}"
+        union_props = set().union(*alias_props.values()) if alias_props else set()
+        predicate_aliases = dict(alias_props)
+        predicate_aliases["selected"] = union_props
+        predicate_err = self._validate_field_refs(predicate_src, predicate_aliases)
+        if predicate_err:
+            return f"set_predicate: {predicate_err}"
+        return None
+
     def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None) -> tuple[str, str]:
         """Run the full two-CEL state pipeline: SELECT a set via `set_query`, then ASSERT
         `set_predicate` over that selected set. Returns ('pass'|'fail'|'error', detail).
@@ -350,19 +381,17 @@ class CelEvaluator:
           - Field references in BOTH expressions are statically validated against the aliases'
             schemas — an undeclared property is an error (invalidation), not a silent null.
         """
+        # static schema validation (aliases + field references in query and predicate)
+        static_err = self.validate_state_condition(selector, predicate_src)
+        if static_err:
+            return ("error", static_err)
+
         artifact_types = (selector or {}).get("artifact_types") or []
         set_query = (selector or {}).get("set_query") or ""
-        if not artifact_types or not set_query or not predicate_src:
-            return ("error", "state condition requires set_selector.artifact_types, set_selector.set_query, and set_predicate")
+        alias_props, _ = self._alias_props(artifact_types)
+        assert alias_props is not None  # guaranteed by validate_state_condition above
 
-        alias_props, err = self._alias_props(artifact_types)
-        if err or alias_props is None:
-            return ("error", err or "could not resolve set_selector aliases")
-
-        # 1. static schema check + evaluate the selector → the SELECTED set
-        err = self._validate_field_refs(set_query, alias_props)
-        if err:
-            return ("error", f"set_query: {err}")
+        # 1. evaluate the selector → the SELECTED set
         universe = self._enumerate_artifacts(artifact_types, alias_props)
         total = sum(len(v) for v in universe.values())
         query_activation = celpy.json_to_cel(self._jsonable(self._with_constants(dict(universe))))
@@ -371,20 +400,14 @@ class CelEvaluator:
             return ("error", selected)
         selected_py = self._jsonable(selected)
 
-        # 2. static schema check (selected elements share the aliases' union of properties) +
-        #    evaluate the predicate over the selected set, bound as `selected`
-        union_props = set().union(*alias_props.values()) if alias_props else set()
-        predicate_aliases = dict(alias_props)
-        predicate_aliases["selected"] = union_props
-        err = self._validate_field_refs(predicate_src, predicate_aliases)
-        if err:
-            return ("error", f"set_predicate: {err}")
+        # 2. evaluate the predicate over the selected set, bound as `selected`
         predicate_facts = dict(universe)
         predicate_facts["selected"] = selected_py
         predicate_activation = celpy.json_to_cel(self._jsonable(self._with_constants(predicate_facts)))
-        pkind, ok = self.evaluate_set_predicate(predicate_src, predicate_activation)
+        pkind, ok = self.evaluate_set_predicate(predicate_src or "", predicate_activation)
         if pkind == "error":
             return ("error", ok)
         detail = f"selected {len(selected_py)} of {total} artifact(s)"
         return ("pass" if ok else "fail", detail)
+
 

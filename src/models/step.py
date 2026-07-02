@@ -112,8 +112,15 @@ class Step:
 
     @property
     def after_ids(self) -> list[str]:
-        """Predecessor step ids — the values of the step's `after` conditions."""
-        return self.ref_values("after")
+        """Predecessor step ids. Reads the new model (`type: after` → `step_id`) and, for
+        backward compatibility during migration, the legacy `after`/`ref` `value`."""
+        ids = [cond.step_id for cond in self.conditions if cond.type == "after" and cond.step_id]
+        ids.extend(self.ref_values("after"))  # legacy expression: ref, value: <step_id>
+        # preserve order, drop duplicates
+        seen: dict[str, None] = {}
+        for step_id in ids:
+            seen.setdefault(step_id, None)
+        return list(seen.keys())
 
     @property
     def cel_exprs(self) -> list[tuple[str, str]]:
