@@ -107,81 +107,125 @@ class StepChecker:
         results: list[dict[str, Any]] = []
         counts = {"pass": 0, "fail": 0, "skipped": 0}
 
-        def record_check(ckind: str, ctype: str, expression: str, value: str, result: str, *,
+        def record_check(ckind: str, ctype: str, result: str, *,
                          cid: str | None = None, reason: str | None = None, detail: str | None = None,
-                         descr: str | None = None) -> None:
-            entry: dict[str, Any] = {"kind": ckind, "type": ctype, "expression": expression, "result": result}
+                         descr: str | None = None, selector_summary: str | None = None) -> None:
+            entry: dict[str, Any] = {"kind": ckind, "type": ctype, "result": result}
             if cid:
                 entry["id"] = cid
-            if value:
-                entry["value"] = value
             if reason:
                 entry["reason"] = reason
             if detail:
                 entry["detail"] = detail
+            if selector_summary:
+                entry["selector"] = selector_summary
             results.append(entry)
             counts[result] += 1
             if result == "fail":
-                finding = Finding("error", "check-step", f"[{ctype}/{ckind}] {cid or value} FAILED — {descr or value or cid}")
-                finding.condition_id = cid or value
+                finding = Finding("error", "check-step", f"[{ctype}/{ckind}] {cid} FAILED — {descr or cid}")
+                finding.condition_id = cid
                 finding.expected = "pass"
                 finding.actual = "fail"
-                finding.suggestion = self._suggest(ctype, value)
                 report.add(finding)
 
         for condition in step.conditions:
             ckind = condition.kind
             ctype = condition.type
-            expression = condition.expression
-            value = condition.value
             cond_id = condition.id
-            if expression == "ref":
-                if ctype == "after":
-                    if executed_steps is None:
-                        record_check(ckind, ctype, expression, value, "skipped", reason="unavailable", descr=f"predecessor '{value}' (no run log supplied)")
-                    elif value in executed_steps:
-                        record_check(ckind, ctype, expression, value, "pass")
-                    else:
-                        record_check(ckind, ctype, expression, value, "fail", descr=f"predecessor '{value}' is not logged complete")
-                else:  # input / output
-                    result, reason = self._ref_status(contract_dir, product, unit_id, value)
-                    record_check(ckind, ctype, expression, value, result, reason=reason, descr=f"{ctype} {value}")
-            elif expression == "cel":
-                if not cond_id:
-                    report.error(label, f"step '{step_id}': {ctype or 'untyped'} cel condition is missing its required id")
+
+            if ctype == "after":
+                # type: after → check predecessor step completion via condition.step_id
+                predecessor_id = condition.step_id
+                if not predecessor_id:
+                    report.error(label, f"step '{step_id}' condition '{cond_id}': type=after requires step_id")
                     continue
-                ekind, ok = self.cel.evaluate_expr(value, activation, functions)
-                if ekind == "error":
-                    report.error(label, f"step '{step_id}' condition '{cond_id}': {ok}")
-                    continue
-                record_check(ckind, ctype, expression, value, "pass" if ok else "fail", cid=cond_id, descr=value)
-            elif expression == "instruction":
-                if not cond_id:
-                    report.error(label, f"step '{step_id}': {ctype or 'untyped'} instruction condition is missing its required id")
-                    continue
-                resolved = contract_dir / value
-                if resolved.is_file():
-                    record_check(ckind, ctype, expression, value, "pass", cid=cond_id, descr=value)
+                if executed_steps is None:
+                    record_check(ckind, ctype, "skipped", cid=cond_id, reason="unavailable", descr=f"predecessor '{predecessor_id}' (no run log supplied)")
+                elif predecessor_id in executed_steps:
+                    record_check(ckind, ctype, "pass", cid=cond_id)
                 else:
-                    record_check(ckind, ctype, expression, value, "fail", cid=cond_id, descr=f"obligation file not found: {value}")
+                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"predecessor '{predecessor_id}' is not logged complete")
+
+            elif ctype == "state":
+                # type: state → check portfolio state via set_selector + set_query + set_predicate
+                if not cond_id:
+                    report.error(label, f"step '{step_id}': type=state condition is missing its required id")
+                    continue
+                selector = condition.set_selector
+                predicate_src = condition.set_predicate
+                if not selector or not predicate_src:
+                    report.error(label, f"step '{step_id}' condition '{cond_id}': type=state requires set_selector and set_predicate")
+                    continue
+
+                # Step 7a-7b: enumerate artifacts and build list activation
+                artifact_types = selector.get("artifact_types", [])
+                list_activation, enum_err = self.cel.build_list_activation(artifact_types)
+                if enum_err:
+                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set enumeration failed: {enum_err}")
+                    continue
+
+                # Step 7c: evaluate set_query (list-returning)
+                set_query_src = selector.get("set_query", "")
+                ekind, selected_set = self.cel.evaluate_set_query(set_query_src, list_activation)
+                if ekind == "error":
+                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set_query failed: {selected_set}", selector_summary=set_query_src)
+                    continue
+
+                # Step 7d: evaluate set_predicate (bool over set A)
+                ekind, ok = self.cel.evaluate_set_predicate(predicate_src, list_activation)
+                if ekind == "error":
+                    record_check(ckind, ctype, "fail", cid=cond_id, descr=f"set_predicate failed: {ok}", selector_summary=set_query_src)
+                    continue
+                record_check(ckind, ctype, "pass" if ok else "fail", cid=cond_id, descr=predicate_src, selector_summary=set_query_src)
+
             else:
-                report.error(label, f"step '{step_id}': condition has unknown expression {expression!r}")
+                # Unknown type (old model still uses expression-based routing for backward compatibility)
+                expression = condition.expression
+                value = condition.value
+                if expression == "ref":
+                    # Old model: structural ref checks (legacy, not in new model)
+                    if ctype == "after":
+                        if executed_steps is None:
+                            record_check(ckind, ctype, "skipped", reason="unavailable", descr=f"predecessor '{value}' (legacy ref, no run log supplied)")
+                        elif value in executed_steps:
+                            record_check(ckind, ctype, "pass")
+                        else:
+                            record_check(ckind, ctype, "fail", descr=f"predecessor '{value}' is not logged complete")
+                    else:
+                        result, reason = self._ref_status(contract_dir, product, unit_id, value)
+                        record_check(ckind, ctype, result, reason=reason, descr=f"{ctype} {value}")
+                elif expression == "cel":
+                    # Old model: CEL on unit facts (legacy)
+                    if not cond_id:
+                        report.error(label, f"step '{step_id}': {ctype or 'untyped'} cel condition is missing its required id")
+                        continue
+                    ekind, ok = self.cel.evaluate_expr(value, activation, functions)
+                    if ekind == "error":
+                        report.error(label, f"step '{step_id}' condition '{cond_id}': {ok}")
+                        continue
+                    record_check(ckind, ctype, "pass" if ok else "fail", cid=cond_id, descr=value)
+                elif expression == "instruction":
+                    # Old model: obligation files (legacy)
+                    if not cond_id:
+                        report.error(label, f"step '{step_id}': instruction condition is missing its required id")
+                        continue
+                    resolved = contract_dir / value
+                    if resolved.is_file():
+                        record_check(ckind, ctype, "pass", cid=cond_id, descr=value)
+                    else:
+                        record_check(ckind, ctype, "fail", cid=cond_id, descr=f"obligation file not found: {value}")
+                else:
+                    report.error(label, f"step '{step_id}': condition has unknown type/expression {ctype!r}/{expression!r}")
 
         print(f"check-step {orchestration_id}/{step_id} unit={unit_id}: pass={counts['pass']}, fail={counts['fail']}, skipped={counts['skipped']}", file=sys.stderr)
         for entry in results:
             if entry["result"] == "skipped":
                 why = entry.get("reason") or ""
                 note = entry.get("detail") or ""
-                print(f"  skipped ({entry.get('type') or entry['kind']}{', ' + why if why else ''}): {entry.get('id') or entry.get('value')}{' — ' + note if note else ''}", file=sys.stderr)
+                print(f"  skipped ({entry.get('type')}{', ' + why if why else ''}): {entry.get('id')}{' — ' + note if note else ''}", file=sys.stderr)
 
         if record and log_path is not None:
             payload: dict[str, Any] = {"conditions": results}
-            inputs = step.ref_values("input")
-            outputs = step.ref_values("output")
-            if inputs:
-                payload["inputs"] = inputs
-            if outputs:
-                payload["outputs"] = outputs
             payload["counts"] = counts
             status = "failed" if counts["fail"] else "completed"
             self.logs.append_entry(
