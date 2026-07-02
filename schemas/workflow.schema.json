@@ -202,58 +202,8 @@
             "type": "string"
           }
         },
-        "role": {
-          "description": "Routing metadata: the bench role used for the role-default tier floor (ModelRouter.role_default). Optional — when absent the harness derives it from `actor` (leading `@` stripped).",
-          "type": "string",
-          "minLength": 1
-        },
-        "risk": {
-          "description": "Routing metadata: risk class. critical -> tier-high floor; medium -> tier-balanced; low -> role default.",
-          "type": "string",
-          "enum": [
-            "low",
-            "medium",
-            "critical"
-          ]
-        },
-        "complexity": {
-          "description": "Routing metadata: complexity class. complex -> tier-high floor; involved -> tier-balanced; simple -> no raise.",
-          "type": "string",
-          "enum": [
-            "simple",
-            "involved",
-            "complex"
-          ]
-        },
-        "tags": {
-          "description": "Routing metadata: capability tags scored by ModelRouter to resolve the concrete model.",
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "deep-reasoning",
-              "code-specialized",
-              "creative",
-              "editorial",
-              "long-context",
-              "multimodal",
-              "fast-iteration",
-              "structured-output"
-            ]
-          }
-        },
-        "config": {
-          "description": "Routing metadata: the config profile dispatched with the step.",
-          "type": "string",
-          "enum": [
-            "deterministic",
-            "audit",
-            "exploratory",
-            "creative"
-          ]
-        },
         "output": {
-          "description": "The single artifact KIND this step produces or updates (effect-determinism, invariant 15). Resolves to a real, owned, typed artifact via the artifact catalog + ACL. The structural `type: output` condition still carries the path ref; this names the kind.",
+          "description": "The single artifact KIND this step produces or updates (effect-determinism, invariant 15). Resolves to a real, owned, typed artifact via the artifact catalog + ACL.",
           "type": "string",
           "minLength": 1
         },

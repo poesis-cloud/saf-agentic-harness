@@ -100,6 +100,12 @@ class OrchestrationService:
         }
 
     # --- dispatch payload ---------------------------------------------------
+    @staticmethod
+    def _role_of(step: Any) -> str:
+        """The bench role for routing — the step's actor with any leading '@' stripped."""
+        actor = getattr(step, "actor", None)
+        return str(actor).lstrip("@") if isinstance(actor, str) else ""
+
     def _dispatch(self, workflow: Workflow, step: Any, unit: str | None, run: str | None) -> dict[str, Any]:
         binding = self._resolve_model(step)
         payload: dict[str, Any] = {
@@ -110,7 +116,7 @@ class OrchestrationService:
             "actor": step.actor,
             "kind": step.kind,
             "model": binding.get("model") if binding else None,
-            "config": step.config or binding.get("config_profile") if binding else step.config,
+            "config": binding.get("config_profile") if binding else None,
             "skills": step.skills,
             "unit": unit,
             "output": step.output,
@@ -119,7 +125,6 @@ class OrchestrationService:
                 "step": step.id,
                 "unit": unit,
                 "output": step.output,
-                "inputs": step.ref_values("input"),
             },
         }
         if binding is None:
@@ -128,7 +133,7 @@ class OrchestrationService:
             payload["detail"] = "no model clears the step's tier floor in llm/map.yaml"
             return payload
         payload["routing"] = binding
-        error = self.router.validate_dispatch(step.role, binding.get("model"))
+        error = self.router.validate_dispatch(self._role_of(step), binding.get("model"))
         if error:
             payload["action"] = "halt"
             payload["reason"] = "off-policy-dispatch"
@@ -136,8 +141,9 @@ class OrchestrationService:
         return payload
 
     def _resolve_model(self, step: Any) -> dict[str, Any] | None:
-        floor = self.router.tier_floor(step.risk, step.complexity, self.router.role_default(step.role))
-        return self.router.resolve(floor, step.tags, config_profile=step.config or None)
+        """Route on defaults: the role floor derived from the actor, with no per-step overrides."""
+        floor = self.router.tier_floor("", "", self.router.role_default(self._role_of(step)))
+        return self.router.resolve(floor, [], config_profile=None)
 
     # --- artifact cursor ----------------------------------------------------
     def _completed_steps(self, workflow: Workflow, unit: str | None) -> set[str]:

@@ -44,37 +44,6 @@ class Step:
         return [str(s) for s in raw] if isinstance(raw, list) else []
 
     @property
-    def role(self) -> str:
-        """The bench role for model routing (role-default tier floor). Defaults to the actor with
-        any leading ``@`` stripped, so a step that does not declare ``role`` still routes."""
-        raw = self._data.get("role")
-        if isinstance(raw, str) and raw:
-            return raw
-        actor = self._data.get("actor")
-        return str(actor).lstrip("@") if isinstance(actor, str) else ""
-
-    @property
-    def risk(self) -> str:
-        """Routing risk class — low | medium | critical (raises the tier floor)."""
-        return str(self._data.get("risk") or "")
-
-    @property
-    def complexity(self) -> str:
-        """Routing complexity class — simple | involved | complex (raises the tier floor)."""
-        return str(self._data.get("complexity") or "")
-
-    @property
-    def tags(self) -> list[str]:
-        """Capability tags scored by ``ModelRouter`` to resolve the concrete model."""
-        raw = self._data.get("tags")
-        return [str(t) for t in raw] if isinstance(raw, list) else []
-
-    @property
-    def config(self) -> str:
-        """Config profile — deterministic | audit | exploratory | creative."""
-        return str(self._data.get("config") or "")
-
-    @property
     def output(self) -> str:
         """The single artifact KIND this step produces or updates (effect-determinism)."""
         return str(self._data.get("output") or "")
