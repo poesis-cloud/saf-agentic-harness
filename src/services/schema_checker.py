@@ -11,13 +11,13 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
     jsonschema = None
 
 from models import Artifact, Report
-from persistence import SchemaRepository, Workspace
+from mappers import SchemaRepository, Workspace
 from utils import ArtifactValidator
 
 
 class SchemaChecker:
     """The reporting surface for artifact schema conformance. The per-artifact check is the
-    persistence-level `ArtifactValidator` (shared with `ArtifactRepository` + the postcondition
+    mappers-level `ArtifactValidator` (shared with `ArtifactRepository` + the postcondition
     hook); this service loops it into a report and adds catalog integrity + native-JSON validation."""
 
     def __init__(self, workspace: Workspace, schemas: SchemaRepository, validator: ArtifactValidator | None = None) -> None:

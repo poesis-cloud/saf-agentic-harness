@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Workflow
-from persistence import SchemaRepository, WorkflowRepository, Workspace
+from mappers import SchemaRepository, WorkflowRepository, Workspace
 from services import WorkflowChecker
 
 

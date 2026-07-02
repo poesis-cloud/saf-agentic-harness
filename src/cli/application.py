@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from models import Report
-from persistence import (
+from mappers import (
     ArtifactRepository,
     LogRepository,
     SchemaRepository,
@@ -92,7 +92,7 @@ class Application:
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
 
-        # persistence (data-mappers)
+        # mappers (data-mappers)
         workflows = WorkflowRepository(workspace)
         schemas = SchemaRepository(workspace)
         self.validator = ArtifactValidator(workspace, schemas)

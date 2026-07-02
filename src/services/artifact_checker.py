@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from models import Artifact, Report
-from persistence import ArtifactRepository, Workspace
+from mappers import ArtifactRepository, Workspace
 from .schema_checker import SchemaChecker
 from .transition_policy import TransitionPolicy
 

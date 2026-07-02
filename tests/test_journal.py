@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import jsonschema
 
-from persistence import LogRepository, SchemaRepository, Workspace
+from mappers import LogRepository, SchemaRepository, Workspace
 
 
 def _validator() -> jsonschema.Draft7Validator:

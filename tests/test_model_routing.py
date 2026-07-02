@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from persistence import Workspace
+from mappers import Workspace
 from services import ModelRouter
 
 

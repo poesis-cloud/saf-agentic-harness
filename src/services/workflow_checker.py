@@ -13,7 +13,7 @@ except ImportError:  # pragma: no cover
     yaml = None
 
 from models import Report, Workflow
-from persistence import SchemaRepository, WorkflowRepository, Workspace
+from mappers import SchemaRepository, WorkflowRepository, Workspace
 from .cel_evaluator import CelEvaluator
 
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from persistence import ArtifactRepository, InvalidArtifactError, LogRepository, SchemaRepository, Workspace
+from mappers import ArtifactRepository, InvalidArtifactError, LogRepository, SchemaRepository, Workspace
 from services import AuthorizationPolicy, HookService
 from utils import ArtifactValidator
 

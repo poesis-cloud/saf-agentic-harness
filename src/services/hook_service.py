@@ -28,7 +28,7 @@ from typing import Any
 import yaml
 
 from models import Report
-from persistence import ArtifactRepository, LogRepository, SchemaRepository, Workspace, WorkflowRepository
+from mappers import ArtifactRepository, LogRepository, SchemaRepository, Workspace, WorkflowRepository
 from .authorization_checker import AuthorizationChecker
 from .authorization_policy import AuthorizationPolicy
 from .model_router import ModelRouter

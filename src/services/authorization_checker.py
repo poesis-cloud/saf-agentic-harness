@@ -6,7 +6,7 @@ import fnmatch
 from pathlib import Path
 
 from models import Report
-from persistence import LogRepository, SchemaRepository, Workspace
+from mappers import LogRepository, SchemaRepository, Workspace
 from text import frontmatter, parse_frontmatter
 from .authorization_policy import AuthorizationPolicy
 

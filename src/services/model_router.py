@@ -17,7 +17,7 @@ from typing import Any
 
 import yaml
 
-from persistence import Workspace
+from mappers import Workspace
 
 
 class ModelRouter:

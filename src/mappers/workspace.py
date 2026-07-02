@@ -29,8 +29,8 @@ class Workspace:
         for parent in script.parents:
             if (parent / "plugin.json").is_file() or (parent / ".github" / "skills").is_dir():
                 return parent
-        # __file__ = harness/src/persistence/workspace.py; the last-ditch fallback walks up past
-        # src/persistence/ and the harness project when no plugin.json / skills marker is found
+        # __file__ = harness/src/mappers/workspace.py; the last-ditch fallback walks up past
+        # src/mappers/ and the harness project when no plugin.json / skills marker is found
         # (the marker walk above is the normal, depth-independent path).
         return script.parents[7]
 

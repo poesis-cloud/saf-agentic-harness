@@ -10,7 +10,7 @@ import lark
 from celpy import celtypes
 
 from models import Artifact
-from persistence import ArtifactRepository, SchemaRepository, Workspace
+from mappers import ArtifactRepository, SchemaRepository, Workspace
 
 
 class CelEvaluator:

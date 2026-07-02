@@ -11,7 +11,7 @@ import re
 from typing import Any
 
 from models import Artifact, Report
-from persistence import ArtifactRepository, Workspace
+from mappers import ArtifactRepository, Workspace
 from text import parse_scalar
 from .transition_policy import TransitionPolicy
 

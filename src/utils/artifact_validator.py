@@ -1,4 +1,4 @@
-"""ArtifactValidator — the persistence-level schema-conformance primitive.
+"""ArtifactValidator — the mappers-level schema-conformance primitive.
 
 Answers one question: does an `Artifact` conform to its matched artifact schema? It owns the
 schema matching (path + `type` disambiguation), the `__`-injected validation view, and the
@@ -24,7 +24,7 @@ from models import Artifact, ArtifactSchema, Report
 from text import markdown_body, section_map, section_tree
 
 if TYPE_CHECKING:
-    from persistence import SchemaRepository, Workspace
+    from mappers import SchemaRepository, Workspace
 
 
 class ArtifactValidator:

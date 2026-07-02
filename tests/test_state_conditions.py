@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Artifact
-from persistence import ArtifactRepository, SchemaRepository, Workspace
+from mappers import ArtifactRepository, SchemaRepository, Workspace
 from services import CelEvaluator
 
 

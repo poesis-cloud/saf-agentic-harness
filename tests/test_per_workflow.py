@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest
 
-from persistence import ArtifactRepository, WorkflowRepository, Workspace
+from mappers import ArtifactRepository, WorkflowRepository, Workspace
 from services import ModelRouter, OrchestrationService
 
 

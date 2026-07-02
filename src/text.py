@@ -1,8 +1,8 @@
 """Pure parsing kernel — the bottom layer (no intra-package dependencies).
 
 String/YAML/frontmatter/markdown transforms and generic value coercion shared by the
-models, persistence, and services layers. Everything here is a pure function over text or
-values; filesystem and path concerns live in `persistence.workspace`, domain behaviour on
+models, mappers, and services layers. Everything here is a pure function over text or
+values; filesystem and path concerns live in `mappers.workspace`, domain behaviour on
 the model entities, and orchestration in the services. This module imports nothing from the
 package, so it can never take part in an import cycle.
 """

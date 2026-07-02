@@ -3,7 +3,7 @@
 Each model abstracts a file (or a fragment of one): `Workflow` ⇄ workflow.yaml, `Artifact`
 ⇄ a portfolio unit, `Log` ⇄ a run log, `ArtifactSchema` ⇄ an artifact schema. `Finding` /
 `Report` are the result entities. Models depend only on the `text` kernel — never on
-persistence, services, or the CLI.
+mappers, services, or the CLI.
 """
 
 from __future__ import annotations

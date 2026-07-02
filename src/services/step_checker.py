@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from models import Finding, Report
-from persistence import ArtifactRepository, LogRepository, WorkflowRepository, Workspace
+from mappers import ArtifactRepository, LogRepository, WorkflowRepository, Workspace
 from .cel_evaluator import CelEvaluator
 from .schema_checker import SchemaChecker
 

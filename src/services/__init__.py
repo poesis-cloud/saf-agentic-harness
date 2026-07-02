@@ -4,7 +4,7 @@ Each service operates on the model entities via the repositories: `WorkflowCheck
 (workflow constitution, pytest), `SchemaChecker`, `ArtifactChecker` (state plane),
 `StepChecker` (check-step), `CalculationService` (wsjf/cost/transition),
 `CelEvaluator` (the only check language), `TransitionPolicy` (the kanban policy). Services
-depend on models + persistence — never on the CLI; the CLI wires them together.
+depend on models + mappers — never on the CLI; the CLI wires them together.
 """
 
 from __future__ import annotations

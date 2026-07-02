@@ -1,4 +1,4 @@
-"""Persistence layer — the access layer + data-mappers (model ⇄ filesystem).
+"""Mappers layer — the access layer + data-mappers (model ⇄ filesystem).
 
 `Workspace` is the shared filesystem context; each repository maps one entity to its files:
 `WorkflowRepository` ⇄ workflow.yaml, `ArtifactRepository` ⇄ the portfolio, `SchemaRepository`

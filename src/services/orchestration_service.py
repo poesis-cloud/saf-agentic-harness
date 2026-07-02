@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from models import Workflow
-from persistence import ArtifactRepository, WorkflowRepository, Workspace
+from mappers import ArtifactRepository, WorkflowRepository, Workspace
 from .model_router import ModelRouter
 
 
