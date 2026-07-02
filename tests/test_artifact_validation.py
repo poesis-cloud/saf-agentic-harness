@@ -19,8 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from persistence import ArtifactRepository, ArtifactValidator, InvalidArtifactError, LogRepository, SchemaRepository, Workspace
+from persistence import ArtifactRepository, InvalidArtifactError, LogRepository, SchemaRepository, Workspace
 from services import AuthorizationPolicy, HookService
+from utils import ArtifactValidator
 
 # An epic frontmatter that parses but violates the epic schema (missing most required fields).
 INVALID_EPIC = "---\nid: bad-epic\nstatus: funnel\n---\n# Bad epic\n"

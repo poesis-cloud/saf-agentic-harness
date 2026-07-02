@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from .artifact_repository import ArtifactRepository, InvalidArtifactError
-from .artifact_validator import ArtifactValidator
 from .log_repository import LogRepository
 from .schema_repository import SchemaRepository
 from .workflow_repository import WorkflowRepository
@@ -17,7 +16,6 @@ from .workspace import Workspace
 
 __all__ = [
     "ArtifactRepository",
-    "ArtifactValidator",
     "InvalidArtifactError",
     "LogRepository",
     "SchemaRepository",

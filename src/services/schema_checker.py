@@ -11,7 +11,8 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
     jsonschema = None
 
 from models import Artifact, Report
-from persistence import ArtifactValidator, SchemaRepository, Workspace
+from persistence import SchemaRepository, Workspace
+from utils import ArtifactValidator
 
 
 class SchemaChecker:

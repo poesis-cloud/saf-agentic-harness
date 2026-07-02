@@ -5,11 +5,15 @@ schema matching (path + `type` disambiguation), the `__`-injected validation vie
 Draft-07 check. Shared by `SchemaChecker` (the reporter), `ArtifactRepository` (valid-by-
 construction: `discover()` raises on any invalid artifact), and the postcondition hook (enforce +
 revert). It logs nothing and knows nothing about commands — reporting stays a caller concern.
+
+Dependencies are injected to avoid circular imports.
 """
 
 from __future__ import annotations
 
 from fnmatch import fnmatch
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 try:
     import jsonschema
@@ -18,12 +22,16 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
 
 from models import Artifact, ArtifactSchema, Report
 from text import markdown_body, section_map, section_tree
-from .schema_repository import SchemaRepository
-from .workspace import Workspace
+
+if TYPE_CHECKING:
+    from persistence import SchemaRepository, Workspace
 
 
 class ArtifactValidator:
-    """Schema-conformance for one artifact against the cataloged artifact schemas."""
+    """Schema-conformance for one artifact against the cataloged artifact schemas.
+    
+    Dependencies (Workspace, SchemaRepository) are injected to avoid circular imports.
+    """
 
     def __init__(self, workspace: Workspace, schemas: SchemaRepository) -> None:
         self.workspace = workspace

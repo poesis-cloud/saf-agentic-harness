@@ -6,7 +6,7 @@ from pathlib import Path
 
 from models import Artifact, Report
 from text import frontmatter, parse_frontmatter
-from .artifact_validator import ArtifactValidator
+from utils import ArtifactValidator
 from .workspace import Workspace
 
 

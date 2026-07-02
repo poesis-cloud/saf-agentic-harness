@@ -17,12 +17,12 @@ from typing import Callable
 from models import Report
 from persistence import (
     ArtifactRepository,
-    ArtifactValidator,
     LogRepository,
     SchemaRepository,
     Workspace,
     WorkflowRepository,
 )
+from utils import ArtifactValidator
 from services import (
     ArtifactChecker,
     AuthorizationPolicy,
