@@ -26,7 +26,6 @@ from utils import ArtifactValidator
 from services import (
     ArtifactChecker,
     AuthorizationPolicy,
-    CalculationService,
     CelEvaluator,
     HookService,
     ModelRouter,
@@ -40,17 +39,17 @@ from .command import Command
 
 # --- per-command argument configurators -------------------------------------
 def _configure_check_artifact(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--unit-id", help="validate only one Epic/Feature/Story by its globally-unique id")
+    parser.add_argument("--unit-id", help="validate only one artifact by its globally-unique id")
     parser.add_argument("--path", type=Path, help="validate one native JSON artifact (*.artifact.json) directly against its schema")
     parser.add_argument("--to", help="with --unit-id: target status of a status edge to evaluate against the transition guard")
-    parser.add_argument("--gate", choices=["accept", "reject"], help="with --to: explicit decision for an edge that crosses a ★ gate")
-    parser.add_argument("--orchestrator", help="with --to: committing orchestrator (owner check: vmo->epic, rte->feature, sm->story)")
+    parser.add_argument("--gate", choices=["accept", "reject"], help="with --to: explicit decision for an edge that crosses a gate")
+    parser.add_argument("--orchestrator", help="with --to: committing orchestrator (owner check is policy-driven)")
 
 
 def _configure_check_step(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--orchestration", required=True, help="workflow id (root or sub-workflow id) — the workflow.yaml is resolved from it")
+    parser.add_argument("--orchestration", required=True, help="workflow id (root or sub-workflow id) — the workflow config is resolved from it")
     parser.add_argument("--step", required=True, help="structurant step id within that workflow")
-    parser.add_argument("--unit-id", required=True, help="Epic / Feature / Story id the step acts on (product is derived from it)")
+    parser.add_argument("--unit-id", required=True, help="artifact id the step acts on (scope is derived from its workspace path)")
     parser.add_argument("--session", help="host session id selecting the per-session run ledger (logs/hooks/<session>.jsonl) — read for predecessor checks and always appended to; omit to use the shared 'session' ledger")
 
 
@@ -61,28 +60,28 @@ def _configure_hook(parser: argparse.ArgumentParser) -> None:
 
 def _configure_orchestrate(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workflow", required=True, help="workflow id (root or sub-workflow id) to drive")
-    parser.add_argument("--unit", help="Epic / Feature / Story id the workflow acts on (its artifacts drive the step cursor)")
-    parser.add_argument("--run", help="run id selecting the per-run journal (portfolio/logs/<run>.jsonl); the resolved action is appended there as one enveloped entry")
+    parser.add_argument("--unit", help="artifact id the workflow acts on (its artifacts drive the step cursor)")
+    parser.add_argument("--run", help="run id selecting the per-run journal (workspace/logs/<run>.jsonl); the resolved action is appended there as one enveloped entry")
 
 
 # --- the registry (metadata; runners are bound in Application) ---------------
 COMMANDS: list[Command] = [
-    Command("check-artifact", "validate Epic/Feature/Story state (FSM, linkage, schema, gates, derived fields)",
-            "The STATE plane. With no args: sweep every Epic/Feature/Story — status FSM, product/path coherence, parent linkage, blocking open_items across gates, JSON Schema conformance, staged gate-packet evidence, and wsjf/cost drift.\n  --unit-id <id>   scope every check to one unit (ids are globally unique across the portfolio).\n  --path <file>    validate one native JSON artifact (*.artifact.json) directly against its schema.\n  --to <status>    with --unit-id: evaluate that status edge against the transition guard (legal edge, structurant precondition, no blocking open_items, ★-gate accept/reject) and report OK-to-commit or blocked.\nThe harness never writes — it reports the value/edge; the orchestrator commits.\nExample: harness.py --portfolio-root portfolio check-artifact --unit-id sie-observability-foundation",
+    Command("check-artifact", "validate artifact state (FSM, linkage, schema, gates)",
+            "The STATE plane. With no args: sweep every artifact — status FSM, scope/frontmatter coherence, parent linkage, blocking open_items across gates, and JSON Schema conformance.\n  --unit-id <id>   scope every check to one unit (ids are globally unique across the workspace).\n  --path <file>    validate one native JSON artifact (*.artifact.json) directly against its schema.\n  --to <status>    with --unit-id: evaluate that status edge against the transition guard (legal edge, no blocking open_items, gate accept/reject) and report OK-to-commit or blocked.\nThe harness never writes — it reports the edge; the orchestrator commits.\nExample: harness.py --workspace-root workspace check-artifact --unit-id my-unit",
             _configure_check_artifact),
     Command("check-step", "evaluate one step's preconditions and postconditions and append the step line to the session ledger",
-            "The CONDITIONS plane. Evaluate a step's `conditions` (each is `kind: precondition|postcondition`, `type: after|state`, `id`): `type: after` checks a predecessor step (resolved from the run ledger), `type: state` asserts on the persisted portfolio via CEL (artifact selection + predicate). Authorization is also checked at precondition. The workflow.yaml is resolved from --orchestration; product is derived from the resolved unit. The step's canonical, schema-valid line is ALWAYS appended to the per-session run ledger (logs/hooks/<session>.jsonl, selected by --session) — that same ledger feeds predecessor `after` checks and the session-close review.\nExample: harness.py check-step --orchestration value-management-officier --step capture-epic --unit-id sie-observability-foundation --session abc123",
+            "The CONDITIONS plane. Evaluate a step's `conditions` (each is `kind: precondition|postcondition`, `type: after|state`, `id`): `type: after` checks a predecessor step (resolved from the run ledger), `type: state` asserts on the persisted workspace via CEL (artifact selection + predicate). Authorization is also checked at precondition. The workflow config is resolved from --orchestration; scope is derived from the resolved unit's workspace path. The step's canonical, schema-valid line is ALWAYS appended to the per-session run ledger (logs/hooks/<session>.jsonl, selected by --session) — that same ledger feeds predecessor `after` checks and the session-close review.\nExample: harness.py check-step --orchestration my-workflow --step my-step --unit-id my-unit --session abc123",
             _configure_check_step),
     Command("hook", "environment-hook adapter: funnel a lifecycle event through the harness",
             "Read a host lifecycle event (JSON on stdin) and route it to the deterministic checks: preToolUse authorizes the write (deny ungranted), postToolUse validates the written native-JSON artifact, session-close reviews the recorded steps' postconditions, sessionStart injects deterministic context. Emits the host's decision JSON on stdout; exit 2 = deny/fail. The shared host adapter (adapters/dispatch.sh <event> <env>) calls this; the CLI stays the single source of truth.\nExample: cat event.json | harness.py hook --event preToolUse",
             _configure_hook),
     Command("orchestrate", "resolve the next orchestration action (dispatch | halt | done) for a workflow + unit",
-            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts}), `halt` (a ★ gate is next, or no step is eligible while work remains), or `done` (every step's output artifact exists). The model resolves deterministically from the actor's role via config/llm.yaml. The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow value-management-officier --unit sie-observability-foundation",
+            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts}), `halt` (a gate is next, or no step is eligible while work remains), or `done` (every step's output artifact exists). The model resolves deterministically from the actor's role via config/llm.yaml. The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow my-workflow --unit my-unit",
             _configure_orchestrate),
 ]
 
-CLI_DESCRIPTION = "Deterministic check-only harness for Poesis SAFe orchestration: validate artifacts (state + derived fields) and step conditions, and adapt host lifecycle hooks. The framework constitution (workflow contracts + artifact catalog) is verified separately by the pytest suite (make verify)."
-CLI_EPILOG = "Run '<command> --help' for command-specific arguments. Global options (--portfolio-root, --strict, --json) come before the command."
+CLI_DESCRIPTION = "Deterministic check-only orchestration harness: validate artifacts (state + derived fields) and step conditions, and adapt host lifecycle hooks. The framework constitution (workflow contracts + artifact catalog) is verified separately by the pytest suite (make verify)."
+CLI_EPILOG = "Run '<command> --help' for command-specific arguments. Global options (--workspace-root, --strict, --json) come before the command."
 
 
 class Application:
@@ -104,7 +103,6 @@ class Application:
         # services (in dependency order — no cycles)
         policy = TransitionPolicy()
         self.schema_checker = SchemaChecker(workspace, schemas, self.validator)
-        self.calculation = CalculationService(workspace, artifacts, policy)
         self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker, policy)
         cel = CelEvaluator(workspace, artifacts, schemas)
         self.step_checker = StepChecker(workspace, workflows, artifacts, logs, cel, self.schema_checker)
@@ -128,20 +126,16 @@ class Application:
             if not args.unit_id:
                 report.error("check-artifact", "--to requires --unit-id (the unit whose status edge to check)")
                 return report
-            return self.calculation.transition(args.unit_id, args.to, args.gate, args.orchestrator)
+            return self.artifact_checker.check_transition(args.unit_id, args.to, args.gate, args.orchestrator)
         if args.unit_id is not None:
             sub, targets = self.artifact_checker.check_target(args.unit_id, None)
             report.extend(sub)
             if len(targets) != 1:
                 return report
             report.extend(self.artifact_checker.check_gate_packet(args.unit_id))
-            report.extend(self.calculation.wsjf(args.unit_id))
-            report.extend(self.calculation.roll_cost(args.unit_id))
             return report
         report.extend(self.artifact_checker.check_all())
         report.extend(self.artifact_checker.check_gate_packet(None))
-        report.extend(self.calculation.wsjf(None))
-        report.extend(self.calculation.roll_cost(None))
         return report
 
     def _run_check_step(self, args: argparse.Namespace) -> Report:
@@ -167,7 +161,7 @@ class Application:
             if command == "check-artifact":
                 for ref in decision.outputs:
                     if ref.endswith(".json"):
-                        report.extend(self.schema_checker.check_json((self.workspace.portfolio_base / ref).resolve()))
+                        report.extend(self.schema_checker.check_json((self.workspace.workspace_base / ref).resolve()))
         if decision.phase == "session-close":
             report.extend(self.step_checker.review_session(hooks.ledger_path(payload)))
         hooks.record(args.event, payload, decision)
@@ -217,7 +211,8 @@ class Application:
             epilog=CLI_EPILOG,
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
-        parser.add_argument("--portfolio-root", type=Path, help="portfolio root (default: <framework-root>/portfolio)")
+        parser.add_argument("--workspace-root", type=Path, help="workspace root (default: <framework-root>/workspace)")
+        parser.add_argument("--portfolio-root", type=Path, help=argparse.SUPPRESS)
         parser.add_argument("--strict", action="store_true", help="treat warnings as failures")
         parser.add_argument("--json", action="store_true", help="emit findings as structured JSON (machine-actionable)")
         subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
@@ -235,7 +230,8 @@ class Application:
 def main(argv: list[str] | None = None) -> int:
     parser = Application.build_parser()
     args = parser.parse_args(argv)
-    workspace = Workspace.detect(None, args.portfolio_root)
+    workspace_root = args.workspace_root or args.portfolio_root
+    workspace = Workspace.detect(None, workspace_root)
     report = Application(workspace).dispatch(args)
     if args.command in ("hook", "orchestrate"):
         # the action/decision JSON is already on stdout; exit non-zero = deny/error.

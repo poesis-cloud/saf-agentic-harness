@@ -1,8 +1,17 @@
-"""ArtifactMapper — discovers portfolio artifacts and resolves their relations."""
+"""ArtifactMapper — discovers workspace artifacts and resolves their relations.
+
+The mapper is framework-agnostic: it does not embed methodology semantics. It learns the
+recognized artifact kinds and their workspace paths from the framework schema catalog
+(`schemas/*.artifact.schema.json`). Every artifact kind declares one or more
+workspace-root-relative `pathPatterns`; the mapper matches on-disk files against those patterns
+to infer kind and build the artifact universe.
+"""
 
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
+from typing import Any
 
 from models import Artifact, Report
 from text import frontmatter, parse_frontmatter, parse_sections, markdown_body, extract_file_heading
@@ -12,7 +21,7 @@ from .workspace import Workspace
 
 class InvalidArtifactError(Exception):
     """Raised by `discover()` when a persisted artifact violates its schema — a breach of the
-    Portfolio Validity Invariant (the portfolio must contain exclusively schema-valid artifacts).
+    Workspace Validity Invariant (the workspace must contain exclusively schema-valid artifacts).
     Carries the offending path + the schema-violation `Report`."""
 
     def __init__(self, path: Path, report: Report) -> None:
@@ -23,33 +32,117 @@ class InvalidArtifactError(Exception):
 
 
 class ArtifactMapper:
-    """The data-mapper for the portfolio (Epic/Feature/Story).
+    """The data-mapper for the workspace artifacts.
 
     Two universe doors: `scan_raw()` returns every parsed artifact WITHOUT validation (for the
     validators — check-artifact + the postcondition hook — which must tolerate invalids to report
     them); `discover()` returns the VALID-BY-CONSTRUCTION domain universe and **raises
-    `InvalidArtifactError`** on any schema-invalid artifact (Portfolio Validity Invariant). Domain
+    `InvalidArtifactError`** on any schema-invalid artifact (Workspace Validity Invariant). Domain
     entry points (`resolve_unit`, `collect_by_schema_id`) go through `discover()`; navigation
     helpers read the raw universe (valid under the invariant, tolerant when it is being reconciled).
     """
 
-    def __init__(self, workspace: Workspace, validator: ArtifactValidator | None = None) -> None:
+    def __init__(
+        self,
+        workspace: Workspace,
+        validator: ArtifactValidator | None = None,
+        schemas: Any | None = None,
+    ) -> None:
         self.workspace = workspace
         self.validator = validator
+        self._schemas = schemas
         self._raw: list[Artifact] | None = None
         self._universe: list[Artifact] | None = None
 
-    # --- discovery ----------------------------------------------------------
+    # --- schema-driven kind resolution --------------------------------------
+    def _schema_mapper(self) -> Any:
+        if self._schemas is None:
+            # Lazy import avoids a hard dependency at construction time.
+            from .schema_mapper import SchemaMapper
+
+            self._schemas = SchemaMapper(self.workspace)
+        return self._schemas
+
+    def _schema_catalog(self) -> dict[str, dict[str, Any]]:
+        return self._schema_mapper().load_raw(Report())
+
     @staticmethod
-    def _parse_file(kind: str, path: Path, text: str, product_slug: str | None = None) -> Artifact:
+    def _pattern_matches(relative: str, pattern: str) -> bool:
+        """Match a workspace-root-relative path against a schema pathPattern.
+
+        Patterns use shell-style wildcards (`*`, `**` is treated as `*` for simplicity).
+        A leading or embedded `**` is normalized to a single `*` because the framework
+        catalog currently uses single-segment wildcards.
+        """
+        normalized = pattern.replace("**", "*")
+        return fnmatch.fnmatch(relative, normalized) or fnmatch.fnmatch(relative, f"*/{normalized}")
+
+    def _kinds_for_path(self, relative: str, text: str | None = None) -> list[tuple[str, dict[str, Any]]]:
+        """Return all (schema_id, schema_dict) pairs whose pathPatterns match `relative`.
+
+        When multiple schemas match (e.g. business vs enabler variants share a directory
+        convention), disambiguate by the artifact's `type` frontmatter if available. The caller
+        decides whether to accept ambiguity.
+        """
+        matches: list[tuple[str, dict[str, Any]]] = []
+        for schema_id, schema_dict in self._schema_catalog().items():
+            metadata = schema_dict.get("x-artifact", {})
+            patterns = metadata.get("pathPatterns") or []
+            if not isinstance(patterns, list):
+                patterns = [patterns]
+            for pattern in patterns:
+                if self._pattern_matches(relative, pattern):
+                    matches.append((schema_id, schema_dict))
+                    break
+        if len(matches) <= 1 or text is None:
+            return matches
+        wanted = str(parse_frontmatter(frontmatter(text)).get("type") or "").strip()
+        if wanted:
+            typed = [(sid, sd) for sid, sd in matches if sd.get("x-artifact", {}).get("type") == wanted]
+            if typed:
+                return typed
+        # Default to the business variant when type is silent.
+        business = [(sid, sd) for sid, sd in matches if sd.get("x-artifact", {}).get("type") == "business"]
+        if business:
+            return business
+        return matches
+
+    def _kind_for_path(self, path: Path, text: str | None = None) -> str | None:
+        """Infer the artifact kind for a single path, or None if no schema pattern matches."""
+        workspace_root = self.workspace.workspace_root
+        try:
+            relative = path.resolve().relative_to(workspace_root.resolve()).as_posix()
+        except (ValueError, OSError):
+            return None
+        matches = self._kinds_for_path(relative, text)
+        return matches[0][0] if matches else None
+
+    def _scope_slug_for_path(self, path: Path, kind: str) -> str | None:
+        """Extract the scope slug for scoped artifacts from the path.
+
+        The harness is agnostic to methodology scope names; it only preserves a scope slug
+        when the matched schema pattern places the artifact under a recognized scope folder
+        (currently `products/<slug>/`).
+        """
+        workspace_root = self.workspace.workspace_root
+        try:
+            parts = path.resolve().relative_to(workspace_root.resolve()).parts
+        except (ValueError, OSError):
+            return None
+        if len(parts) >= 2 and parts[0] == "products":
+            return parts[1]
+        return None
+
+    @staticmethod
+    def _parse_file(kind: str, path: Path, text: str, scope_slug: str | None = None) -> Artifact:
         front = frontmatter(text)
         body = markdown_body(text)
         sections = parse_sections(body)
         heading = extract_file_heading(body)
-        return Artifact(kind, path, parse_frontmatter(front), front, sections, product_slug, heading)
+        return Artifact(kind, path, parse_frontmatter(front), front, sections, scope_slug, heading)
 
     def scan_raw(self) -> list[Artifact]:
-        """Every parsed portfolio artifact, WITHOUT schema validation (cached). Used by the
+        """Every parsed workspace artifact, WITHOUT schema validation (cached). Used by the
         validators that must tolerate invalids to report them; also the base of `discover()`."""
         if self._raw is None:
             self._raw = self._scan()
@@ -57,7 +150,7 @@ class ArtifactMapper:
 
     def discover(self) -> list[Artifact]:
         """The valid-by-construction domain universe (cached). Raises `InvalidArtifactError` on the
-        first schema-invalid artifact — under the Portfolio Validity Invariant this never happens in
+        first schema-invalid artifact — under the Workspace Validity Invariant this never happens in
         normal operation; if it does, it is a breach and must fail fast."""
         if self._universe is None:
             raw = self.scan_raw()
@@ -70,42 +163,53 @@ class ArtifactMapper:
         return self._universe
 
     def load_one(self, path: Path) -> Artifact | None:
-        """Parse a single portfolio file into an (unvalidated) `Artifact`, inferring its kind from
-        the path, or None if the path is not a portfolio artifact location. Used by the postcondition
-        hook to validate exactly the just-written file."""
-        portfolio_root = self.workspace.portfolio_root
+        """Parse a single workspace file into an (unvalidated) `Artifact`, inferring its kind from
+        the path against the schema catalog, or None if the path is not a workspace artifact
+        location. Used by the postcondition hook to validate exactly the just-written file."""
+        if not path.is_file():
+            return None
+        workspace_root = self.workspace.workspace_root
         try:
-            parts = path.resolve().relative_to(portfolio_root.resolve()).parts
+            path.relative_to(workspace_root.resolve())
         except (ValueError, OSError):
             return None
-        if not path.is_file() or path.suffix != ".md":
-            return None
         text = self.workspace.read_text(path)
-        if len(parts) == 2 and parts[0] == "epics":
-            return self._parse_file("epic", path, text)
-        if len(parts) == 3 and parts[1] == "features":
-            return self._parse_file("feature", path, text, parts[0])
-        if len(parts) >= 4 and parts[1].startswith("sprint-") and parts[2] == "stories":
-            return self._parse_file("story", path, text, parts[0])
-        return None
+        kind = self._kind_for_path(path, text)
+        if kind is None:
+            return None
+        scope_slug = self._scope_slug_for_path(path, kind)
+        return self._parse_file(kind, path, text, scope_slug)
 
     def _scan(self) -> list[Artifact]:
-        portfolio_root = self.workspace.portfolio_root
+        workspace_root = self.workspace.workspace_root
         artifacts: list[Artifact] = []
-        for path in sorted(portfolio_root.glob("epics/*.md")):
+        if not workspace_root.is_dir():
+            return artifacts
+
+        # Collect every file that any schema pattern could match. We scan markdown and JSON
+        # artifact files; other extensions are ignored.
+        for path in sorted(workspace_root.rglob("*")):
+            if not path.is_file():
+                continue
             if path.name.startswith("."):
                 continue
-            artifacts.append(self._parse_file("epic", path, self.workspace.read_text(path)))
-        for path in sorted(portfolio_root.glob("*/features/*.md")):
-            if path.name.startswith("."):
+            if path.suffix not in (".md", ".json"):
                 continue
-            product_slug = path.relative_to(portfolio_root).parts[0]
-            artifacts.append(self._parse_file("feature", path, self.workspace.read_text(path), product_slug))
-        for path in sorted(portfolio_root.glob("*/sprint-*/stories/*.md")):
-            if path.name.startswith("."):
+            # Skip logs and hidden directories.
+            try:
+                relative = path.resolve().relative_to(workspace_root.resolve()).as_posix()
+            except (ValueError, OSError):
                 continue
-            product_slug = path.relative_to(portfolio_root).parts[0]
-            artifacts.append(self._parse_file("story", path, self.workspace.read_text(path), product_slug))
+            if relative.startswith("logs/"):
+                continue
+
+            text = self.workspace.read_text(path)
+            kind = self._kind_for_path(path, text)
+            if kind is None:
+                continue
+            scope_slug = self._scope_slug_for_path(path, kind)
+            artifacts.append(self._parse_file(kind, path, text, scope_slug))
+
         return artifacts
 
     # --- selection ----------------------------------------------------------
@@ -123,74 +227,66 @@ class ArtifactMapper:
 
     def collect_by_schema_id(self, schema_id: str) -> list[Artifact]:
         """Collect all artifacts matching a schema_id (maps to artifact.kind).
-        Used by CEL set-selector to enumerate artifacts for state conditions.
-        Returns empty list if schema_id doesn't match any known kind (epic, feature, story)."""
+        Used by CEL set-selector to enumerate artifacts for state conditions."""
         return [artifact for artifact in self.discover() if artifact.kind == schema_id]
 
     def ambiguity_error(self, report: Report, targets: list[Artifact], unit_id: str | None) -> bool:
         if unit_id and len(targets) > 1:
-            locations = sorted(str(target.product_slug or "portfolio") for target in targets)
-            report.error(self.workspace.portfolio_root, f"unit id {unit_id!r} is not globally unique (found in {locations}); ids must be unique across the portfolio — rename to a unique slug")
+            locations = sorted(self.workspace.label(target.path, self.workspace.workspace_root) for target in targets)
+            report.error(self.workspace.workspace_root, f"unit id {unit_id!r} is not globally unique (found in {locations}); ids must be unique across the workspace — rename to a unique slug")
             return False
         return True
 
     # --- relations ----------------------------------------------------------
-    def child_stories(self, feature: Artifact) -> list[Artifact]:
+    def children_of(self, artifact: Artifact, child_kind: str, parent_field: str) -> list[Artifact]:
+        """Generic parent→children traversal using the `parent_<kind>` convention.
+
+        Relations are resolved globally by artifact id; the harness does not enforce a scope
+        boundary because parent/child links may cross framework scopes.
+        """
         return [
             candidate
             for candidate in self.scan_raw()
-            if candidate.kind == "story"
-            and candidate.product_slug == feature.product_slug
-            and str(candidate.fields.get("parent_feature")) == feature.artifact_id
+            if candidate.kind == child_kind
+            and str(candidate.fields.get(parent_field)) == artifact.artifact_id
         ]
 
-    def child_features(self, epic: Artifact) -> list[Artifact]:
-        return [
-            candidate
-            for candidate in self.scan_raw()
-            if candidate.kind == "feature" and str(candidate.fields.get("parent_epic")) == epic.artifact_id
-        ]
-
-    def parent_feature_of(self, story: Artifact) -> Artifact | None:
-        parent_id = str(story.fields.get("parent_feature"))
+    def parent_of(self, artifact: Artifact, parent_kind: str, parent_field: str) -> Artifact | None:
+        """Generic child→parent traversal using the `parent_<kind>` convention."""
+        parent_id = str(artifact.fields.get(parent_field))
         return next(
-            (a for a in self.scan_raw() if a.kind == "feature" and a.product_slug == story.product_slug and a.artifact_id == parent_id),
+            (a for a in self.scan_raw() if a.kind == parent_kind and a.artifact_id == parent_id),
             None,
         )
-
-    def parent_epic_of(self, feature: Artifact) -> Artifact | None:
-        parent_id = str(feature.fields.get("parent_epic"))
-        return next((a for a in self.scan_raw() if a.kind == "epic" and a.artifact_id == parent_id), None)
-
-    def priced_children(self, artifact: Artifact) -> list[Artifact]:
-        if artifact.kind == "feature":
-            return self.child_stories(artifact)
-        if artifact.kind == "epic":
-            return self.child_features(artifact)
-        return []
 
     def resolve_dependency(self, dependency_id: str) -> list[Artifact]:
         return [artifact for artifact in self.scan_raw() if artifact.artifact_id == dependency_id]
 
     # --- locators -----------------------------------------------------------
-    def product_root(self, artifact: Artifact) -> Path:
-        if artifact.product_slug is None:
-            return self.workspace.portfolio_root
-        return self.workspace.portfolio_root / artifact.product_slug
+    def scope_root(self, artifact: Artifact) -> Path:
+        """Return the workspace root for unscoped artifacts, or the scope folder for scoped
+        artifacts. The harness does not know methodology scope names; it only preserves the
+        scope slug when one is encoded in the artifact path."""
+        if artifact.scope_slug is None:
+            return self.workspace.workspace_root
+        return self.workspace.workspace_root / "products" / artifact.scope_slug
 
-    def find_adr(self, product_dir: Path, adr_id: str) -> Path | None:
-        normalized = adr_id.lower()
-        architecture_dir = product_dir / "architecture"
-        if not architecture_dir.is_dir():
+    def find_artifact(self, scope_dir: Path, subdir: str, artifact_id: str, suffix: str = "*.md") -> Path | None:
+        """Generic artifact locator: find a file under <scope_dir>/<subdir>/ whose stem contains
+        the given artifact id. Framework-specific locators (ADR, QA signoff) are thin wrappers."""
+        normalized = artifact_id.lower()
+        target_dir = scope_dir / subdir
+        if not target_dir.is_dir():
             return None
-        for path in architecture_dir.glob("*.md"):
+        for path in target_dir.glob(suffix):
             if normalized in path.stem.lower():
                 return path
         return None
 
-    def find_qa_signoff(self, story: Artifact) -> list[Path]:
-        sprint_dir = story.path.parent.parent
-        qa_dir = sprint_dir / "qa"
-        if not qa_dir.is_dir():
+    def find_qa_signoff(self, artifact: Artifact) -> list[Path]:
+        """Locate QA signoff files adjacent to the artifact. The exact folder naming is a framework
+        convention; the harness only provides this helper for backward compatibility."""
+        parent_dir = artifact.path.parent
+        if not parent_dir.is_dir():
             return []
-        return sorted(qa_dir.glob(f"{story.artifact_id}*signoff*.md"))
+        return sorted(parent_dir.glob(f"{artifact.artifact_id}*signoff*.md"))

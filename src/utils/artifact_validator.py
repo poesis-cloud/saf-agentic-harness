@@ -55,9 +55,9 @@ class ArtifactValidator:
 
     def _matches_path(self, artifact: Artifact, schema: dict[str, Any]) -> bool:
         """Check if artifact path matches this schema's path patterns."""
-        portfolio_root = self.workspace.portfolio_root
+        workspace_root = self.workspace.workspace_root
         try:
-            relative = artifact.path.relative_to(portfolio_root).as_posix()
+            relative = artifact.path.relative_to(workspace_root).as_posix()
         except ValueError:
             relative = artifact.path.as_posix()
         
@@ -76,14 +76,14 @@ class ArtifactValidator:
     def _schema_data(self, artifact: Artifact) -> dict:
         text = self.workspace.read_text(artifact.path)
         data = dict(artifact.fields)
-        data["__path"] = self.workspace.label(artifact.path, self.workspace.portfolio_root)
+        data["__path"] = self.workspace.label(artifact.path, self.workspace.workspace_root)
         data["__kind"] = artifact.kind
         data["__artifact_id"] = artifact.artifact_id
         data["__frontmatter_present"] = bool(artifact.frontmatter)
         data["__sections"] = section_map(text)
         data["__section_tree"] = section_tree(text)
         data["__body"] = markdown_body(text)
-        data["__product"] = artifact.product_slug
+        data["__scope"] = artifact.scope_slug
         return data
 
     def match(self, artifact: Artifact) -> tuple[dict[str, Any] | None, str | None, str | None]:
@@ -124,7 +124,7 @@ class ArtifactValidator:
     def validate(self, artifact: Artifact) -> Report:
         """Return a Report of schema violations for one artifact (empty Report ⇒ valid)."""
         report = Report()
-        label = self.workspace.label(artifact.path, self.workspace.portfolio_root)
+        label = self.workspace.label(artifact.path, self.workspace.workspace_root)
         if jsonschema is None:
             report.error(label, "jsonschema is required to validate artifacts")
             return report
@@ -134,7 +134,29 @@ class ArtifactValidator:
             report.error(label, reason or "no artifact schema matches this artifact")
             return report
         
-        validator = jsonschema.Draft7Validator(schema)
+        base_schema = self.schemas.base_artifact_schema()
+        if base_schema is None:
+            report.error(label, "generic artifact base schema not found at harness/contracts/artifact.schema.json")
+            return report
+        
+        base_id = base_schema.get("$id")
+        if not base_id:
+            report.error(label, "generic artifact base schema is missing $id")
+            return report
+        
+        store: dict[str, Any] = {str(base_id): base_schema}
+        framework_defs = self.schemas.framework_definitions_schema()
+        if framework_defs is not None:
+            defs_id = framework_defs.get("$id")
+            if defs_id:
+                store[str(defs_id)] = framework_defs
+        
+        resolver = jsonschema.RefResolver(
+            base_uri=str(schema.get("$id", "")),
+            referrer=schema,
+            store=store,
+        )
+        validator = jsonschema.Draft7Validator(schema, resolver=resolver)
         for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(error)}")
         
@@ -150,7 +172,7 @@ class ArtifactValidator:
     def _validate_sections(self, artifact: Artifact, sections_spec_data: dict[str, Any]) -> Report:
         """Validate body section structure against sections spec metadata."""
         report = Report()
-        label = self.workspace.label(artifact.path, self.workspace.portfolio_root)
+        label = self.workspace.label(artifact.path, self.workspace.workspace_root)
         
         required = sections_spec_data.get("required", [])
         optional = sections_spec_data.get("optional", [])

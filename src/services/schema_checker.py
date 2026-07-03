@@ -40,8 +40,8 @@ class SchemaChecker:
         schema_suffix = self.schemas.ARTIFACT_SCHEMA_SUFFIX
         # Every artifact template colocated with a role/orchestration (`**/artifacts/`) must be
         # claimed by exactly one registry schema whose x-artifact.template points at it. The
-        # registry (harness/contracts/artifact) is the single home for schemas; templates stay next
-        # to the workflow that renders them.
+        # registry (schemas/ at the framework root) is the single home for methodology-specific
+        # artifact schemas; templates stay next to the workflow that renders them.
         claimed = set()
         for schema_id, schema_dict in schemas.items():
             metadata = schema_dict.get("x-artifact", {})
@@ -53,10 +53,10 @@ class SchemaChecker:
             if template_path.resolve() not in claimed:
                 report.error(self.workspace.label(template_path, root.parent), "no registry artifact schema declares this template via x-artifact.template")
 
-        # A schema must live in the harness/contracts/artifact registry, never colocated under a
+        # A schema must live in the framework root schemas/ registry, never colocated under a
         # role/orchestration `artifacts/` dir.
         for stray_schema in sorted(root.glob(f"**/artifacts/*{schema_suffix}")):
-            report.error(self.workspace.label(stray_schema, root.parent), "artifact schema must live in the harness/contracts/artifact registry, not colocated under an artifacts/ dir")
+            report.error(self.workspace.label(stray_schema, root.parent), "artifact schema must live in the schemas/ registry, not colocated under an artifacts/ dir")
 
         legacy_templates = sorted(
             path for path in root.glob("**/artifacts/*-template.md") if not path.name.endswith(template_suffix)
@@ -105,7 +105,26 @@ class SchemaChecker:
             report.error(label, f"multiple artifact schemas declare kind {kind!r}: {schema_ids}")
             return report
         schema_id, schema_dict = matches[0]
-        validator = jsonschema.Draft7Validator(schema_dict)
+        base_schema = self.schemas.base_artifact_schema()
+        if base_schema is None:
+            report.error(label, "generic artifact base schema not found at harness/contracts/artifact.schema.json")
+            return report
+        base_id = base_schema.get("$id")
+        if not base_id:
+            report.error(label, "generic artifact base schema is missing $id")
+            return report
+        store: dict[str, Any] = {str(base_id): base_schema}
+        framework_defs = self.schemas.framework_definitions_schema()
+        if framework_defs is not None:
+            defs_id = framework_defs.get("$id")
+            if defs_id:
+                store[str(defs_id)] = framework_defs
+        resolver = jsonschema.RefResolver(
+            base_uri=str(schema_dict.get("$id", "")),
+            referrer=schema_dict,
+            store=store,
+        )
+        validator = jsonschema.Draft7Validator(schema_dict, resolver=resolver)
         for err in sorted(validator.iter_errors(data), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(err)}")
         return report

@@ -1,4 +1,4 @@
-"""An Epic / Feature / Story artifact — the abstraction of one portfolio markdown file."""
+"""Artifact — the abstraction of one workspace markdown file."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from .section import Section
 
 @dataclass
 class Artifact:
-    """One portfolio unit on disk (Epic/Feature/Story).
+    """One workspace unit on disk.
 
     Holds the parsed frontmatter `fields` plus the raw `frontmatter` text, and exposes the
     accessors over both. Structured frontmatter blocks the flat `fields` dict cannot express
-    (open_items, wsjf, cost, depends_on) are read from the raw text by the `*_block` / `*field`
+    (e.g. open_items, cost, depends_on) are read from the raw text by the `*_block` / `*field`
     helpers, so behaviour matches the on-disk shape exactly.
     
     Body sections are parsed into `sections` (list of top-level Section objects) to enable
@@ -30,7 +30,7 @@ class Artifact:
     fields: dict[str, Any]
     frontmatter: str
     sections: list[Section] = field(default_factory=list)
-    product_slug: str | None = None
+    scope_slug: str | None = None
     heading: str | None = None  # File-level heading (# Title) for complete round-trip
 
     @property
@@ -41,6 +41,11 @@ class Artifact:
     @property
     def status(self) -> str | None:
         value = self.fields.get("status")
+        return str(value) if value not in (None, "") else None
+
+    @property
+    def slug(self) -> str | None:
+        value = self.fields.get("slug")
         return str(value) if value not in (None, "") else None
 
     # --- accessors over the parsed `fields` dict --------------------------------

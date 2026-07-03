@@ -250,8 +250,8 @@ class HookService:
         return HookDecision(phase="precondition", outputs=outputs)
 
     def _postcondition(self, payload: dict[str, Any]) -> HookDecision:
-        """postToolUse → enforce the Portfolio Validity Invariant on the just-written artifact:
-        validate it against its schema; if invalid, REVERT the write from the portfolio (restore the
+        """postToolUse → enforce the Workspace Validity Invariant on the just-written artifact:
+        validate it against its schema; if invalid, REVERT the write from the workspace (restore the
         last-good version if tracked, else delete the new file) and DENY with the schema findings so
         the host relays them to the agent, which retries. A valid write is recorded and allowed. This
         revert is the harness's single deliberate write — everything else stays check-only."""
@@ -261,7 +261,7 @@ class HookService:
                 abs_path = self._resolve_write_path(ref)
                 artifact = self.artifacts.load_one(abs_path) if abs_path is not None else None
                 if artifact is None:
-                    continue  # not a portfolio artifact — nothing to enforce
+                    continue  # not a workspace artifact — nothing to enforce
                 report = self.artifacts.validator.validate(artifact) if self.artifacts.validator else Report()
                 if report.has_errors():
                     how = self._revert(abs_path)
@@ -270,11 +270,11 @@ class HookService:
         return HookDecision(phase="postcondition", outputs=outputs)
 
     def _resolve_write_path(self, ref: str) -> Path | None:
-        """Resolve a write ref (host-absolute or framework/portfolio-relative) to a concrete path."""
+        """Resolve a write ref (host-absolute or framework/workspace-relative) to a concrete path."""
         candidate = Path(ref)
         if candidate.is_absolute():
             return candidate
-        for base in (self.workspace.framework_root, getattr(self.workspace, "portfolio_base", self.workspace.framework_root)):
+        for base in (self.workspace.framework_root, getattr(self.workspace, "workspace_base", self.workspace.framework_root)):
             resolved = base / ref
             if resolved.exists():
                 return resolved.resolve()

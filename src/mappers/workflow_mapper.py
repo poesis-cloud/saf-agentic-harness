@@ -21,7 +21,7 @@ class WorkflowMapper:
         self.workspace = workspace
 
     def paths(self) -> list[Path]:
-        return sorted(self.workspace.skills_root.glob("**/workflow.yaml"))
+        return sorted((self.workspace.framework_root / "config" / "workflows").glob("*.yaml"))
 
     def load(self, path: Path) -> Workflow:
         return Workflow(parse_contract(self.workspace.read_text(path)), path)

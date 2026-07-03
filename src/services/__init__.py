@@ -2,8 +2,8 @@
 
 Each service operates on the model entities via the repositories: `WorkflowChecker`
 (workflow constitution, pytest), `SchemaChecker`, `ArtifactChecker` (state plane),
-`StepChecker` (check-step), `CalculationService` (wsjf/cost/transition),
-`CelEvaluator` (the only check language), `TransitionPolicy` (the kanban policy). Services
+`StepChecker` (check-step), `CelEvaluator` (the only check language),
+`TransitionPolicy` (the status-transition policy loaded from framework config). Services
 depend on models + mappers — never on the CLI; the CLI wires them together.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 from .artifact_checker import ArtifactChecker
 from .authorization_checker import AuthorizationChecker
 from .authorization_policy import AuthorizationPolicy
-from .calculation_service import CalculationService
 from .cel_evaluator import CelEvaluator
 from .hook_service import HookDecision, HookService
 from .model_router import ModelRouter
@@ -26,7 +25,6 @@ __all__ = [
     "ArtifactChecker",
     "AuthorizationChecker",
     "AuthorizationPolicy",
-    "CalculationService",
     "CelEvaluator",
     "HookDecision",
     "HookService",

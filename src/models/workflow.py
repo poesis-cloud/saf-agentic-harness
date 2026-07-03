@@ -8,12 +8,6 @@ from typing import Any
 from .step import Step
 
 
-# The three root orchestrations, identified by id (portfolio / program / team). Root-ness is
-# intrinsic to the id — a workflow is a root iff its id is one of these; every other workflow.yaml
-# is a suborchestration (and carries `parent`).
-ROOT_IDS = frozenset({"lpm", "art", "scrum"})
-
-
 class Workflow:
     """The single `workflow` root node of a workflow.yaml: header fields + a steps model.
 
@@ -45,7 +39,7 @@ class Workflow:
 
     @property
     def is_root(self) -> bool:
-        return self.block.get("id") in ROOT_IDS
+        return self.parent is None
 
     @property
     def steps(self) -> list[Step]:

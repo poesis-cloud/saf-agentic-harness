@@ -1,0 +1,42 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://poesis.cloud/safe-agentic-framework/artifact.schema.json",
+    "title": "Generic artifact schema",
+    "description": "Base schema for all artifacts validated by the deterministic orchestration harness. Methodology-specific artifact schemas in schemas/ extend this base. The harness is agnostic to the methodology that owns the artifact; this base only supplies the generic object shape and a minimal set of helper definitions that are truly universal across artifact schemas.",
+    "type": "object",
+    "additionalProperties": true,
+    "required": [
+        "slug"
+    ],
+    "properties": {
+        "id": {
+            "description": "Stable artifact identifier. The exact format is owned by the methodology-specific schema; the base only requires it to be a non-empty string when present.",
+            "$ref": "#/definitions/nonEmptyString"
+        },
+        "slug": {
+            "description": "URL-safe artifact slug. Methodology-specific schemas may impose additional constraints (length, format); the base only requires it to be a non-empty string.",
+            "$ref": "#/definitions/nonEmptyString"
+        }
+    },
+    "definitions": {
+        "nonEmptyString": {
+            "description": "Reusable helper: a string with at least one character.",
+            "type": "string",
+            "minLength": 1
+        },
+        "nullableString": {
+            "description": "Reusable helper: a string or null.",
+            "type": [
+                "string",
+                "null"
+            ]
+        },
+        "stringArray": {
+            "description": "Reusable helper: an array of strings.",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    }
+}

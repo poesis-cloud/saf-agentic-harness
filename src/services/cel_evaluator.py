@@ -17,8 +17,8 @@ class CelEvaluator:
     """Compiles and evaluates `cel` condition expressions against the always-present
     read-only fact set assembled for one unit. This is the only thing the harness
     *evaluates*; structural refs and `instruction` files are resolved by `StepChecker`.
-    The derived facts (gate_packet_ok / wsjf_correct / …) delegate to the artifact checker
-    and calculation service, so CEL stays side-effect-free.
+    The derived facts (gate_packet_ok / schema_conforms / …) delegate to the artifact checker
+    and schema checker, so CEL stays side-effect-free.
 
     For `type: state` conditions it runs the two-CEL selector/predicate pipeline:
     `set_selector.set_query` selects a bounded set of artifacts (typed by their schema),
@@ -241,7 +241,7 @@ class CelEvaluator:
         return self.evaluate_expr(src, activation, {})
 
     def validate_state_condition(self, selector: dict[str, Any] | None, predicate_src: str | None) -> str | None:
-        """Design-time (no-portfolio) static validation of a `type: state` condition: the
+        """Design-time (no-workspace) static validation of a `type: state` condition: the
         artifact-backed selector declares `artifact_types` (alias → schema_id) and a CEL `set_query`
         yielding the `selected` set the `set_predicate` asserts over. Every `<alias>.<property>`
         reference (in query and predicate) is checked against that alias's schema — an undeclared

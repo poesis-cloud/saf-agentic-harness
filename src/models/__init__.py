@@ -1,7 +1,7 @@
 """Domain models — the framework's entities, one class per file.
 
 Each model abstracts a file (or a fragment of one): `Workflow` ⇄ workflow.yaml, `Artifact`
-⇄ a portfolio unit, `Log` ⇄ a run log, `Section` ⇄ a markdown section. `Finding` /
+⇄ a workspace unit, `Log` ⇄ a run log, `Section` ⇄ a markdown section. `Finding` /
 `Report` are the result entities. Models depend only on the `text` kernel — never on
 mappers, services, or the CLI.
 

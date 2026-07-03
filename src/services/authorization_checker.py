@@ -33,7 +33,7 @@ class AuthorizationChecker:
         """Resolve a write path to its resource = the artifact's schema name (schema_id). Match the
         path against schema pathPatterns (templated tokens wildcarded). Business and enabler share one
         path; when several schemas match, disambiguate by the artifact's `type` frontmatter so the
-        enabler schema (`epic-enabler`, ...) is selected. First match wins when type is silent."""
+        matching variant is selected. First match wins when type is silent."""
         candidate = path.replace("{product}", "*").replace("{unit_id}", "*")
         schemas = self.schemas.load_raw(Report())
         matches = []
@@ -51,7 +51,7 @@ class AuthorizationChecker:
         if not matches:
             return None
         if len(matches) > 1:
-            file = self.workspace.portfolio_base / path
+            file = self.workspace.resolve_trace_path(path)
             if file.is_file():
                 wanted = str(parse_frontmatter(frontmatter(self.workspace.read_text(file))).get("type") or "").strip()
                 for schema_id, schema_dict in matches:

@@ -30,7 +30,7 @@
       "properties": {
         "alias": {
           "$ref": "#/definitions/identifier",
-          "description": "Alias exposed to `set_query` (e.g. `feature`, `story`)."
+          "description": "Alias exposed to `set_query` (e.g. the artifact kind or role name)."
         },
         "schema_id": {
           "type": "string",
@@ -40,7 +40,7 @@
       }
     },
     "setSelector": {
-      "description": "Selector for a `type: state` condition. Selection is artifact-backed: `artifact_types` declares the FROM bindings (alias + schema_id) and `set_query` (CEL) yields the selected set, bound to the predicate as `selected`. To assert on the acting unit, filter by the `unit_id` runtime constant — e.g. `epic.filter(e, e.id == unit_id)`. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error.",
+      "description": "Selector for a `type: state` condition. Selection is artifact-backed: `artifact_types` declares the FROM bindings (alias + schema_id) and `set_query` (CEL) yields the selected set, bound to the predicate as `selected`. To assert on the acting unit, filter by the `unit_id` runtime constant — e.g. `<alias>.filter(a, a.id == unit_id)`. Every `<alias>.<property>` reference is statically checked against the alias's schema — an undeclared property is a hard error.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -70,7 +70,7 @@
       }
     },
     "condition": {
-      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). `type` = WHAT it is: `after` (structural predecessor via `step_id`) or `state` (a portfolio/unit-state assertion via `set_selector` + `set_predicate`). Behavioral guidance lives at the step level (step.instructions / step.prompts).",
+      "description": "One entry in a step's flat `conditions` list. `kind` = WHEN it holds (precondition / postcondition). `type` = WHAT it is: `after` (structural predecessor via `step_id`) or `state` (a workspace/unit-state assertion via `set_selector` + `set_predicate`). Behavioral guidance lives at the step level (step.instructions / step.prompts).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -146,7 +146,7 @@
       ]
     },
     "step": {
-      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for portfolio-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition).",
+      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for workspace-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -227,7 +227,7 @@
   },
   "properties": {
     "workflow": {
-      "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`/`parent`) plus the `steps` that constitute it. Root workflows are identified by id ∈ {lpm, art, scrum} and carry no parent; sub-workflows declare kind/parent.",
+      "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`/`parent`) plus the `steps` that constitute it. Root workflows carry no parent; sub-workflows declare kind/parent.",
       "type": "object",
       "additionalProperties": false,
       "required": [

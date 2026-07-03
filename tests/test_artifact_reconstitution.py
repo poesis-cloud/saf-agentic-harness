@@ -3,9 +3,9 @@
 Tests that an Artifact parsed from markdown can reconstitute itself back to
 the original markdown via to_markdown(), preserving structure and content.
 
-Uses the framework's own artifact template (story.artifact-template.md) as the
-test fixture. Templates live under layers/team/actors/.../artifacts/ and are
-stable, versioned framework assets — unlike portfolio/ content, which is
+Discovers the framework's own artifact template from the schema catalog
+(x-artifact.template) so the test fixture is methodology-agnostic. Templates
+are stable, versioned framework assets — unlike workspace/ content, which is
 volatile instance data owned by other actors and not a reliable test anchor.
 """
 
@@ -18,15 +18,24 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from mappers import SchemaMapper, Workspace
 from models import Artifact, Section
 from text import frontmatter, markdown_body, parse_frontmatter, parse_sections, extract_file_heading
 
-_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "layers" / "team" / "actors" / "product-owner" / "artifacts" / "story.artifact-template.md"
-)
-
 _FENCE_PATTERN = re.compile(r"```markdown\n(.*?)\n```", re.DOTALL)
+
+
+def _template_path(schema_id: str = "story") -> Path:
+    """Resolve the framework template path for *schema_id* from the schema catalog."""
+    workspace = Workspace.detect()
+    schemas = SchemaMapper(workspace).load_raw()
+    schema = schemas.get(schema_id)
+    assert schema, f"schema {schema_id!r} not found in catalog"
+    template = schema.get("x-artifact", {}).get("template")
+    assert template, f"schema {schema_id!r} has no x-artifact.template"
+    path = workspace.framework_root / template
+    assert path.exists(), f"template not found: {path}"
+    return path
 
 
 def _extract_template_body(template_text: str) -> str:
@@ -54,14 +63,14 @@ def _file_signature(content: str) -> str:
 def test_artifact_to_markdown_real_template() -> None:
     """Verify Artifact.to_markdown() produces stable output matching the framework template.
 
-    Uses the framework's own story.artifact-template.md (the fenced example
-    block) as fixture. This tests true round-trip fidelity: load → parse →
-    reconstitute → compare signature, anchored on a stable framework asset
-    rather than volatile portfolio instance data.
+    Uses the framework's own artifact template (the fenced example block) as
+    fixture, discovered from the schema catalog. This tests true round-trip
+    fidelity: load → parse → reconstitute → compare signature, anchored on a
+    stable framework asset rather than volatile workspace instance data.
     """
-    assert _TEMPLATE_PATH.exists(), f"Framework template not found: {_TEMPLATE_PATH}"
+    template_path = _template_path("story")
 
-    original_content = _extract_template_body(_TEMPLATE_PATH.read_text())
+    original_content = _extract_template_body(template_path.read_text())
 
     # Parse the artifact
     front = frontmatter(original_content)
@@ -71,11 +80,11 @@ def test_artifact_to_markdown_real_template() -> None:
 
     artifact = Artifact(
         kind="story",
-        path=_TEMPLATE_PATH,
+        path=template_path,
         fields=fields,
         frontmatter=front,
         sections=sections,
-        product_slug="",
+        scope_slug="",
         heading=extract_file_heading(body),
     )
 

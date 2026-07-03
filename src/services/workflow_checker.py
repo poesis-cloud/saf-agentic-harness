@@ -29,7 +29,7 @@ class WorkflowChecker:
         self.workspace = workspace
         self.workflows = workflows
         self.schemas = schemas
-        # schema-only evaluator (no portfolio) for design-time state-CEL validation
+        # schema-only evaluator (no workspace) for design-time state-CEL validation
         self._cel = CelEvaluator(workspace, None, schemas)
 
     def check(self) -> Report:
@@ -91,7 +91,7 @@ class WorkflowChecker:
         """(step_id, message) for every `type: state` condition whose `set_selector` /
         `set_predicate` fails static schema validation — unknown alias schema, uncompilable CEL,
         or a property reference not declared by the aliased artifact schema. Reusable by the
-        constitution gate and its tests; needs no portfolio (design-time schema check only)."""
+        constitution gate and its tests; needs no workspace (design-time schema check only)."""
         findings: list[tuple[str, str]] = []
         for step in workflow.steps:
             for condition in step.conditions:

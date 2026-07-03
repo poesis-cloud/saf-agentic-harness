@@ -3,7 +3,8 @@
 DESIGN-TIME test for ``OrchestrationService``: the pure sequencing core (``next_action`` over a
 workflow + a set of completed step ids) returns the first eligible step as a policy-valid
 ``dispatch``, halts at a ``gate``, halts when a predecessor is unmet, and reports ``done`` once every
-step is complete — and a smoke pass drives a real root workflow from id alone. Run via ``make verify``.
+step is complete — and a smoke pass drives a real root workflow from id alone. Actors are loaded
+from ``config/access-control-list.yaml`` so the synthetic workflow stays methodology-agnostic. Run via pytest.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Workflow
 from mappers import ArtifactMapper, Workspace, WorkflowMapper
-from services import ModelRouter, OrchestrationService
+from services import AuthorizationPolicy, ModelRouter, OrchestrationService
 
 
 def _engine() -> OrchestrationService:
@@ -24,7 +25,27 @@ def _engine() -> OrchestrationService:
 
 
 def _sample_workflow() -> Workflow:
-    """A four-step linear workflow: author -> challenge -> ★ gate -> commit, sequenced by `after`."""
+    """A four-step linear workflow: author -> challenge -> ★ gate -> commit, sequenced by `after`.
+
+    Actors are picked from the real ACL so model-router validation exercises actual role defaults.
+    """
+    policy = AuthorizationPolicy()
+    agents = sorted(policy.agents().keys())
+    assert len(agents) >= 3, "ACL must define at least three agents for the synthetic workflow"
+
+    # Pick agents with distinct role-default floors to exercise routing validation.
+    router = ModelRouter(Workspace.detect())
+    by_floor = {}
+    for agent in agents:
+        floor = router.role_default(agent)
+        by_floor.setdefault(floor, []).append(agent)
+
+    # author: any agent; reviewer: an agent whose floor is above tier-fast if possible;
+    # gatekeeper/committer: any agent (reuse author or reviewer is fine).
+    author = agents[0]
+    reviewer = by_floor.get("tier-balanced", [author])[0]
+    gatekeeper = agents[-1]
+
     return Workflow(
         {
             "workflow": {
@@ -33,28 +54,28 @@ def _sample_workflow() -> Workflow:
                 "steps": [
                     {
                         "id": "draft",
-                        "actor": "@product-manager",
+                        "actor": f"@{author}",
                         "kind": "author",
-                        "output": "feature",
+                        "output": "artifact",
                     },
                     {
                         "id": "review",
-                        "actor": "@security-expert",
+                        "actor": f"@{reviewer}",
                         "kind": "challenge",
-                        "output": "security-review",
+                        "output": "review",
                         "conditions": [
                             {"id": "after_draft", "kind": "precondition", "type": "after", "step_id": "draft"},
                         ],
                     },
                     {
                         "id": "approve",
-                        "actor": "@release-train-engineer",
+                        "actor": f"@{gatekeeper}",
                         "kind": "gate",
                         "conditions": [{"id": "after_review", "kind": "precondition", "type": "after", "step_id": "review"}],
                     },
                     {
                         "id": "land",
-                        "actor": "@release-train-engineer",
+                        "actor": f"@{gatekeeper}",
                         "kind": "commit",
                         "conditions": [{"id": "after_approve", "kind": "precondition", "type": "after", "step_id": "approve"}],
                     },
@@ -71,11 +92,11 @@ def test_first_step_dispatches_policy_valid() -> None:
     action = engine.next_action(wf, completed=set(), unit="u-1", run="r-1")
     assert action["action"] == "dispatch"
     assert action["step"] == "draft"
-    assert action["actor"] == "@product-manager"
     assert action["unit"] == "u-1"
     # the model resolved and clears the role-default floor (validate_dispatch returned no error).
     assert action["model"]
-    assert engine.router.validate_dispatch("product-manager", action["model"]) is None
+    actor = action["actor"].lstrip("@")
+    assert engine.router.validate_dispatch(actor, action["model"]) is None
 
 
 def test_second_step_routes_on_default() -> None:
@@ -85,7 +106,8 @@ def test_second_step_routes_on_default() -> None:
     assert action["action"] == "dispatch"
     assert action["step"] == "review"
     # routes on the actor-derived role default; dispatch stays on-policy.
-    assert engine.router.validate_dispatch("security-expert", action["model"]) is None
+    actor = action["actor"].lstrip("@")
+    assert engine.router.validate_dispatch(actor, action["model"]) is None
     assert action["routing"]["tier"] == engine.router.models()[action["model"]]["tier"]
 
 
@@ -99,6 +121,9 @@ def test_gate_halts() -> None:
 def test_blocked_when_predecessor_unmet() -> None:
     # Defensive branch: every remaining step waits on an unmet predecessor (here a dangling id),
     # so nothing is eligible while work remains -> the engine halts (blocked) rather than looping.
+    policy = AuthorizationPolicy()
+    agents = sorted(policy.agents().keys())
+    author = agents[0] if agents else "developer"
     wf = Workflow(
         {
             "workflow": {
@@ -107,7 +132,7 @@ def test_blocked_when_predecessor_unmet() -> None:
                 "steps": [
                     {
                         "id": "only",
-                        "actor": "@developer",
+                        "actor": f"@{author}",
                         "kind": "author",
                         "conditions": [{"id": "after_missing", "kind": "precondition", "type": "after", "step_id": "missing"}],
                     }

@@ -26,40 +26,6 @@ class SchemaMapper:
 
     ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
     ARTIFACT_TEMPLATE_SUFFIX = ".artifact-template.md"
-    KNOWN_ARTIFACT_KINDS = {
-        "adr",
-        "architectural-vision",
-        "architecture-decision-inventory",
-        "architecture-review",
-        "daily-sync",
-        "epic",
-        "feature",
-        "feasibility-review",
-        "gate-decision-backlog",
-        "inspect-adapt",
-        "kanban",
-        "lean-business-case",
-        "nfr-register",
-        "operability-review",
-        "pi-objectives",
-        "pi-risks",
-        "portfolio-init",
-        "product-init",
-        "product-vision",
-        "project-brief",
-        "qa-signoff",
-        "roadmap",
-        "runway-register",
-        "security-review",
-        "sprint-plan",
-        "sprint-progress",
-        "sprint-retro",
-        "story",
-        "strategic-themes",
-        "testability-review",
-        "ux-review",
-        "value-review",
-    }
 
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
@@ -99,7 +65,9 @@ class SchemaMapper:
         """
         local_report = report or Report()
         root = self.workspace.skills_root
-        registry = self.workspace.schemas_dir / "artifact"
+        # Methodology-specific artifact schemas live in the framework root schemas/ directory;
+        # the harness-owned generic base schema lives in harness/contracts/artifact.schema.json.
+        registry = self.workspace.framework_root / "schemas"
         schemas_by_id: dict[str, dict[str, Any]] = {}
         seen_ids: dict[str, Path] = {}
         
@@ -178,3 +146,26 @@ class SchemaMapper:
                 if schema_id:
                     store[str(schema_id)] = schema
         return store
+
+    def base_artifact_schema_path(self) -> Path:
+        return self.workspace.schemas_dir / "artifact.schema.json"
+
+    def base_artifact_schema(self) -> dict[str, Any] | None:
+        """The generic harness-owned artifact base schema that methodology-specific artifact
+        schemas in schemas/ extend via `$ref`."""
+        path = self.base_artifact_schema_path()
+        if not path.is_file():
+            return None
+        return json.loads(self.workspace.read_text(path))
+
+    def framework_definitions_schema_path(self) -> Path:
+        return self.workspace.framework_root / "schemas" / "framework-definitions.schema.json"
+
+    def framework_definitions_schema(self) -> dict[str, Any] | None:
+        """The framework-owned reusable definitions schema referenced by methodology-specific
+        artifact schemas. Loaded into the RefResolver store so `$ref` resolution works during
+        artifact validation."""
+        path = self.framework_definitions_schema_path()
+        if not path.is_file():
+            return None
+        return json.loads(self.workspace.read_text(path))

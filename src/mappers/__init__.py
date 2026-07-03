@@ -1,7 +1,7 @@
 """Mappers layer — the access layer + data-mappers (model ⇄ filesystem).
 
 `Workspace` is the shared filesystem context; each mapper maps one entity to its files:
-`WorkflowMapper` ⇄ workflow.yaml, `ArtifactMapper` ⇄ the portfolio, `SchemaMapper`
+`WorkflowMapper` ⇄ workflow.yaml, `ArtifactMapper` ⇄ the workspace, `SchemaMapper`
 ⇄ JSON schemas, `LogMapper` ⇄ run logs. Mappers depend on models + the text kernel
 — never on services or the CLI.
 """

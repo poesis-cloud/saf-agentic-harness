@@ -1,11 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poesis.cloud/safe-agentic-framework/orchestration-harness-finding.schema.json",
-  "title": "SAFe Orchestration Harness Finding",
-  "description": "A structured deterministic harness report item. Findings are not open_items; only selected findings project into open_items as clarification or challenge entries.",
+  "title": "Orchestration Harness Finding",
+  "description": "A structured deterministic harness report item. Findings are not open_items; only selected findings project into open_items as clarification or challenge entries. The harness is methodology-agnostic; the unit_id is the id of the artifact the finding concerns, whatever the methodology calls it.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "severity", "type", "path", "message", "route", "open_item_projection"],
+  "required": [
+    "schema_version",
+    "severity",
+    "type",
+    "path",
+    "message",
+    "route",
+    "open_item_projection"
+  ],
   "properties": {
     "schema_version": {
       "description": "Finding schema version for future-compatible harness report readers.",
@@ -14,7 +22,11 @@
     "severity": {
       "description": "Operational severity emitted by the deterministic harness.",
       "type": "string",
-      "enum": ["error", "warning", "info"]
+      "enum": [
+        "error",
+        "warning",
+        "info"
+      ]
     },
     "type": {
       "description": "Stable finding classification used for routing and aggregation.",
@@ -72,7 +84,11 @@
     "open_item_projection": {
       "description": "Whether the finding should be materialized into the unit open_items ledger, and if so under which backlog kind.",
       "type": "string",
-      "enum": ["none", "challenge", "clarification"]
+      "enum": [
+        "none",
+        "challenge",
+        "clarification"
+      ]
     },
     "blocking": {
       "description": "Whether the finding blocks the current return boundary or next gate until corrected, deferred, or waived.",
@@ -91,7 +107,7 @@
       "type": "string"
     },
     "unit_id": {
-      "description": "Epic, Feature, or Story id associated with the finding.",
+      "description": "Artifact id associated with the finding.",
       "type": "string"
     },
     "owner": {
@@ -113,16 +129,63 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "route": { "const": "open_item_challenge" } }, "required": ["route"] },
-      "then": { "properties": { "open_item_projection": { "const": "challenge" } } }
+      "if": {
+        "properties": {
+          "route": {
+            "const": "open_item_challenge"
+          }
+        },
+        "required": [
+          "route"
+        ]
+      },
+      "then": {
+        "properties": {
+          "open_item_projection": {
+            "const": "challenge"
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "route": { "const": "open_item_clarification" } }, "required": ["route"] },
-      "then": { "properties": { "open_item_projection": { "const": "clarification" } } }
+      "if": {
+        "properties": {
+          "route": {
+            "const": "open_item_clarification"
+          }
+        },
+        "required": [
+          "route"
+        ]
+      },
+      "then": {
+        "properties": {
+          "open_item_projection": {
+            "const": "clarification"
+          }
+        }
+      }
     },
     {
-      "if": { "properties": { "open_item_projection": { "enum": ["challenge", "clarification"] } }, "required": ["open_item_projection"] },
-      "then": { "required": ["owner", "unit_id"] }
+      "if": {
+        "properties": {
+          "open_item_projection": {
+            "enum": [
+              "challenge",
+              "clarification"
+            ]
+          }
+        },
+        "required": [
+          "open_item_projection"
+        ]
+      },
+      "then": {
+        "required": [
+          "owner",
+          "unit_id"
+        ]
+      }
     }
   ]
 }

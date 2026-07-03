@@ -1,8 +1,8 @@
 """Workspace — the filesystem context shared by every repository.
 
-Holds the framework + portfolio roots and resolves the well-known locations (skills root,
+Holds the framework + workspace roots and resolves the well-known locations (skills root,
 harness + schema dirs) and labels. Injecting one Workspace replaces the framework_root /
-portfolio_root that the old procedural harness threaded through every call.
+workspace_root that the old procedural harness threaded through every call.
 """
 
 from __future__ import annotations
@@ -13,15 +13,15 @@ from text import format_template
 
 
 class Workspace:
-    def __init__(self, framework_root: Path, portfolio_root: Path | None = None) -> None:
+    def __init__(self, framework_root: Path, workspace_root: Path | None = None) -> None:
         self.framework_root = framework_root
-        self._portfolio_root = portfolio_root
+        self._workspace_root = workspace_root
 
     @classmethod
-    def detect(cls, framework_root: Path | None = None, portfolio_root: Path | None = None) -> "Workspace":
+    def detect(cls, framework_root: Path | None = None, workspace_root: Path | None = None) -> "Workspace":
         resolved_framework = (framework_root or cls.default_framework_root()).resolve()
-        resolved_portfolio = (portfolio_root or (resolved_framework / "portfolio")).resolve()
-        return cls(resolved_framework, resolved_portfolio)
+        resolved_workspace = (workspace_root or (resolved_framework / "workspace")).resolve()
+        return cls(resolved_framework, resolved_workspace)
 
     @classmethod
     def default_framework_root(cls) -> Path:
@@ -44,24 +44,23 @@ class Workspace:
         github_root = self.framework_root / ".github" / "skills"
         if github_root.is_dir():
             return github_root
+        if (self.framework_root / "harness").is_dir():
+            return self.framework_root
         plugin_root = self.framework_root / "skills"
         if plugin_root.is_dir():
             return plugin_root
-        if (self.framework_root / "harness").is_dir():
-            return self.framework_root
         raise FileNotFoundError(f"no skills directory found under {self.framework_root}")
 
     @property
-    def portfolio_root(self) -> Path:
-        return self._portfolio_root if self._portfolio_root is not None else self.framework_root / "portfolio"
+    def workspace_root(self) -> Path:
+        return self._workspace_root if self._workspace_root is not None else self.framework_root / "workspace"
 
     @property
-    def portfolio_base(self) -> Path:
-        """The directory that CONTAINS the ``portfolio/`` folder — the base against which repo-root-
-        relative artifact refs (``portfolio/...``) resolve. Tracks ``portfolio_root`` so artifact reads
-        follow the portfolio data, not the framework code; defaults to the framework root (portfolio
-        colocated at ``<framework-root>/portfolio``)."""
-        return self.portfolio_root.parent
+    def workspace_base(self) -> Path:
+        """The directory that CONTAINS the workspace folder — the base against which repo-root-
+        relative artifact refs resolve. Tracks ``workspace_root`` so artifact reads follow the
+        workspace data, not the framework code; defaults to the framework root."""
+        return self.workspace_root.parent
 
     @property
     def harness_dir(self) -> Path:
@@ -78,21 +77,21 @@ class Workspace:
         'session' ledger — the same fallback the hook uses when the host supplies no id — so a manual
         or standalone invocation still logs to the place the session-close review reads."""
         sid = str(session_id).replace("/", "-") if session_id else "session"
-        return self.portfolio_root / "logs" / "hooks" / f"{sid}.jsonl"
+        return self.workspace_root / "logs" / "hooks" / f"{sid}.jsonl"
 
     def run_journal(self, run_id: str | None) -> Path:
-        """The per-run journal (JSONL): the single append-only run trace (`portfolio/logs/<run>.jsonl`)
+        """The per-run journal (JSONL): the single append-only run trace (`workspace/logs/<run>.jsonl`)
         spanning the driver and its dispatched step sessions, one entry per command. The `orchestrate`
         driver writes its action entries here; the per-session hook streams correlate to it by run +
         session. A missing id falls back to the shared 'run' journal so a standalone drive still traces."""
         rid = str(run_id).replace("/", "-") if run_id else "run"
-        return self.portfolio_root / "logs" / f"{rid}.jsonl"
+        return self.workspace_root / "logs" / f"{rid}.jsonl"
 
     def run_journals(self) -> list[Path]:
-        """Every per-run journal (`portfolio/logs/*.jsonl`), oldest first by mtime so the LAST match
+        """Every per-run journal (`workspace/logs/*.jsonl`), oldest first by mtime so the LAST match
         when scanning is the most recent dispatch. The per-session hook streams under `logs/hooks/`
         are NOT run journals, so the directory is skipped (only top-level *.jsonl are runs)."""
-        logs_dir = self.portfolio_root / "logs"
+        logs_dir = self.workspace_root / "logs"
         if not logs_dir.is_dir():
             return []
         files = [p for p in logs_dir.glob("*.jsonl") if p.is_file()]
@@ -111,6 +110,6 @@ class Workspace:
         rendered = Path(format_template(template, **variables))
         if rendered.is_absolute():
             return rendered
-        if rendered.parts and rendered.parts[0] == "portfolio":
+        if rendered.parts and rendered.parts[0] == "workspace":
             rendered = Path(*rendered.parts[1:]) if len(rendered.parts) > 1 else Path()
-        return self.portfolio_root / rendered
+        return self.workspace_root / rendered

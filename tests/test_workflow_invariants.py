@@ -13,7 +13,7 @@ The harness is the sole implicit mediator (Design invariant: one log = run journ
 engine dispatches one step at a time), so there is no explicit ``facilitate``/mediation step and no
 orthogonal ``orchestrator-mediation`` edge rule — participant→participant ``after`` edges are legal.
 
-These checks read only the Poesis-owned workflows (never user portfolio data), so they live apart
+These checks read only the Poesis-owned workflows (never user workspace data), so they live apart
 from the runtime harness services and run via ``make test`` — separate from the ``make verify``
 contract gate. They consume the harness's OOP API: a ``Workspace`` and the ``WorkflowMapper``
 mapping each workflow.yaml to a ``Workflow`` entity.
@@ -35,9 +35,9 @@ from models import Workflow
 from mappers import Workspace, WorkflowMapper
 
 ROOT_ORCHESTRATIONS = (
-    "layers/portfolio/workflow",
-    "layers/program/workflow",
-    "layers/team/workflow",
+    "portfolio",
+    "program",
+    "team",
 )
 
 # A single actor: one ``@hat`` or the human ``central-supervisor``, each with an optional "(… hat)"
@@ -56,19 +56,23 @@ def _norm(actor: object) -> str:
 
 
 # --- the structural checks (each returns a list of human-readable violations) -------------------
+def _workflow_path(workspace: Workspace, name: str) -> Path:
+    return workspace.framework_root / "config" / "workflows" / f"{name}.yaml"
+
+
 def violations_root_completeness(workspace: Workspace) -> list[str]:
     out: list[str] = []
     repo = WorkflowMapper(workspace)
     for oid in ROOT_ORCHESTRATIONS:
-        path = workspace.skills_root / oid / "workflow.yaml"
+        path = _workflow_path(workspace, oid)
         if not path.is_file():
-            out.append(f"{oid}: missing root workflow.yaml")
+            out.append(f"{oid}: missing root workflow at {path}")
             continue
         workflow = repo.load(path)
         if not workflow.is_root:
-            out.append(f"{oid}/workflow.yaml: id {workflow.id!r} is not a root id, expected one of lpm/art/scrum")
+            out.append(f"{path}: id {workflow.id!r} is not a root id, expected one of {ROOT_ORCHESTRATIONS}")
         if workflow.parent:
-            out.append(f"{oid}/workflow.yaml: root workflow must not declare `parent`")
+            out.append(f"{path}: root workflow must not declare `parent`")
     return out
 
 
@@ -91,9 +95,9 @@ def violations_delegates_to(workspace: Workspace) -> list[str]:
             target = step.delegates_to
             if not target:
                 continue
-            resolved = workflow.path.parent / str(target) / "workflow.yaml"
+            resolved = workspace.framework_root / "config" / "workflows" / f"{target}.yaml"
             if not resolved.is_file():
-                out.append(f"{label}: step {step.raw_id!r} delegates_to {target!r} → no workflow.yaml at {target}/")
+                out.append(f"{label}: step {step.raw_id!r} delegates_to {target!r} → no workflow at {resolved}")
     return out
 
 

@@ -1,106 +1,115 @@
-"""TransitionPolicy — status vocabularies, transition tables, gates, and ownership."""
+"""TransitionPolicy — status vocabularies, transition tables, gates, and ownership.
+
+Loaded from config/transition-policy.yaml so the harness stays methodology-agnostic.
+A different methodology can supply its own policy file without changing harness code.
+"""
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised only in minimal Python runtimes
+    yaml = None
+
 
 class TransitionPolicy:
-    """The kanban policy for Epic/Feature/Story: which statuses exist, which edges are
-    legal, which cross a human ★ gate, and which orchestrator owns each kind. Pure policy
-    — no I/O — so checks and the calculation service share one source of truth."""
+    """The status-transition policy for artifact kinds that have a lifecycle.
+    
+    Pure policy — no I/O during checks — loaded once from framework config.
+    """
 
-    EPIC_STATUSES = {"funnel", "reviewing", "analyzing", "portfolio-backlog", "implementing", "done", "blocked"}
-    FEATURE_STATUSES = {"funnel", "refined", "arch-pending", "ready", "committed", "in-progress", "done", "blocked"}
-    STORY_STATUSES = {"backlog", "ready", "in-progress", "in-review", "in-qa", "awaiting-pr", "done", "blocked"}
-    DEPRECATED_FEATURE_STATUSES = {"adr-pending": "arch-pending"}
+    def __init__(self, policy_path: Path | None = None) -> None:
+        # __file__ = harness/src/services/transition_policy.py; parents[3] = framework root
+        self.policy_path = policy_path or (Path(__file__).resolve().parents[3] / "config" / "transition-policy.yaml")
+        self._data: dict[str, Any] | None = None
+        self._statuses_by_kind: dict[str, set[str]] = {}
+        self._transitions_by_kind: dict[str, set[tuple[str, str]]] = {}
+        self._post_gate_by_kind: dict[str, set[str]] = {}
+        self._gate_edges: dict[str, dict[tuple[str, str], str]] = {}
+        self._reject_targets: dict[str, dict[tuple[str, str], str]] = {}
+        self._deprecated_by_kind: dict[str, dict[str, str]] = {}
+        self._orchestrator_kinds: dict[str, set[str]] = {}
+        self._orchestrator_aliases: dict[str, str] = {}
+        self._load()
 
-    EPIC_POST_GATE = {"portfolio-backlog", "implementing", "done"}
-    FEATURE_POST_GATE = {"arch-pending", "ready", "committed", "in-progress", "done"}
-    STORY_POST_GATE = {"ready", "in-progress", "in-review", "in-qa", "awaiting-pr", "done"}
+    def _load(self) -> None:
+        if yaml is None:
+            raise RuntimeError("PyYAML is required to load transition policy")
+        if not self.policy_path.is_file():
+            raise FileNotFoundError(f"transition policy not found: {self.policy_path}")
+        data = yaml.safe_load(self.policy_path.read_text(encoding="utf-8")) or {}
+        self._data = data
 
-    ORCHESTRATOR_KINDS = {
-        "value-management-officier": {"epic"},
-        "release-train-engineer": {"feature"},
-        "scrum-master": {"story"},
-    }
-    ORCHESTRATOR_ALIASES = {
-        "vmo": "value-management-officier",
-        "value-management-office": "value-management-officier",
-        "value-management-officier": "value-management-officier",
-        "rte": "release-train-engineer",
-        "release-train-engineer": "release-train-engineer",
-        "sm": "scrum-master",
-        "scrum-master": "scrum-master",
-    }
+        kinds = data.get("kinds", {})
+        for kind, cfg in kinds.items():
+            self._statuses_by_kind[kind] = set(cfg.get("statuses", []))
+            self._transitions_by_kind[kind] = {tuple(edge) for edge in cfg.get("transitions", [])}
+            self._post_gate_by_kind[kind] = set(cfg.get("post_gate", []))
+            self._deprecated_by_kind[kind] = dict(cfg.get("deprecated", {}))
 
-    # Legal status edges per kind. `blocked` is an orthogonal flag: any active status may
-    # enter it, and it may resume to any valid status for the kind.
-    EPIC_TRANSITIONS = {
-        ("funnel", "reviewing"),
-        ("reviewing", "analyzing"),
-        ("analyzing", "portfolio-backlog"),
-        ("analyzing", "funnel"),
-        ("portfolio-backlog", "implementing"),
-        ("implementing", "done"),
-    }
-    FEATURE_TRANSITIONS = {
-        ("funnel", "refined"),
-        ("refined", "arch-pending"),
-        ("refined", "ready"),
-        ("refined", "funnel"),
-        ("arch-pending", "ready"),
-        ("arch-pending", "refined"),
-        ("ready", "committed"),
-        ("committed", "in-progress"),
-        ("in-progress", "done"),
-    }
-    STORY_TRANSITIONS = {
-        ("backlog", "ready"),
-        ("ready", "in-progress"),
-        ("in-progress", "in-review"),
-        ("in-review", "in-progress"),
-        ("in-review", "in-qa"),
-        ("in-qa", "in-progress"),
-        ("in-qa", "awaiting-pr"),
-        ("awaiting-pr", "done"),
-    }
-    TRANSITIONS_BY_KIND = {"epic": EPIC_TRANSITIONS, "feature": FEATURE_TRANSITIONS, "story": STORY_TRANSITIONS}
-    STATUSES_BY_KIND = {"epic": EPIC_STATUSES, "feature": FEATURE_STATUSES, "story": STORY_STATUSES}
+            gates: dict[tuple[str, str], str] = {}
+            for key, name in cfg.get("gates", {}).items():
+                from_status, _, to_status = key.partition(" -> ")
+                gates[(from_status.strip(), to_status.strip())] = name
+            self._gate_edges[kind] = gates
 
-    # Edges that cross a human gate: the orchestrator may only commit them after the
-    # Central Supervisor decides (encoded as --gate accept/reject).
-    GATE_EDGES = {
-        "epic": {
-            ("analyzing", "portfolio-backlog"): "Epic Gate",
-            ("implementing", "done"): "Epic Outcome Gate",
-        },
-        "feature": {
-            ("refined", "arch-pending"): "Feature Gate",
-            ("refined", "ready"): "Feature Gate",
-            ("arch-pending", "ready"): "Architecture Gate",
-            ("in-progress", "done"): "Demo Gate",
-        },
-        "story": {
-            ("backlog", "ready"): "Story Gate",
-            ("awaiting-pr", "done"): "PR Gate",
-        },
-    }
-    REJECT_TARGETS = {
-        ("epic", "analyzing", "portfolio-backlog"): "funnel",
-        ("epic", "implementing", "done"): "implementing",
-        ("feature", "refined", "arch-pending"): "funnel",
-        ("feature", "refined", "ready"): "funnel",
-        ("feature", "arch-pending", "ready"): "refined",
-        ("feature", "in-progress", "done"): "in-progress",
-        ("story", "backlog", "ready"): "backlog",
-        ("story", "awaiting-pr", "done"): "awaiting-pr",
-    }
+            rejects: dict[tuple[str, str], str] = {}
+            for key, target in cfg.get("reject_targets", {}).items():
+                from_status, _, to_status = key.partition(" -> ")
+                rejects[(from_status.strip(), to_status.strip())] = target
+            self._reject_targets[kind] = rejects
+
+        for orchestrator, kinds in data.get("orchestrators", {}).items():
+            self._orchestrator_kinds[orchestrator] = set(kinds)
+        self._orchestrator_aliases = dict(data.get("aliases", {}))
+
+    # Backward-compatible public attributes (computed properties)
+    @property
+    def STATUSES_BY_KIND(self) -> dict[str, set[str]]:
+        return self._statuses_by_kind
+
+    @property
+    def TRANSITIONS_BY_KIND(self) -> dict[str, set[tuple[str, str]]]:
+        return self._transitions_by_kind
+
+    @property
+    def GATE_EDGES(self) -> dict[str, dict[tuple[str, str], str]]:
+        return self._gate_edges
+
+    @property
+    def REJECT_TARGETS(self) -> dict[tuple[str, str, str], str]:
+        """Flattened reject targets keyed by (kind, from_status, to_status)."""
+        result: dict[tuple[str, str, str], str] = {}
+        for kind, targets in self._reject_targets.items():
+            for (from_status, to_status), target in targets.items():
+                result[(kind, from_status, to_status)] = target
+        return result
+
+    @property
+    def DEPRECATED_STATUSES_BY_KIND(self) -> dict[str, dict[str, str]]:
+        return self._deprecated_by_kind
+
+    @property
+    def POST_GATE_BY_KIND(self) -> dict[str, set[str]]:
+        return self._post_gate_by_kind
+
+    @property
+    def ORCHESTRATOR_KINDS(self) -> dict[str, set[str]]:
+        return self._orchestrator_kinds
+
+    @property
+    def ORCHESTRATOR_ALIASES(self) -> dict[str, str]:
+        return self._orchestrator_aliases
 
     def is_legal_edge(self, kind: str, from_status: str, to_status: str) -> bool:
         if to_status == "blocked":
             return from_status != "blocked"
         if from_status == "blocked":
-            return to_status in self.STATUSES_BY_KIND.get(kind, set())
-        return (from_status, to_status) in self.TRANSITIONS_BY_KIND.get(kind, set())
+            return to_status in self._statuses_by_kind.get(kind, set())
+        return (from_status, to_status) in self._transitions_by_kind.get(kind, set())
 
     def gate_for_edge(self, kind: str, from_status: str, to_status: str) -> str | None:
-        return self.GATE_EDGES.get(kind, {}).get((from_status, to_status))
+        return self._gate_edges.get(kind, {}).get((from_status, to_status))

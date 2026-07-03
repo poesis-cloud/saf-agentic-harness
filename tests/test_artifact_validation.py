@@ -1,10 +1,10 @@
-"""Portfolio Validity Invariant TESTS — valid-by-construction reads + write-boundary enforcement.
+"""Workspace Validity Invariant TESTS — valid-by-construction reads + write-boundary enforcement.
 
 Covers:
   - ArtifactValidator flags a schema-invalid artifact;
   - ArtifactMapper.discover() RAISES InvalidArtifactError on an invalid universe, while
-    scan_raw() tolerates it (so check-artifact can report), and an empty portfolio is fine;
-  - load_one() infers an artifact's kind from its portfolio path;
+    scan_raw() tolerates it (so check-artifact can report), and an empty workspace is fine;
+  - load_one() infers an artifact's kind from its workspace path;
   - the postcondition hook REVERTS an invalid write (deletes the untracked new file) and DENIES
     with the schema findings.
 
@@ -23,12 +23,12 @@ from mappers import ArtifactMapper, InvalidArtifactError, LogMapper, SchemaMappe
 from services import AuthorizationPolicy, HookService
 from utils import ArtifactValidator
 
-# An epic frontmatter that parses but violates the epic schema (missing most required fields).
-INVALID_EPIC = "---\nid: bad-epic\nstatus: funnel\n---\n# Bad epic\n"
+# An artifact frontmatter that parses but violates the epic schema (missing most required fields).
+INVALID_ARTIFACT = "---\nid: bad-epic\nstatus: funnel\n---\n# Bad epic\n"
 
 
 def _ws(tmp: str) -> Workspace:
-    return Workspace.detect(portfolio_root=Path(tmp))
+    return Workspace.detect(workspace_root=Path(tmp))
 
 
 def _repo(ws: Workspace) -> ArtifactMapper:
@@ -43,18 +43,18 @@ def main() -> int:
         if not cond:
             failures.append(name)
 
-    # (a) validator + scan_raw + load_one + discover-raises, over an invalid portfolio
-    print("(a) invalid portfolio")
+    # (a) validator + scan_raw + load_one + discover-raises, over an invalid workspace
+    print("(a) invalid workspace")
     with tempfile.TemporaryDirectory() as tmp:
         ws = _ws(tmp)
-        (Path(tmp) / "epics").mkdir(parents=True)
-        bad = Path(tmp) / "epics" / "bad-epic.md"
-        bad.write_text(INVALID_EPIC)
+        (Path(tmp) / "portfolio-backlog" / "bad-epic").mkdir(parents=True)
+        bad = Path(tmp) / "portfolio-backlog" / "bad-epic" / "bad-epic.epic.md"
+        bad.write_text(INVALID_ARTIFACT)
         repo = _repo(ws)
 
         check("scan_raw tolerates invalid", len(repo.scan_raw()) == 1)
         art = repo.load_one(bad)
-        check("load_one infers epic kind", art is not None and art.kind == "epic")
+        check("load_one infers artifact kind", art is not None and art.kind == "epic")
         report = ArtifactValidator(ws, SchemaMapper(ws)).validate(art)
         check("validator flags invalid artifact", report.has_errors(), str([f.message for f in report.findings][:1]))
 
@@ -65,19 +65,19 @@ def main() -> int:
             raised = True
         check("discover raises InvalidArtifactError", raised)
 
-    # (b) empty portfolio: discover returns [] with no raise
-    print("(b) empty portfolio")
+    # (b) empty workspace: discover returns [] with no raise
+    print("(b) empty workspace")
     with tempfile.TemporaryDirectory() as tmp:
         repo = _repo(_ws(tmp))
-        check("discover of empty portfolio is []", repo.discover() == [])
+        check("discover of empty workspace is []", repo.discover() == [])
 
     # (c) postcondition hook reverts an invalid (untracked) write + denies
     print("(c) write-boundary enforcement")
     with tempfile.TemporaryDirectory() as tmp:
         ws = _ws(tmp)
-        (Path(tmp) / "epics").mkdir(parents=True)
-        bad = Path(tmp) / "epics" / "bad-epic.md"
-        bad.write_text(INVALID_EPIC)
+        (Path(tmp) / "portfolio-backlog" / "bad-epic").mkdir(parents=True)
+        bad = Path(tmp) / "portfolio-backlog" / "bad-epic" / "bad-epic.epic.md"
+        bad.write_text(INVALID_ARTIFACT)
         repo = _repo(ws)
         hooks = HookService(ws, SchemaMapper(ws), LogMapper(ws), AuthorizationPolicy(), artifacts=repo)
 

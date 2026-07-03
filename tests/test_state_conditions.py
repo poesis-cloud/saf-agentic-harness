@@ -21,16 +21,16 @@ from mappers import ArtifactMapper, SchemaMapper, Workspace
 from services import CelEvaluator
 
 
-def _epic(artifact_id: str, status: str = "done", **extra: object) -> Artifact:
+def _artifact_a(artifact_id: str, status: str = "done", **extra: object) -> Artifact:
     fields = {"id": artifact_id, "status": status, "type": "business", "title": artifact_id}
     fields.update(extra)
-    return Artifact("epic", Path(f"/tmp/epics/{artifact_id}.md"), fields, "")
+    return Artifact("epic", Path(f"/tmp/artifacts/{artifact_id}.md"), fields, "")
 
 
-def _feature(artifact_id: str, status: str = "done", product: str = "p1", **extra: object) -> Artifact:
+def _artifact_b(artifact_id: str, status: str = "done", product: str = "p1", **extra: object) -> Artifact:
     fields = {"id": artifact_id, "status": status, "type": "business", "title": artifact_id}
     fields.update(extra)
-    return Artifact("feature", Path(f"/tmp/{product}/features/{artifact_id}.md"), fields, "", product)
+    return Artifact("feature", Path(f"/tmp/{product}/artifacts/{artifact_id}.md"), fields, "", product)
 
 
 class _StubArtifactMapper(ArtifactMapper):
@@ -71,7 +71,7 @@ def main() -> int:
 
     # (a) alias/schema resolution: known schema ok, unknown schema errors
     print("(a) alias + schema resolution")
-    cel = _cel([_epic("E-1")])
+    cel = _cel([_artifact_a("A-1")])
     props, err = cel._alias_props([{"alias": "epic", "schema_id": "epic"}])
     check("known schema resolves", err is None and props is not None and "status" in props["epic"])
     _, err = cel._alias_props([{"alias": "x", "schema_id": "not-a-schema"}])
@@ -80,7 +80,7 @@ def main() -> int:
     # (b) closed artifact view: exactly the schema's declared props, no __-injected, no off-schema
     print("(b) closed artifact view")
     props, _ = cel._alias_props([{"alias": "epic", "schema_id": "epic"}])
-    view = cel._artifact_view(_epic("E-9", strategic_theme="growth"), props["epic"])
+    view = cel._artifact_view(_artifact_a("A-9", strategic_theme="growth"), props["epic"])
     check("declared prop present", "status" in view and view["status"] == "done")
     check("authored extra prop present", view.get("strategic_theme") == "growth")
     check("harness __ prop excluded", "__path" not in view and "__kind" not in view)
@@ -98,15 +98,15 @@ def main() -> int:
     check("undeclared prop in compound invalidated", bad2 is not None and "wrongfield" in bad2)
     check("runtime constant not treated as artifact prop", cel._validate_field_refs("size(epic) > 0 && product == null", ap) is None)
 
-    # (d) evaluate_state PASS: select all epics, assert every selected is done
+    # (d) evaluate_state PASS: select all artifacts of kind A, assert every selected is done
     print("(d) evaluate_state — pass")
-    cel = _cel([_epic("E-1", "done"), _epic("E-2", "done")])
+    cel = _cel([_artifact_a("A-1", "done"), _artifact_a("A-2", "done")])
     outcome, detail = cel.evaluate_state(_sel(("epic", "epic"), query="epic"), "selected.all(e, e.status == 'done')")
     check("all-done asserts pass", outcome == "pass", f"got {outcome}: {detail}")
     check("detail reports selection size", "selected 2 of 2" in detail, f"got {detail}")
 
-    # query actually feeds the predicate: filter to the single done epic, assert size(selected)==1
-    cel = _cel([_epic("E-1", "done"), _epic("E-2", "blocked"), _epic("E-3", "blocked")])
+    # query actually feeds the predicate: filter to the single done artifact, assert size(selected)==1
+    cel = _cel([_artifact_a("A-1", "done"), _artifact_a("A-2", "blocked"), _artifact_a("A-3", "blocked")])
     outcome, detail = cel.evaluate_state(
         _sel(("epic", "epic"), query="epic.filter(e, e.status == 'done')"),
         "size(selected) == 1",
@@ -114,7 +114,7 @@ def main() -> int:
     check("query result feeds predicate (selected)", outcome == "pass", f"got {outcome}: {detail}")
     check("detail reports filtered selection", "selected 1 of 3" in detail, f"got {detail}")
 
-    # (e) evaluate_state FAIL: assert all epics done when one is blocked
+    # (e) evaluate_state FAIL: assert all artifacts done when one is blocked
     print("(e) evaluate_state — fail")
     outcome, detail = cel.evaluate_state(_sel(("epic", "epic"), query="epic"), "selected.all(e, e.status == 'done')")
     check("mixed-status asserts fail", outcome == "fail", f"got {outcome}: {detail}")
@@ -142,7 +142,7 @@ def main() -> int:
 
     # (g) multi-alias FROM: two schemas bound, predicate over selected subset
     print("(g) multi-alias selection")
-    cel = _cel([_epic("E-1", "done"), _feature("F-1", "done"), _feature("F-2", "blocked")])
+    cel = _cel([_artifact_a("A-1", "done"), _artifact_b("B-1", "done"), _artifact_b("B-2", "blocked")])
     outcome, detail = cel.evaluate_state(
         _sel(("epic", "epic"), ("feature", "feature"), query="feature.filter(f, f.status == 'blocked')"),
         "selected.all(f, f.status == 'blocked')",
@@ -152,16 +152,16 @@ def main() -> int:
 
     # (h) acting-unit state via artifact selection (filter by the unit_id runtime constant)
     print("(h) acting-unit state (artifact-mode, filter by unit_id)")
-    cel = _cel([_epic("E-1", "funnel"), _epic("E-2", "done")])
+    cel = _cel([_artifact_a("A-1", "funnel"), _artifact_a("A-2", "done")])
     unit_sel = {
         "set_type": "artifact",
         "artifact_types": [{"alias": "epic", "schema_id": "epic"}],
         "set_query": "epic.filter(x, x.id == unit_id)",
     }
-    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="E-1")
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="A-1")
     check("acting-unit status pass", outcome == "pass", f"got {outcome}: {detail}")
     check("acting-unit selects one of two", "selected 1 of 2" in detail, f"got {detail}")
-    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="E-2")
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="A-2")
     check("acting-unit status fail", outcome == "fail", f"got {outcome}: {detail}")
     bad = cel.validate_state_condition(unit_sel, "selected.all(x, x.nonexistent == 1)")
     check("acting-unit undeclared prop rejected", bad is not None and "nonexistent" in bad, f"got {bad}")

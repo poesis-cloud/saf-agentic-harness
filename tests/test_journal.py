@@ -37,22 +37,24 @@ def _errors(validator: jsonschema.Draft7Validator, entry: dict) -> list[str]:
 
 
 # --- sample entries (one per command) ---------------------------------------
+# Generic workflow/actor IDs: the journal envelope and payload schemas validate
+# structure, not methodology-specific values.
 _CHECK_STEP = {
-    "command": "check-step", "trigger": "agent", "orchestration": "lpm",
-    "step": "capture-epic", "unit": "E-01", "actor": "value-management-officier", "status": "completed",
+    "command": "check-step", "trigger": "agent", "orchestration": "test-orchestration",
+    "step": "step-1", "unit": "U-01", "actor": "test-actor", "status": "completed",
     "payload": {
-        "conditions": [{"kind": "postcondition", "type": "output", "expression": "ref", "value": "epic", "result": "pass"}],
-        "outputs": ["portfolio/epics/E-01.md"], "counts": {"pass": 1, "fail": 0, "skipped": 0},
+        "conditions": [{"kind": "postcondition", "type": "output", "expression": "ref", "value": "artifact", "result": "pass"}],
+        "outputs": ["products/P-01/artifacts/A-01.md"], "counts": {"pass": 1, "fail": 0, "skipped": 0},
     },
 }
 _HOOK = {
-    "command": "hook", "trigger": "host", "session": "abc123", "actor": "product-manager", "status": "allow",
-    "payload": {"event": "preToolUse", "phase": "precondition", "permission": "allow", "reason": "", "outputs": ["portfolio/p/features/F-01.md"]},
+    "command": "hook", "trigger": "host", "session": "abc123", "actor": "test-actor", "status": "allow",
+    "payload": {"event": "preToolUse", "phase": "precondition", "permission": "allow", "reason": "", "outputs": ["products/P-01/artifacts/A-01.md"]},
 }
 _ORCHESTRATE = {
-    "command": "orchestrate", "trigger": "agent", "run": "R-01", "orchestration": "lpm",
-    "step": "capture-epic", "unit": "E-01", "status": "dispatch",
-    "payload": {"action": "dispatch", "workflow": "lpm", "step": "capture-epic", "actor": "@value-management-officier", "model": "GPT-5.4 (copilot)", "unit": "E-01", "output": "epic"},
+    "command": "orchestrate", "trigger": "agent", "run": "R-01", "orchestration": "test-orchestration",
+    "step": "step-1", "unit": "U-01", "status": "dispatch",
+    "payload": {"action": "dispatch", "workflow": "test-orchestration", "step": "step-1", "actor": "@test-actor", "model": "GPT-5.4 (copilot)", "unit": "U-01", "output": "artifact"},
 }
 
 

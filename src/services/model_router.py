@@ -30,7 +30,7 @@ class ModelRouter:
 
     def __init__(self, workspace: Workspace, path: Path | None = None) -> None:
         self.workspace = workspace
-        self.path = path or (workspace.harness_dir / "config" / "llm.yaml")
+        self.path = path or (workspace.framework_root / "config" / "llm.yaml")
         self._data: dict[str, Any] | None = None
 
     def _load(self) -> dict[str, Any]:

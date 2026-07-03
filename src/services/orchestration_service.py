@@ -43,7 +43,7 @@ class OrchestrationService:
 
     # --- entry point --------------------------------------------------------
     def orchestrate(self, workflow_id: str, run: str | None = None, unit: str | None = None) -> dict[str, Any]:
-        """Resolve the next action for ``workflow_id`` acting on ``unit`` (an Epic/Feature/Story id)."""
+        """Resolve the next action for ``workflow_id`` acting on ``unit`` (an artifact id)."""
         workflow = self.workflows.find(workflow_id)
         if workflow is None:
             return {"action": "error", "workflow": workflow_id, "reason": f"no workflow found for id {workflow_id!r}"}
