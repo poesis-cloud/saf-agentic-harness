@@ -40,7 +40,7 @@ class SchemaChecker:
         schema_suffix = self.schemas.ARTIFACT_SCHEMA_SUFFIX
         # Every artifact template colocated with a role/orchestration (`**/artifacts/`) must be
         # claimed by exactly one registry schema whose x-artifact.template points at it. The
-        # registry (harness/schemas/artifact) is the single home for schemas; templates stay next
+        # registry (harness/contracts/artifact) is the single home for schemas; templates stay next
         # to the workflow that renders them.
         claimed = set()
         for schema_id, schema_dict in schemas.items():
@@ -53,10 +53,10 @@ class SchemaChecker:
             if template_path.resolve() not in claimed:
                 report.error(self.workspace.label(template_path, root.parent), "no registry artifact schema declares this template via x-artifact.template")
 
-        # A schema must live in the harness/schemas/artifact registry, never colocated under a
+        # A schema must live in the harness/contracts/artifact registry, never colocated under a
         # role/orchestration `artifacts/` dir.
         for stray_schema in sorted(root.glob(f"**/artifacts/*{schema_suffix}")):
-            report.error(self.workspace.label(stray_schema, root.parent), "artifact schema must live in the harness/schemas/artifact registry, not colocated under an artifacts/ dir")
+            report.error(self.workspace.label(stray_schema, root.parent), "artifact schema must live in the harness/contracts/artifact registry, not colocated under an artifacts/ dir")
 
         legacy_templates = sorted(
             path for path in root.glob("**/artifacts/*-template.md") if not path.name.endswith(template_suffix)

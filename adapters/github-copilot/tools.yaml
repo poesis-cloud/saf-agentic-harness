@@ -1,6 +1,6 @@
 # GitHub Copilot CLI / VS Code environment binding (env-specific tool/payload map).
 # The harness core stays env-agnostic and reads this map; another host (Claude Code, Cursor, …)
-# ships its own adapters/<env>/tools/map.yaml. `write`/`delete` map a host tool name to its action;
+# ships its own adapters/<env>/tools.yaml. `write`/`delete` map a host tool name to its action;
 # the *_keys lists name the payload fields to probe (first hit wins).
 write_tools:
   create_file: create

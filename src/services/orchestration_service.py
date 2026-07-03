@@ -130,7 +130,7 @@ class OrchestrationService:
         if binding is None:
             payload["action"] = "halt"
             payload["reason"] = "unroutable"
-            payload["detail"] = "no model clears the step's tier floor in llm/map.yaml"
+            payload["detail"] = "no model clears the step's tier floor in config/llm.yaml"
             return payload
         payload["routing"] = binding
         error = self.router.validate_dispatch(self._role_of(step), binding.get("model"))

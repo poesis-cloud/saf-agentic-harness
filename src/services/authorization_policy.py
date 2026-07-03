@@ -1,4 +1,4 @@
-"""AuthorizationPolicy — the privilege engine: load acl/map.yaml and decide who may act on what."""
+"""AuthorizationPolicy — the privilege engine: load config/acl.yaml and decide who may act on what."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import yaml
 
 
 class AuthorizationPolicy:
-    """The authorization plane. Loads the harness-owned ``acl/map.yaml`` (agent -> privileges) and
+    """The authorization plane. Loads the harness-owned ``config/acl.yaml`` (agent -> privileges) and
     answers ``allows(actor, action, resource)``. A privilege is ``"<action>_<resource>"`` where
     action ∈ create/read/update/delete/* and resource is an artifact schema name or ``*``. This is
     PLAIN RBAC — per action + per WHOLE resource, never per property: the host hook only sees the file
@@ -33,8 +33,8 @@ class AuthorizationPolicy:
 
     def __init__(self, acl_path: Path | None = None) -> None:
         # __file__ = harness/src/services/authorization_policy.py; parents[2] = the harness project
-        # dir that holds the data maps (map/ stays at the project root, not under src/).
-        self.acl_path = acl_path or (Path(__file__).resolve().parents[2] / "acl" / "map.yaml")
+        # dir. Env-agnostic config lives under harness/config/.
+        self.acl_path = acl_path or (Path(__file__).resolve().parents[2] / "config" / "acl.yaml")
         self._agents: dict[str, set[str]] | None = None
 
     @staticmethod

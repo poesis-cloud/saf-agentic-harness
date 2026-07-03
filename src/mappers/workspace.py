@@ -69,7 +69,7 @@ class Workspace:
 
     @property
     def schemas_dir(self) -> Path:
-        return self.harness_dir / "schemas"
+        return self.harness_dir / "contracts"
 
     def session_ledger(self, session_id: str | None) -> Path:
         """The per-session run ledger (JSONL): the single append-only record the hook funnel writes

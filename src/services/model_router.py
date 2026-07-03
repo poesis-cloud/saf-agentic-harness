@@ -2,7 +2,7 @@
 
 The orchestrator agents speak only TIERS + CAPABILITY TAGS + DISPATCH KNOBS; the concrete
 ``Model (Vendor)`` strings, capability scores, and dispatch-profile metadata live in the harness map
-``llm/map.yaml``. This service encodes the scoring + selection that used to be prose in
+``config/llm.yaml``. This service encodes the scoring + selection that used to be prose in
 the orchestrator SKILL (filter by tier floor, score ``sum(capability_scores[tag]) - cost_rank *
 cost_penalty``, pick the highest, resolve the config profile + dispatch knobs) so a dispatch's model
 resolves *deterministically* and can be validated/injected by the hook — instead of the agent
@@ -21,7 +21,7 @@ from mappers import Workspace
 
 
 class ModelRouter:
-    """Loads ``llm/map.yaml`` and resolves a concrete model key from a tier floor +
+    """Loads ``config/llm.yaml`` and resolves a concrete model key from a tier floor +
     capability tags, applying the cost-penalty scoring and the per-model dispatch-knob limits."""
 
     # risk -> tier floor (low defers to the role default); complexity -> tier floor (simple = no raise).
@@ -30,7 +30,7 @@ class ModelRouter:
 
     def __init__(self, workspace: Workspace, path: Path | None = None) -> None:
         self.workspace = workspace
-        self.path = path or (workspace.harness_dir / "llm" / "map.yaml")
+        self.path = path or (workspace.harness_dir / "config" / "llm.yaml")
         self._data: dict[str, Any] | None = None
 
     def _load(self) -> dict[str, Any]:
@@ -65,9 +65,9 @@ class ModelRouter:
         agent's role-default tier floor. Risk/complexity may raise the floor further — which the harness
         can't observe — so this is the MINIMUM gate, not the full resolution."""
         if not model or str(model).strip().lower() == "auto":
-            return "no resolved model set (never pass Auto or omit model); resolve via llm/map.yaml"
+            return "no resolved model set (never pass Auto or omit model); resolve via config/llm.yaml"
         if not self.is_known_model(model):
-            return f"model {model!r} is not a known routing key in llm/map.yaml"
+            return f"model {model!r} is not a known routing key in config/llm.yaml"
         floor = self.role_default(agent)
         tier = (self.models().get(model) or {}).get("tier")
         if self._tier_rank(tier) < self._tier_rank(floor):

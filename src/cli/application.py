@@ -56,7 +56,7 @@ def _configure_check_step(parser: argparse.ArgumentParser) -> None:
 
 def _configure_hook(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--event", required=True, help="host lifecycle event (sessionStart/userPromptSubmit/preToolUse/postToolUse/stop/sessionEnd)")
-    parser.add_argument("--env", default="github-copilot", help="host environment binding under adapters/<env>/tools/map.yaml (default: github-copilot)")
+    parser.add_argument("--env", default="github-copilot", help="host environment binding under adapters/<env>/tools.yaml (default: github-copilot)")
 
 
 def _configure_orchestrate(parser: argparse.ArgumentParser) -> None:
@@ -77,7 +77,7 @@ COMMANDS: list[Command] = [
             "Read a host lifecycle event (JSON on stdin) and route it to the deterministic checks: preToolUse authorizes the write (deny ungranted), postToolUse validates the written native-JSON artifact, session-close reviews the recorded steps' postconditions, sessionStart injects deterministic context. Emits the host's decision JSON on stdout; exit 2 = deny/fail. The shared host adapter (adapters/dispatch.sh <event> <env>) calls this; the CLI stays the single source of truth.\nExample: cat event.json | harness.py hook --event preToolUse",
             _configure_hook),
     Command("orchestrate", "resolve the next orchestration action (dispatch | halt | done) for a workflow + unit",
-            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts}), `halt` (a ★ gate is next, or no step is eligible while work remains), or `done` (every step's output artifact exists). The model resolves deterministically from the actor's role via harness/llm/map.yaml. The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow value-management-officier --unit sie-observability-foundation",
+            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts}), `halt` (a ★ gate is next, or no step is eligible while work remains), or `done` (every step's output artifact exists). The model resolves deterministically from the actor's role via config/llm.yaml. The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow value-management-officier --unit sie-observability-foundation",
             _configure_orchestrate),
 ]
 

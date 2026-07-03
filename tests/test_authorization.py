@@ -1,6 +1,6 @@
 """Authorization gate TESTS — privilege-based write-authority over a run log (harness ACL).
 
-DESIGN-TIME framework tests for the ``AuthorizationChecker`` + ``AuthorizationPolicy`` + ``acl/map.yaml``:
+DESIGN-TIME framework tests for the ``AuthorizationChecker`` + ``AuthorizationPolicy`` + ``config/acl.yaml``:
 a write is legal only when the actor holds a covering ``<action>_<resource>`` privilege. Asserts the
 original drift (RTE writing the portfolio singleton) is rejected; VMO passes; RTE may update_feature.status
 but not rewrite a PM-owned Feature; PM may; a missing actor is flagged. Run: ``python3 harness/tests/test_authorization.py``.

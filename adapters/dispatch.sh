@@ -5,7 +5,7 @@
 # Every host lifecycle hook execs this script with the event name as $1 and the environment id as
 # $2; the event payload arrives as JSON on stdin. We forward it unchanged to the harness `hook`
 # command, which is the single source of truth. The harness emits the host decision JSON on
-# stdout; exit 2 = deny/fail. Each adapter's own hooks/map.yaml supplies its env id as $2 — adding a
+# stdout; exit 2 = deny/fail. Each adapter's own hooks.yaml supplies its env id as $2 — adding a
 # new host never touches this script.
 set -euo pipefail
 

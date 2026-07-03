@@ -36,5 +36,5 @@ full: verify
 ## install-copilot-hooks: render the Copilot CLI hook map into the repo's .copilot/ (review/merge first)
 install-copilot-hooks:
 	@mkdir -p $(REPO)/.copilot
-	python3 -c "import json,yaml; json.dump(yaml.safe_load(open('adapters/github-copilot/hooks/map.yaml')), open('$(REPO)/.copilot/hooks.json','w'), indent=2)"
-	@echo "installed: $(REPO)/.copilot/hooks.json (rendered from adapters/github-copilot/hooks/map.yaml — the YAML map is the source of truth)"
+	python3 -c "import json,yaml; json.dump(yaml.safe_load(open('adapters/github-copilot/hooks.yaml')), open('$(REPO)/.copilot/hooks.json','w'), indent=2)"
+	@echo "installed: $(REPO)/.copilot/hooks.json (rendered from adapters/github-copilot/hooks.yaml — the YAML map is the source of truth)"

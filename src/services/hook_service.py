@@ -4,7 +4,7 @@ A host environment (GitHub Copilot CLI first) fires lifecycle hooks; each hook c
 `hook` command, which routes the event here. This service is the ONE place that turns a generic
 environment event into the same deterministic checks the CLI already exposes — it never becomes a
 second source of truth. Tool names, payload keys, and write verbs are host-specific, so they are NOT
-hardcoded: each `adapters/<env>/tools/map.yaml` declares them and the core stays env-agnostic.
+hardcoded: each `adapters/<env>/tools.yaml` declares them and the core stays env-agnostic.
 
 Host events normalize to the WORKFLOW's own vocabulary (a new host maps its events in EVENT_PHASE):
   - session-open   (sessionStart)        — constitution preflight + deterministic context injection
@@ -79,7 +79,7 @@ class HookService:
         self.binding = self._load_binding(env)
 
     def _load_binding(self, env: str) -> dict[str, Any]:
-        path = self.workspace.harness_dir / "adapters" / env / "tools" / "map.yaml"
+        path = self.workspace.harness_dir / "adapters" / env / "tools.yaml"
         return yaml.safe_load(self.workspace.read_text(path)) or {} if path.is_file() else {}
 
     def commands_for(self, phase: str) -> list[str]:
@@ -321,7 +321,7 @@ class HookService:
         if not agent:
             return ""
         return (f"routing: agent={agent}; role-default tier floor={self.router.role_default(agent)}; "
-                "resolve the model from harness/llm/map.yaml (never Auto).")
+                "resolve the model from config/llm.yaml (never Auto).")
 
     # --- session ledger -----------------------------------------------------
     def ledger_path(self, payload: dict[str, Any]) -> Path:

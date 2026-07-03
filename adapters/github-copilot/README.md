@@ -6,6 +6,6 @@ adapters-folder overview (shared dispatch script, per-host layout, how to add a 
 
 This adapter contains only the GitHub Copilot specific binding:
 
-- `hooks/map.yaml` — the host hook registration, rendered to `.copilot/hooks.json`; every entry calls
+- `hooks.yaml` — the host hook registration, rendered to `.copilot/hooks.json`; every entry calls
   the shared `../dispatch.sh <event> github-copilot`
-- `tools/map.yaml` — tool names, write verbs, and payload keys for this host
+- `tools.yaml` — tool names, write verbs, and payload keys for this host

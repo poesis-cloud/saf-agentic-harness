@@ -1,6 +1,6 @@
 """Model-routing TEST — the harness ModelRouter resolves deterministically from the routing map.
 
-DESIGN-TIME framework test for ``ModelRouter`` over ``llm/map.yaml``: the tier-floor
+DESIGN-TIME framework test for ``ModelRouter`` over ``config/llm.yaml``": the tier-floor
 mapping, tier-default selection when no capability tags are given, capability-score + cost-penalty
 selection, dispatch-knob downgrade against a model's supported levels, and known-model validation.
 Run via ``make verify``.
