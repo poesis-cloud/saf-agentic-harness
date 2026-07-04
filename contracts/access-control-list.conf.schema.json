@@ -5,7 +5,10 @@
     "description": "Validation schema for conf/access-control-list.conf.yaml: whole-resource RBAC. Actors (agent files) hold roles; each role carries privileges of exactly one artifact plus one action verb (CREATE|READ|UPDATE|DELETE).",
     "type": "object",
     "additionalProperties": false,
-    "required": ["actors", "roles"],
+    "required": [
+        "actors",
+        "roles"
+    ],
     "properties": {
         "actors": {
             "description": "The agents known to the framework, each with the roles it holds.",
@@ -14,7 +17,10 @@
             "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id", "roles"],
+                "required": [
+                    "id",
+                    "roles"
+                ],
                 "properties": {
                     "id": {
                         "description": "The agent filename (e.g. business-owner.agent.md).",
@@ -40,7 +46,10 @@
             "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["id", "privileges"],
+                "required": [
+                    "id",
+                    "privileges"
+                ],
                 "properties": {
                     "id": {
                         "type": "string",
@@ -51,7 +60,10 @@
                         "items": {
                             "type": "object",
                             "additionalProperties": false,
-                            "required": ["artifact", "action"],
+                            "required": [
+                                "artifact",
+                                "action"
+                            ],
                             "properties": {
                                 "artifact": {
                                     "description": "The artifact schema filename (or its stem) the privilege applies to.",
@@ -59,7 +71,12 @@
                                     "minLength": 1
                                 },
                                 "action": {
-                                    "enum": ["CREATE", "READ", "UPDATE", "DELETE"]
+                                    "enum": [
+                                        "CREATE",
+                                        "READ",
+                                        "UPDATE",
+                                        "DELETE"
+                                    ]
                                 }
                             }
                         }

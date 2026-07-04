@@ -5,7 +5,9 @@
     "description": "Validation schema for conf/workspace.conf.yaml: the structural blueprint of the workspace. A recursive tree of nodes; each node binds a path (with <slug> placeholders) to an optional artifact schema + template and a cardinality. Artifact-to-artifact derivation constraints (which kinds a given artifact may declare as sources) live in the artifact schemas themselves \u2014 the node's `schema` binding is the join point.",
     "type": "object",
     "additionalProperties": false,
-    "required": ["nodes"],
+    "required": [
+        "nodes"
+    ],
     "properties": {
         "nodes": {
             "type": "array",
@@ -19,7 +21,11 @@
         "node": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["path", "description", "cardinality"],
+            "required": [
+                "path",
+                "description",
+                "cardinality"
+            ],
             "properties": {
                 "path": {
                     "description": "Workspace-relative path of this node. Folder or file; <slug> segments are placeholders.",
@@ -32,7 +38,12 @@
                 },
                 "cardinality": {
                     "description": "How many instances of this node may exist at this position.",
-                    "enum": ["1", "0..1", "1..*", "0..*"]
+                    "enum": [
+                        "1",
+                        "0..1",
+                        "1..*",
+                        "0..*"
+                    ]
                 },
                 "schema": {
                     "description": "The artifact schema filename (in schemas/) that validates this node's file.",

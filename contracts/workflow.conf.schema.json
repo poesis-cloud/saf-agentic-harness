@@ -194,15 +194,51 @@
             "schema-adherence"
           ],
           "properties": {
-            "deep-reasoning": { "type": "number", "minimum": 0, "maximum": 10 },
-            "coding": { "type": "number", "minimum": 0, "maximum": 10 },
-            "tool-use": { "type": "number", "minimum": 0, "maximum": 10 },
-            "long-context": { "type": "number", "minimum": 0, "maximum": 10 },
-            "multimodal": { "type": "number", "minimum": 0, "maximum": 10 },
-            "writing-quality": { "type": "number", "minimum": 0, "maximum": 10 },
-            "instruction-following": { "type": "number", "minimum": 0, "maximum": 10 },
-            "fast-iteration": { "type": "number", "minimum": 0, "maximum": 10 },
-            "schema-adherence": { "type": "number", "minimum": 0, "maximum": 10 }
+            "deep-reasoning": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "coding": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "tool-use": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "long-context": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "multimodal": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "writing-quality": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "instruction-following": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "fast-iteration": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            },
+            "schema-adherence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10
+            }
           },
           "additionalProperties": false
         },
