@@ -4,7 +4,7 @@ DESIGN-TIME test for ``OrchestrationService``: the pure sequencing core (``next_
 workflow + a set of completed step ids) returns the first eligible step as a policy-valid
 ``dispatch``, halts at a ``gate``, halts when a predecessor is unmet, and reports ``done`` once every
 step is complete — and a smoke pass drives a real root workflow from id alone. Actors are loaded
-from ``config/access-control-list.yaml`` so the synthetic workflow stays methodology-agnostic. Run via pytest.
+from ``conf/access-control-list.conf.yaml`` so the synthetic workflow stays methodology-agnostic. Run via pytest.
 """
 
 from __future__ import annotations
@@ -14,37 +14,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from models import Workflow
-from mappers import ArtifactMapper, Workspace, WorkflowMapper
+from config import Workflow
+from config import FrameworkConfig
+from mappers import ArtifactMapper, Workspace
 from services import AuthorizationPolicy, ModelRouter, OrchestrationService
 
 
 def _engine() -> OrchestrationService:
     ws = Workspace.detect()
-    return OrchestrationService(ws, WorkflowMapper(ws), ArtifactMapper(ws), ModelRouter(ws))
+    cfg = FrameworkConfig.detect(ws)
+    return OrchestrationService(ws, cfg.workflows, ArtifactMapper(ws), ModelRouter(cfg.model_profiles))
 
 
 def _sample_workflow() -> Workflow:
     """A four-step linear workflow: author -> challenge -> ★ gate -> commit, sequenced by `after`.
 
-    Actors are picked from the real ACL so model-router validation exercises actual role defaults.
+    Actors are picked from the real ACL so dispatch validation exercises real agents; steps
+    carry weighted capabilities so the router resolves from the model catalog.
     """
-    policy = AuthorizationPolicy()
+    cfg = FrameworkConfig.detect(Workspace.detect())
+    policy = AuthorizationPolicy(cfg.access_control_list)
     agents = sorted(policy.agents().keys())
     assert len(agents) >= 3, "ACL must define at least three agents for the synthetic workflow"
 
-    # Pick agents with distinct role-default floors to exercise routing validation.
-    router = ModelRouter(Workspace.detect())
-    by_floor = {}
-    for agent in agents:
-        floor = router.role_default(agent)
-        by_floor.setdefault(floor, []).append(agent)
-
-    # author: any agent; reviewer: an agent whose floor is above tier-fast if possible;
-    # gatekeeper/committer: any agent (reuse author or reviewer is fine).
     author = agents[0]
-    reviewer = by_floor.get("tier-balanced", [author])[0]
+    reviewer = agents[1]
     gatekeeper = agents[-1]
+    caps = {"deep-reasoning": 7, "writing-quality": 8}
 
     return Workflow(
         {
@@ -57,12 +53,14 @@ def _sample_workflow() -> Workflow:
                         "actor": f"@{author}",
                         "kind": "author",
                         "output": "artifact",
+                        "capabilities": caps,
                     },
                     {
                         "id": "review",
                         "actor": f"@{reviewer}",
                         "kind": "challenge",
                         "output": "review",
+                        "capabilities": caps,
                         "conditions": [
                             {"id": "after_draft", "kind": "precondition", "type": "after", "step_id": "draft"},
                         ],
@@ -108,7 +106,8 @@ def test_second_step_routes_on_default() -> None:
     # routes on the actor-derived role default; dispatch stays on-policy.
     actor = action["actor"].lstrip("@")
     assert engine.router.validate_dispatch(actor, action["model"]) is None
-    assert action["routing"]["tier"] == engine.router.models()[action["model"]]["tier"]
+    assert action["routing"]["model"] == action["model"]
+    assert action["routing"]["score"] > 0
 
 
 def test_gate_halts() -> None:
@@ -121,7 +120,7 @@ def test_gate_halts() -> None:
 def test_blocked_when_predecessor_unmet() -> None:
     # Defensive branch: every remaining step waits on an unmet predecessor (here a dangling id),
     # so nothing is eligible while work remains -> the engine halts (blocked) rather than looping.
-    policy = AuthorizationPolicy()
+    policy = AuthorizationPolicy(FrameworkConfig.detect(Workspace.detect()).access_control_list)
     agents = sorted(policy.agents().keys())
     author = agents[0] if agents else "developer"
     wf = Workflow(
@@ -162,7 +161,7 @@ def test_real_root_workflow_drives_from_id() -> None:
     """Smoke: a real root workflow resolves to a concrete first action from its id alone (no unit
     artifacts on disk -> the cursor is empty -> the first authored step dispatches or halts at a gate)."""
     engine = _engine()
-    wf = next((w for w in WorkflowMapper(Workspace.detect()).all() if w.is_root), None)
+    wf = next((w for w in FrameworkConfig.detect(Workspace.detect()).workflows.all() if w.is_root), None)
     assert wf is not None, "expected at least one root workflow"
     action = engine.orchestrate(str(wf.id), unit=None)
     assert action["action"] in {"dispatch", "halt", "done"}

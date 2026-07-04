@@ -15,7 +15,7 @@ orthogonal ``orchestrator-mediation`` edge rule — participant→participant ``
 
 These checks read only the Poesis-owned workflows (never user workspace data), so they live apart
 from the runtime harness services and run via ``make test`` — separate from the ``make verify``
-contract gate. They consume the harness's OOP API: a ``Workspace`` and the ``WorkflowMapper``
+contract gate. They consume the harness's OOP API: a ``Workspace`` and the ``WorkflowCatalog``
 mapping each workflow.yaml to a ``Workflow`` entity.
 
 Run:  ``python3 harness/tests/test_workflow_invariants.py``   (from the framework root)
@@ -31,8 +31,9 @@ from pathlib import Path
 # ``python3 harness/tests/test_workflow_invariants.py`` resolves them from any cwd.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from models import Workflow
-from mappers import Workspace, WorkflowMapper
+from config import Workflow
+from config import FrameworkConfig
+from mappers import Workspace
 
 ROOT_ORCHESTRATIONS = (
     "portfolio",
@@ -48,7 +49,7 @@ def _workspace() -> Workspace:
 
 
 def _workflows(workspace: Workspace) -> list[Workflow]:
-    return WorkflowMapper(workspace).all()
+    return FrameworkConfig.detect(workspace).workflows.all()
 
 
 def _norm(actor: object) -> str:
@@ -57,12 +58,12 @@ def _norm(actor: object) -> str:
 
 # --- the structural checks (each returns a list of human-readable violations) -------------------
 def _workflow_path(workspace: Workspace, name: str) -> Path:
-    return workspace.framework_root / "config" / "workflows" / f"{name}.yaml"
+    return workspace.framework_root / "conf" / "workflows" / f"{name}.workflow.conf.yaml"
 
 
 def violations_root_completeness(workspace: Workspace) -> list[str]:
     out: list[str] = []
-    repo = WorkflowMapper(workspace)
+    repo = FrameworkConfig.detect(workspace).workflows
     for oid in ROOT_ORCHESTRATIONS:
         path = _workflow_path(workspace, oid)
         if not path.is_file():
@@ -95,7 +96,7 @@ def violations_delegates_to(workspace: Workspace) -> list[str]:
             target = step.delegates_to
             if not target:
                 continue
-            resolved = workspace.framework_root / "config" / "workflows" / f"{target}.yaml"
+            resolved = workspace.framework_root / "conf" / "workflows" / f"{target}.workflow.conf.yaml"
             if not resolved.is_file():
                 out.append(f"{label}: step {step.raw_id!r} delegates_to {target!r} → no workflow at {resolved}")
     return out

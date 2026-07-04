@@ -17,18 +17,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from models import Artifact
-from mappers import ArtifactMapper, SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import ArtifactMapper, Workspace
 from services import CelEvaluator
 
 
 def _artifact_a(artifact_id: str, status: str = "done", **extra: object) -> Artifact:
-    fields = {"id": artifact_id, "status": status, "type": "business", "title": artifact_id}
+    fields = {"slug": artifact_id.lower(), "status": status, "type": "business", "title": artifact_id}
     fields.update(extra)
     return Artifact("epic", Path(f"/tmp/artifacts/{artifact_id}.md"), fields, "")
 
 
 def _artifact_b(artifact_id: str, status: str = "done", product: str = "p1", **extra: object) -> Artifact:
-    fields = {"id": artifact_id, "status": status, "type": "business", "title": artifact_id}
+    fields = {"slug": artifact_id.lower(), "status": status, "type": "business", "title": artifact_id}
     fields.update(extra)
     return Artifact("feature", Path(f"/tmp/{product}/artifacts/{artifact_id}.md"), fields, "", product)
 
@@ -47,7 +48,7 @@ class _StubArtifactMapper(ArtifactMapper):
 def _cel(artifacts: list[Artifact]) -> CelEvaluator:
     ws = Workspace.detect()
     repo = _StubArtifactMapper(ws, artifacts)
-    schemas = SchemaMapper(ws)
+    schemas = SchemaCatalog(ws)
     return CelEvaluator(ws, repo, schemas)
 
 
@@ -156,12 +157,12 @@ def main() -> int:
     unit_sel = {
         "set_type": "artifact",
         "artifact_types": [{"alias": "epic", "schema_id": "epic"}],
-        "set_query": "epic.filter(x, x.id == unit_id)",
+        "set_query": "epic.filter(x, x.slug == unit_id)",
     }
-    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="A-1")
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="a-1")
     check("acting-unit status pass", outcome == "pass", f"got {outcome}: {detail}")
     check("acting-unit selects one of two", "selected 1 of 2" in detail, f"got {detail}")
-    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="A-2")
+    outcome, detail = cel.evaluate_state(unit_sel, "selected.all(x, x.status == 'funnel')", unit_id="a-2")
     check("acting-unit status fail", outcome == "fail", f"got {outcome}: {detail}")
     bad = cel.validate_state_condition(unit_sel, "selected.all(x, x.nonexistent == 1)")
     check("acting-unit undeclared prop rejected", bad is not None and "nonexistent" in bad, f"got {bad}")

@@ -1,4 +1,4 @@
-"""SchemaMapper — loads and validates the artifact-schema catalog + the harness schemas."""
+"""SchemaCatalog — loads and validates the artifact-schema catalog + the harness contracts."""
 
 from __future__ import annotations
 
@@ -13,21 +13,19 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
 
 from models import Report
 from text import bool_value, list_value
-from .workspace import Workspace
 
 
-class SchemaMapper:
-    """The data-mapper for JSON schemas.
+class SchemaCatalog:
+    """The configuration catalog for JSON schemas.
 
     `load_raw` returns artifact schemas as raw dicts (schema_id -> full schema dict with
     x-artifact metadata). Validating *artifacts against* these schemas is the `SchemaChecker`'s job.
-    
-    Alternative 1: schemas are pure data (raw dicts), not reified classes."""
+    Schemas are pure data (raw dicts), not reified classes."""
 
     ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
     ARTIFACT_TEMPLATE_SUFFIX = ".artifact-template.md"
 
-    def __init__(self, workspace: Workspace) -> None:
+    def __init__(self, workspace: Any) -> None:
         self.workspace = workspace
 
     # --- pure helpers -------------------------------------------------------
@@ -87,11 +85,14 @@ class SchemaMapper:
                 continue
             
             try:
-                jsonschema.Draft7Validator.check_schema(data)
+                # Meta-validate against the draft this schema itself declares via $schema
+                # (draft 2020-12 for the artifact/work-item $ref-subtyping family, draft-07
+                # elsewhere) rather than a hardcoded draft.
+                jsonschema.validators.validator_for(data).check_schema(data)
             except jsonschema.SchemaError as exc:
                 path_suffix = "/".join(str(part) for part in exc.absolute_schema_path)
                 location = f" at schema path {path_suffix}" if path_suffix else ""
-                local_report.error(label, f"invalid Draft-07 JSON Schema{location}: {exc.message}")
+                local_report.error(label, f"invalid JSON Schema{location}: {exc.message}")
                 continue
             
             metadata = self.schema_metadata(data)
@@ -117,7 +118,7 @@ class SchemaMapper:
 
     # --- harness schemas ----------------------------------------------------
     def workflow_schema_path(self) -> Path:
-        return self.workspace.schemas_dir / "workflow.schema.json"
+        return self.workspace.schemas_dir / "workflow.conf.schema.json"
 
     def workflow_schema(self) -> dict[str, Any] | None:
         path = self.workflow_schema_path()

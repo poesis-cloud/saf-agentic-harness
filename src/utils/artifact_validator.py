@@ -26,17 +26,18 @@ from models import Artifact, Report
 from text import markdown_body, section_map, section_tree
 
 if TYPE_CHECKING:
-    from mappers import SchemaMapper, Workspace
+    from config import SchemaCatalog
+    from mappers import Workspace
 
 
 class ArtifactValidator:
     """Schema-conformance for one artifact against the cataloged artifact schemas.
     
-    Uses raw schema dicts (Alternative 1) instead of ArtifactSchema objects.
-    Dependencies (Workspace, SchemaMapper) are injected to avoid circular imports.
+    Uses raw schema dicts instead of reified schema classes.
+    Dependencies (Workspace, SchemaCatalog) are injected to avoid circular imports.
     """
 
-    def __init__(self, workspace: Workspace, schemas: SchemaMapper) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaCatalog) -> None:
         self.workspace = workspace
         self.schemas = schemas
         self._catalog: dict[str, dict[str, Any]] | None = None
@@ -156,7 +157,12 @@ class ArtifactValidator:
             referrer=schema,
             store=store,
         )
-        validator = jsonschema.Draft7Validator(schema, resolver=resolver)
+        # validator_for() selects the validator class matching this schema's own declared
+        # $schema (e.g. draft 2020-12 for the artifact/work-item $ref-subtyping family) rather
+        # than a hardcoded draft. This matters: under Draft-07, a top-level $ref makes sibling
+        # keywords (properties/required/etc.) silently ignored; 2020-12 composes them.
+        validator_cls = jsonschema.validators.validator_for(schema)
+        validator = validator_cls(schema, resolver=resolver)
         for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(error)}")
         

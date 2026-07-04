@@ -14,13 +14,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import Workspace
 from services import SchemaChecker
 
 
 def _checker() -> SchemaChecker:
     ws = Workspace.detect()
-    return SchemaChecker(ws, SchemaMapper(ws))
+    return SchemaChecker(ws, SchemaCatalog(ws))
 
 
 def test_artifact_catalog() -> None:

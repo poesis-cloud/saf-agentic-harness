@@ -28,7 +28,8 @@ from typing import Any
 import yaml
 
 from models import Report
-from mappers import ArtifactMapper, LogMapper, SchemaMapper, Workspace, WorkflowMapper
+from config import SchemaCatalog, WorkflowCatalog
+from mappers import ArtifactMapper, LogMapper, Workspace
 from .authorization_checker import AuthorizationChecker
 from .authorization_policy import AuthorizationPolicy
 from .model_router import ModelRouter
@@ -68,14 +69,14 @@ class HookService:
     POSTCONDITION_AUTO_RUN = ["check-artifact"]
     SESSION_OPEN_INJECT = ["workflow", "instructions", "skills"]
 
-    def __init__(self, workspace: Workspace, schemas: SchemaMapper, logs: LogMapper, policy: AuthorizationPolicy, env: str = "github-copilot", artifacts: ArtifactMapper | None = None) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, logs: LogMapper, policy: AuthorizationPolicy, workflows: WorkflowCatalog, router: ModelRouter, env: str = "github-copilot", artifacts: ArtifactMapper | None = None) -> None:
         self.workspace = workspace
         self.logs = logs
         self.policy = policy
         self.artifacts = artifacts
         self.authz = AuthorizationChecker(workspace, schemas, logs, policy)
-        self.workflows = WorkflowMapper(workspace)
-        self.router = ModelRouter(workspace)
+        self.workflows = workflows
+        self.router = router
         self.binding = self._load_binding(env)
 
     def _load_binding(self, env: str) -> dict[str, Any]:
@@ -320,8 +321,9 @@ class HookService:
     def _routing_context(self, agent: str) -> str:
         if not agent:
             return ""
-        return (f"routing: agent={agent}; role-default tier floor={self.router.role_default(agent)}; "
-                "resolve the model from config/llm.yaml (never Auto).")
+        return (f"routing: agent={agent}; the model must be a catalog id from "
+                "conf/model-profiles.conf.yaml, resolved deterministically from the dispatching "
+                "step's weighted capabilities (see harness/README.md 'Model Routing').")
 
     # --- session ledger -----------------------------------------------------
     def ledger_path(self, payload: dict[str, Any]) -> Path:

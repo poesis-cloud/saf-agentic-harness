@@ -18,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest
 
-from mappers import ArtifactMapper, WorkflowMapper, Workspace
+from config import FrameworkConfig
+from mappers import ArtifactMapper, Workspace
 from services import ModelRouter, OrchestrationService
 
 
@@ -27,12 +28,13 @@ def _workspace() -> Workspace:
 
 
 def _engine(ws: Workspace) -> OrchestrationService:
-    return OrchestrationService(ws, WorkflowMapper(ws), ArtifactMapper(ws), ModelRouter(ws))
+    cfg = FrameworkConfig.detect(ws)
+    return OrchestrationService(ws, cfg.workflows, ArtifactMapper(ws), ModelRouter(cfg.model_profiles))
 
 
 def _all_workflows():
     ws = _workspace()
-    return [(str(wf.id), wf) for wf in WorkflowMapper(ws).all()]
+    return [(str(wf.id), wf) for wf in FrameworkConfig.detect(ws).workflows.all()]
 
 
 _WORKFLOWS = _all_workflows()

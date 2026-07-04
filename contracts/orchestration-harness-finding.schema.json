@@ -32,18 +32,14 @@
       "description": "Stable finding classification used for routing and aggregation.",
       "type": "string",
       "enum": [
-        "artifact_state_invalid",
         "artifact_reference_unresolved",
         "blocked_route_missing",
         "child_work_incomplete",
         "contract_missing",
         "cost_accounting_missing",
         "dependency_not_ready",
-        "deprecated_status",
         "environment_missing",
         "facilitator_mismatch",
-        "forbidden_orchestrator_write",
-        "gate_packet_incomplete",
         "handler_evidence_missing",
         "no_artifacts_found",
         "participant_evidence_missing",
@@ -51,7 +47,6 @@
         "return_boundary_order_violation",
         "trace_contract_invalid",
         "unit_selection_ambiguous",
-        "unknown_orchestrator",
         "unsupported_handler_scope",
         "generic"
       ]

@@ -1,32 +1,27 @@
-"""Domain models — the framework's entities, one class per file.
+"""Domain models — the workspace's domain entities, one class per file.
 
-Each model abstracts a file (or a fragment of one): `Workflow` ⇄ workflow.yaml, `Artifact`
+The workspace content is the database the harness reads its domain entities from: `Artifact`
 ⇄ a workspace unit, `Log` ⇄ a run log, `Section` ⇄ a markdown section. `Finding` /
-`Report` are the result entities. Models depend only on the `text` kernel — never on
-mappers, services, or the CLI.
+`Report` are the result entities. Configuration entities (Workflow, Step, Condition) live in
+the `config` package — they are framework configuration, not workspace data. Models depend
+only on the `text` kernel — never on mappers, services, config, or the CLI.
 
-Artifact schemas are now pure data (raw dicts), not reified classes (Alternative 1).
+Artifact schemas are pure data (raw dicts), not reified classes.
 """
 
 from __future__ import annotations
 
 from .artifact import Artifact
-from .condition import Condition
 from .finding import Finding
 from .log import Log, LogEntry
 from .report import Report
 from .section import Section
-from .step import Step
-from .workflow import Workflow
 
 __all__ = [
     "Artifact",
-    "Condition",
     "Finding",
     "Log",
     "LogEntry",
     "Report",
     "Section",
-    "Step",
-    "Workflow",
 ]

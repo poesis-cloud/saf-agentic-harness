@@ -1,4 +1,4 @@
-"""A parsed workflow.yaml — the `workflow` root (header + steps) as an entity."""
+"""A parsed workflow configuration — the `workflow` root (header + steps) as a config entity."""
 
 from __future__ import annotations
 

@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from models import Finding, Report
-from mappers import ArtifactMapper, LogMapper, WorkflowMapper, Workspace
+from config import WorkflowCatalog
+from mappers import ArtifactMapper, LogMapper, Workspace
 from .cel_evaluator import CelEvaluator
 from .schema_checker import SchemaChecker
 
@@ -21,7 +22,7 @@ class StepChecker:
     def __init__(
         self,
         workspace: Workspace,
-        workflows: WorkflowMapper,
+        workflows: WorkflowCatalog,
         artifacts: ArtifactMapper,
         logs: LogMapper,
         cel: CelEvaluator,

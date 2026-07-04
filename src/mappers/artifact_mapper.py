@@ -58,9 +58,9 @@ class ArtifactMapper:
     def _schema_mapper(self) -> Any:
         if self._schemas is None:
             # Lazy import avoids a hard dependency at construction time.
-            from .schema_mapper import SchemaMapper
+            from config import SchemaCatalog
 
-            self._schemas = SchemaMapper(self.workspace)
+            self._schemas = SchemaCatalog(self.workspace)
         return self._schemas
 
     def _schema_catalog(self) -> dict[str, dict[str, Any]]:

@@ -93,18 +93,92 @@ tool binding live under each adapter's own subfolder. See `harness/adapters/READ
 adapter contract (adding a new host, etc.).
 
 ```text
-config/               # env-agnostic framework configuration (owned by the embedding framework)
-  acl.yaml            # authorization grants
-  llm.yaml            # model tiers, capability scores, routing knobs
-  workflows/          # methodology-specific workflow definitions
+conf/                 # env-agnostic framework configuration (owned by the embedding framework)
+  access-control-list.conf.yaml  # authorization grants (actors -> roles -> privileges)
+  workspace.conf.yaml            # workspace layout blueprint (nodes: path -> schema/template/cardinality)
+  model-profiles.conf.yaml       # canonical model catalog: capability_scores + cost_rank per model
+  workflows/                     # *.workflow.conf.yaml — steps declare actor, kind, and weighted capabilities
 harness/
   adapters/
     dispatch.sh       # shared, generic dispatcher: stdin JSON -> harness hook command (every adapter calls this)
     github-copilot/
       hooks.yaml      # YAML source rendered to .copilot/hooks.json
       tools.yaml      # host tool names, write verbs, payload keys
-  contracts/          # generic harness schemas (workflow, journal, artifact base)
+      models.yaml     # host model id bindings to canonical profiles
+  contracts/          # generic harness schemas: the artifact base contract, the journal contract,
+                      # and one <name>.conf.schema.json contract per conf/ configuration file
+  src/
+    config/           # the configuration plane: one typed view per conf file + the shared loader
+    models/           # workspace domain entities (Artifact, Log, Section, Finding, Report)
+    mappers/          # workspace data access (Workspace, ArtifactMapper, LogMapper)
+    services/         # domain logic (checkers, CEL, authorization, routing, orchestration, hooks)
+    cli/              # the composition root + argparse dispatch
 ```
+
+## Configuration plane
+
+Every `conf/` file has a contract schema in `harness/contracts/` and a typed view class in
+`harness/src/config/`:
+
+| Configuration | Contract | Typed view |
+|---|---|---|
+| `conf/access-control-list.conf.yaml` | `access-control-list.conf.schema.json` | `AccessControlList` |
+| `conf/model-profiles.conf.yaml` | `model-profiles.conf.schema.json` | `ModelProfiles` |
+| `conf/workspace.conf.yaml` | `workspace.conf.schema.json` | `WorkspaceLayout` |
+| `conf/workflows/*.workflow.conf.yaml` | `workflow.conf.schema.json` | `WorkflowCatalog` / `Workflow` / `Step` |
+
+Parsing and validation are one act: `ConfigLoader` parses the YAML and validates it against the
+contract in the same step — an unvalidated parse never escapes the config package. `FrameworkConfig`
+aggregates the four views and is built once at `Application` initialization, so every interaction
+with the harness (check, hook, orchestrate) fails fast — with the full findings report — on an
+invalid configuration before any command logic runs.
+
+The workspace content is the database the harness reads its domain entities from (`models/` via
+`mappers/`); `conf/` is the framework's static configuration (`config/`). Workflows and steps are
+configuration entities, not workspace entities — they live in the config package.
+
+## Model Routing
+Model routing is resolved from two static configuration layers, both read deterministically at
+dispatch time (no artifact reads, no per-instance estimation):
+
+1. **Step → `capabilities` (weighted, static)**. Each workflow step declares a weighted map of
+   capability tag -> weight (0-10), all nine tags explicit — e.g. an architecture-review step
+   weights `deep-reasoning: 9, coding: 4, …`. Authored once per step in
+   `conf/workflows/*.workflow.conf.yaml`, exactly like `skills`. The step is the dispatch — its
+   kind of work fixes both WHICH tags matter and HOW MUCH; SAFe's splitting discipline homogenizes
+   per-unit complexity (stories sized to fit an iteration, features to fit a PI), so two instances
+   of the same step carry the same weights. A human `gate` step weights every tag 0 — it is never
+   dispatched to a model.
+
+2. **Model catalog → `capability_scores` + `cost_rank` (static)**. `conf/model-profiles.conf.yaml`'s
+   0-10 `capability_scores` per tag and `cost_rank` per model. The catalog owns the canonical tag
+   vocabulary (`model-profiles.conf.schema.json#/definitions/capabilities`).
+
+### The score
+The score is a pure weighted capability sum:
+
+$\text{Score}(m) = \sum_{\text{tag}} \text{capability\_score}_m[\text{tag}] \times \text{step.capabilities}[\text{tag}]$
+
+Highest score wins; ties break toward lower `cost_rank`. Cost sensitivity emerges structurally:
+steps with low, sparse weights compress the candidate scores into a narrow band where the
+cheap-model tie-break dominates, while steps with high weights on discriminating tags let
+capability differences dominate cost.
+
+**Worked example** — a step with `capabilities: {deep-reasoning: 9}`, two models differing by 2
+points on `deep-reasoning` (9 vs 7):
+
+$\text{A} = 9 \times 9 = 81 \qquad \text{B} = 7 \times 9 = 63$
+
+A wins on capability. With `capabilities: {deep-reasoning: 3}` the spread narrows
+($27$ vs $21$) and, across a larger candidate set, the `cost_rank` tie-break routes toward
+cheaper models on genuinely low-stakes steps.
+
+A step with no positive weight (a gate) or an empty catalog is **unroutable**: `orchestrate`
+returns `halt` with `reason: unroutable` rather than silently passing `Auto`. At the hook plane,
+a `runSubagent` dispatch is denied unless its model is a known catalog id (never `Auto`, never
+omitted). `OrchestrationService` resolves each dispatch's model via `ModelRouter` from the step's
+`capabilities` and returns the binding in the dispatch payload (`routing: {model, score,
+cost_rank, reason}`).
 
 `dispatch.sh` is intentionally thin and env-agnostic: it takes the event name and the environment
 id as its two arguments and forwards the raw event payload to `harness.py hook --event <name> --env

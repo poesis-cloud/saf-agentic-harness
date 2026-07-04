@@ -16,7 +16,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import LogMapper, SchemaMapper, Workspace, WorkflowMapper
+from config import FrameworkConfig, SchemaCatalog
+from mappers import LogMapper, Workspace
 from services import AuthorizationPolicy, HookService, ModelRouter
 
 
@@ -54,17 +55,31 @@ def _agents_without_privilege(policy: AuthorizationPolicy, action: str, resource
     return [agent for agent, privs in policy.agents().items() if not policy.allows(agent, action, resource)]
 
 
+SINGLETON_PATH_KIND = {
+    "portfolio-manifest.yaml": "portfolio-manifest",
+    "_registry.yaml": "portfolio-manifest",
+    "strategic-themes.md": "strategic-themes",
+    "portfolio-vision.md": "portfolio-vision",
+    "portfolio-roadmap.md": "portfolio-roadmap",
+    "art/*/art-manifest.yaml": "art-manifest",
+    "art/*/teams/*/team-manifest.yaml": "team-manifest",
+    "products/*/product-manifest.yaml": "product-manifest",
+}
+
+
 def _svc(workspace: Workspace | None = None) -> HookService:
     ws = workspace or Workspace.detect()
-    return HookService(ws, SchemaMapper(ws), LogMapper(ws), AuthorizationPolicy())
+    cfg = FrameworkConfig.detect(ws)
+    return HookService(ws, SchemaCatalog(ws), LogMapper(ws), AuthorizationPolicy(cfg.access_control_list, singleton_path_kind=SINGLETON_PATH_KIND), cfg.workflows, ModelRouter(cfg.model_profiles))
 
 
 def main() -> int:
     workspace = Workspace.detect()
-    policy = AuthorizationPolicy()
-    schemas = SchemaMapper(workspace).load_raw()
-    workflows = WorkflowMapper(workspace).all()
-    router = ModelRouter(workspace)
+    cfg = FrameworkConfig.detect(workspace)
+    policy = AuthorizationPolicy(cfg.access_control_list)
+    schemas = SchemaCatalog(workspace).load_raw()
+    workflows = cfg.workflows.all()
+    router = ModelRouter(cfg.model_profiles)
     svc = _svc(workspace)
     failures: list[str] = []
 
@@ -100,7 +115,7 @@ def main() -> int:
             failures.append(f"{artifact_non_owners[0]} artifact.status edit should deny (property-level dropped), got {d.permission}")
 
     # 4. A read-only tool is never blocked, regardless of actor.
-    singleton_path = next((p for p in policy.SINGLETON_PATH_KIND if "." not in p), "portfolio-manifest.yaml")
+    singleton_path = next((p for p in SINGLETON_PATH_KIND if "." not in p), "portfolio-manifest.yaml")
     d = svc.handle("preToolUse", {"agent": artifact_non_owners[0] if artifact_non_owners else "unknown", "tool": "read_file", "tool_input": {"filePath": singleton_path}})
     if d.permission != "allow":
         failures.append(f"read_file should never block, got {d.permission}")
@@ -130,23 +145,13 @@ def main() -> int:
             if f"on suborchestration {sub_id}" not in d.context:
                 failures.append(f"sessionStart should inject the {sub_id} suborchestration skill map")
 
-    # 7. Dispatch governance (preToolUse on runSubagent): the (target agent, model) selection is gated
-    #    against the routing map — Auto/omitted/unknown/below-floor models deny; a valid in-floor one allows.
-    #    Pick a target agent whose role-default floor is above the lowest tier so we can test below-floor denial.
-    models = router.models()
-    tiers = router.tiers()
+    # 7. Dispatch governance (preToolUse on runSubagent): the (target agent, model) selection is
+    #    gated against the model catalog — Auto/omitted/unknown models deny; a known catalog id allows.
+    models = router.profiles.models()
     if not models:
-        failures.append("config/llm.yaml has no models")
+        failures.append("conf/model-profiles.conf.yaml catalog is empty — dispatch governance cannot be exercised")
     else:
-        # A known model at the lowest tier (should allow any role whose floor is tier-fast).
-        lowest_tier_model = tiers.get("tier-fast") or next(iter(models.keys()))
-        # A known model below the security-expert floor (tier-balanced).
-        balanced_floor = router.role_default("security-expert")
-        below_floor_model = None
-        for key, entry in models.items():
-            if router._tier_rank(entry.get("tier")) < router._tier_rank(balanced_floor):
-                below_floor_model = key
-                break
+        known_model = next(iter(models.keys()))
         unknown_model = "Imaginary Model (copilot)"
         if unknown_model in models:
             unknown_model = "Totally Unknown Model (copilot)"
@@ -161,12 +166,10 @@ def main() -> int:
             failures.append("runSubagent with model=Auto should deny")
         if dispatch("developer", None).permission != "deny":
             failures.append("runSubagent with omitted model should deny")
-        if unknown_model not in models and dispatch("developer", unknown_model).permission != "deny":
+        if dispatch("developer", unknown_model).permission != "deny":
             failures.append("runSubagent with an unknown model should deny")
-        if below_floor_model and dispatch("security-expert", below_floor_model).permission != "deny":
-            failures.append("runSubagent below the role-default floor should deny")
-        if dispatch("developer", lowest_tier_model).permission != "allow":
-            failures.append("runSubagent with a valid in-floor model should allow")
+        if dispatch("developer", known_model).permission != "allow":
+            failures.append("runSubagent with a known catalog model should allow")
 
     # 8. A dispatched CHILD step session inherits ITS step's context (Option B — correlate-by-actor
     #    via the run journal's open `dispatch`): given an orchestrate dispatch to a step actor, that
@@ -198,7 +201,8 @@ def main() -> int:
         unit_id = "test-unit-01"
         with tempfile.TemporaryDirectory() as tmp:
             ws2 = Workspace.detect(workspace_root=Path(tmp))
-            svc2 = HookService(ws2, SchemaMapper(ws2), LogMapper(ws2), AuthorizationPolicy())
+            cfg2 = FrameworkConfig.detect(ws2)
+            svc2 = HookService(ws2, SchemaCatalog(ws2), LogMapper(ws2), AuthorizationPolicy(cfg2.access_control_list), cfg2.workflows, ModelRouter(cfg2.model_profiles))
             step_actor = str(sub.facilitator).lstrip("@") if sub.facilitator else "step-actor"
             LogMapper(ws2).append_entry(
                 ws2.run_journal("R-child"), command="orchestrate",

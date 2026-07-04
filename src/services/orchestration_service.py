@@ -4,11 +4,11 @@ Given a workflow id + a unit, the engine recomputes the step cursor from the uni
 (never from a prior log line — Design invariant 13: check-only determinism) and returns exactly one
 of three actions:
 
-* ``dispatch`` — the next eligible step, with its resolved ``{step, actor, model, skills, config,
-  unit, output, prompt_context}`` binding (the model resolved deterministically via ``ModelRouter``
-  from the step's static routing metadata: role / risk / complexity / tags / config).
+* ``dispatch`` — the next eligible step, with its resolved ``{step, actor, model, skills, unit,
+  output, prompt_context}`` binding (the model resolved deterministically via ``ModelRouter``
+  from the step's weighted ``capabilities`` map against the model catalog).
 * ``halt`` — a ``gate`` step is next (await the human ★ decision), or no step is eligible while the
-  workflow is unfinished (an unmet predecessor / blocked precondition).
+  workflow is unfinished (an unmet predecessor / blocked precondition / unroutable step).
 * ``done`` — every step's output artifact exists; the workflow is complete for this unit.
 
 Sequencing is split in two: a pure, filesystem-independent core (``next_action`` over a workflow +
@@ -18,11 +18,10 @@ unit's artifacts. The engine never writes — it returns the action; the host co
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
-from models import Workflow
-from mappers import ArtifactMapper, WorkflowMapper, Workspace
+from config import Workflow, WorkflowCatalog
+from mappers import ArtifactMapper, Workspace
 from .model_router import ModelRouter
 
 
@@ -32,7 +31,7 @@ class OrchestrationService:
     def __init__(
         self,
         workspace: Workspace,
-        workflows: WorkflowMapper,
+        workflows: WorkflowCatalog,
         artifacts: ArtifactMapper,
         router: ModelRouter,
     ) -> None:
@@ -107,7 +106,7 @@ class OrchestrationService:
         return str(actor).lstrip("@") if isinstance(actor, str) else ""
 
     def _dispatch(self, workflow: Workflow, step: Any, unit: str | None, run: str | None) -> dict[str, Any]:
-        binding = self._resolve_model(step)
+        binding = self.router.resolve(step.capabilities)
         payload: dict[str, Any] = {
             "action": "dispatch",
             "workflow": str(workflow.id),
@@ -116,7 +115,6 @@ class OrchestrationService:
             "actor": step.actor,
             "kind": step.kind,
             "model": binding.get("model") if binding else None,
-            "config": binding.get("config_profile") if binding else None,
             "skills": step.skills,
             "unit": unit,
             "output": step.output,
@@ -130,7 +128,9 @@ class OrchestrationService:
         if binding is None:
             payload["action"] = "halt"
             payload["reason"] = "unroutable"
-            payload["detail"] = "no model clears the step's tier floor in config/llm.yaml"
+            payload["detail"] = (f"step {step.id!r} has no positive capability weights (or the model "
+                                  "catalog is empty) — nothing to score; the harness halts rather "
+                                  "than passing Auto")
             return payload
         payload["routing"] = binding
         error = self.router.validate_dispatch(self._role_of(step), binding.get("model"))
@@ -139,11 +139,6 @@ class OrchestrationService:
             payload["reason"] = "off-policy-dispatch"
             payload["detail"] = error
         return payload
-
-    def _resolve_model(self, step: Any) -> dict[str, Any] | None:
-        """Route on defaults: the role floor derived from the actor, with no per-step overrides."""
-        floor = self.router.tier_floor("", "", self.router.role_default(self._role_of(step)))
-        return self.router.resolve(floor, [], config_profile=None)
 
     # --- artifact cursor ----------------------------------------------------
     def _completed_steps(self, workflow: Workflow, unit: str | None) -> set[str]:

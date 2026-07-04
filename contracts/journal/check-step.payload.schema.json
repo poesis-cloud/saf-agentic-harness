@@ -41,9 +41,9 @@
           "enum": ["precondition", "postcondition", "invariant"]
         },
         "type": {
-          "description": "What the condition is about: a judgment category (authority/content/clarification/challenge/consistency/transition/state) or a structural dependency (after/input/output).",
+          "description": "What the condition is about: a judgment category (authority/content/clarification/challenge/consistency/state) or a structural dependency (after/input/output).",
           "type": "string",
-          "enum": ["authority", "content", "clarification", "challenge", "consistency", "transition", "state", "after", "input", "output"]
+          "enum": ["authority", "content", "clarification", "challenge", "consistency", "state", "after", "input", "output"]
         },
         "id": {
           "description": "Condition id, matching a steps[].conditions[].id token in the contract.",

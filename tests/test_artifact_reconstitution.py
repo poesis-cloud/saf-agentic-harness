@@ -18,7 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import Workspace
 from models import Artifact, Section
 from text import frontmatter, markdown_body, parse_frontmatter, parse_sections, extract_file_heading
 
@@ -28,7 +29,7 @@ _FENCE_PATTERN = re.compile(r"```markdown\n(.*?)\n```", re.DOTALL)
 def _template_path(schema_id: str = "story") -> Path:
     """Resolve the framework template path for *schema_id* from the schema catalog."""
     workspace = Workspace.detect()
-    schemas = SchemaMapper(workspace).load_raw()
+    schemas = SchemaCatalog(workspace).load_raw()
     schema = schemas.get(schema_id)
     assert schema, f"schema {schema_id!r} not found in catalog"
     template = schema.get("x-artifact", {}).get("template")

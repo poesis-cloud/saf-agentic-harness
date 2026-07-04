@@ -1,41 +1,28 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://poesis.cloud/safe-agentic-framework/artifact.schema.json",
     "title": "Generic artifact schema",
-    "description": "Base schema for all artifacts validated by the deterministic orchestration harness. Methodology-specific artifact schemas in schemas/ extend this base. The harness is agnostic to the methodology that owns the artifact; this base only supplies the generic object shape and a minimal set of helper definitions that are truly universal across artifact schemas.",
+    "description": "Base schema for all artifacts validated by the deterministic orchestration harness. Methodology-specific artifact schemas in schemas/ extend this base via a top-level $ref (structural base, per the GSM convention; allOf is reserved for if/then facets). The harness is agnostic to the methodology that owns the artifact; this base only supplies the generic object shape and the one universal identity field (slug).",
     "type": "object",
     "additionalProperties": true,
     "required": [
         "slug"
     ],
     "properties": {
-        "id": {
-            "description": "Stable artifact identifier. The exact format is owned by the methodology-specific schema; the base only requires it to be a non-empty string when present.",
-            "$ref": "#/definitions/nonEmptyString"
-        },
         "slug": {
-            "description": "URL-safe artifact slug. Methodology-specific schemas may impose additional constraints (length, format); the base only requires it to be a non-empty string.",
-            "$ref": "#/definitions/nonEmptyString"
-        }
-    },
-    "definitions": {
-        "nonEmptyString": {
-            "description": "Reusable helper: a string with at least one character.",
+            "description": "URL-safe, human-identifying slug for the artifact \u2014 the ONE generic display/identity field every artifact schema should rely on rather than locally re-defining an equivalent 'title' property.",
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-z0-9-]+$"
         },
-        "nullableString": {
-            "description": "Reusable helper: a string or null.",
-            "type": [
-                "string",
-                "null"
-            ]
-        },
-        "stringArray": {
-            "description": "Reusable helper: an array of strings.",
+        "sources": {
+            "description": "Derivation provenance: workspace-relative refs to the upstream artifacts this artifact was BUILT FROM (the inputs the authoring step read). Owned by the derived artifact \u2014 the upstream cannot know its future consumers. Optional: originating artifacts (e.g. the root of the hierarchy) have no sources. Methodology-specific subtype schemas MAY narrow items with a pattern constraining which artifact kinds are valid sources (e.g. an ADR sources features). Factual only \u2014 distinct from work_item_relations (semantic peer relations).",
             "type": "array",
+            "minItems": 1,
             "items": {
-                "type": "string"
+                "type": "string",
+                "format": "uri-reference"
             }
         }
     }

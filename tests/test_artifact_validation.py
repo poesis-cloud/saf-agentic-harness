@@ -19,8 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import ArtifactMapper, InvalidArtifactError, LogMapper, SchemaMapper, Workspace
-from services import AuthorizationPolicy, HookService
+from config import FrameworkConfig, SchemaCatalog
+from mappers import ArtifactMapper, InvalidArtifactError, LogMapper, Workspace
+from services import AuthorizationPolicy, HookService, ModelRouter
 from utils import ArtifactValidator
 
 # An artifact frontmatter that parses but violates the epic schema (missing most required fields).
@@ -32,7 +33,7 @@ def _ws(tmp: str) -> Workspace:
 
 
 def _repo(ws: Workspace) -> ArtifactMapper:
-    return ArtifactMapper(ws, ArtifactValidator(ws, SchemaMapper(ws)))
+    return ArtifactMapper(ws, ArtifactValidator(ws, SchemaCatalog(ws)))
 
 
 def main() -> int:
@@ -55,7 +56,7 @@ def main() -> int:
         check("scan_raw tolerates invalid", len(repo.scan_raw()) == 1)
         art = repo.load_one(bad)
         check("load_one infers artifact kind", art is not None and art.kind == "epic")
-        report = ArtifactValidator(ws, SchemaMapper(ws)).validate(art)
+        report = ArtifactValidator(ws, SchemaCatalog(ws)).validate(art)
         check("validator flags invalid artifact", report.has_errors(), str([f.message for f in report.findings][:1]))
 
         raised = False
@@ -79,7 +80,8 @@ def main() -> int:
         bad = Path(tmp) / "portfolio-backlog" / "bad-epic" / "bad-epic.epic.md"
         bad.write_text(INVALID_ARTIFACT)
         repo = _repo(ws)
-        hooks = HookService(ws, SchemaMapper(ws), LogMapper(ws), AuthorizationPolicy(), artifacts=repo)
+        cfg = FrameworkConfig.detect(ws)
+        hooks = HookService(ws, SchemaCatalog(ws), LogMapper(ws), AuthorizationPolicy(cfg.access_control_list), cfg.workflows, ModelRouter(cfg.model_profiles), artifacts=repo)
 
         payload = {"tool": "create_file", "tool_input": {"filePath": str(bad)}}
         decision = hooks._postcondition(payload)

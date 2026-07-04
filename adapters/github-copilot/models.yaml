@@ -1,0 +1,54 @@
+# GitHub Copilot CLI / VS Code environment binding — canonical model id -> host model id map.
+# The harness core and conf/model-profiles.conf.yaml stay host-agnostic; this file is the ONLY
+# place that names the exact string this host expects as the `runSubagent` `model` argument.
+# Another host (Claude Code, Cursor, …) ships its own adapters/<env>/models.yaml with the same
+# canonical ids on the left and its own host model strings on the right.
+#
+# `canonical id` MUST match an `id` entry in ../../../conf/model-profiles.conf.yaml.
+# `host_model_id` MUST be the exact string to pass as the `model` argument to `runSubagent`
+# ("Model Name (Vendor)", vendor is always "copilot" for this host).
+#
+# Scope: every `model_picker_enabled: true` chat model from this host's models.json catalog as of
+# 2026-07-04 (20 models). Disabled/legacy/embedding catalog entries are intentionally excluded —
+# they are not selectable dispatch targets.
+model_bindings:
+  gpt-5.5:
+    host_model_id: "GPT-5.5 (copilot)"
+  gpt-5.4:
+    host_model_id: "GPT-5.4 (copilot)"
+  gpt-5.4-mini:
+    host_model_id: "GPT-5.4 mini (copilot)"
+  gpt-5.3-codex:
+    host_model_id: "GPT-5.3-Codex (copilot)"
+  claude-opus-4.8:
+    host_model_id: "Claude Opus 4.8 (copilot)"
+  gemini-2.5-pro:
+    host_model_id: "Gemini 2.5 Pro (copilot)"
+  claude-fable-5:
+    host_model_id: "Claude Fable 5 (copilot)"
+  claude-opus-4.6:
+    host_model_id: "Claude Opus 4.6 (copilot)"
+  claude-opus-4.7:
+    host_model_id: "Claude Opus 4.7 (copilot)"
+  claude-opus-4.8-fast:
+    host_model_id: "Claude Opus 4.8 (fast mode) (Preview) (copilot)"
+  claude-sonnet-4.6:
+    host_model_id: "Claude Sonnet 4.6 (copilot)"
+  claude-sonnet-5:
+    host_model_id: "Claude Sonnet 5 (copilot)"
+  gemini-3.1-pro-preview:
+    host_model_id: "Gemini 3.1 Pro (Preview) (copilot)"
+  gemini-3.5-flash:
+    host_model_id: "Gemini 3.5 Flash (copilot)"
+  kimi-k2.7-code:
+    host_model_id: "Kimi K2.7 Code (Preview) (copilot)"
+  mai-code-1-flash:
+    host_model_id: "MAI-Code-1-Flash (copilot)"
+  gpt-5-mini:
+    host_model_id: "GPT-5 mini (copilot)"
+  claude-sonnet-4.5:
+    host_model_id: "Claude Sonnet 4.5 (copilot)"
+  claude-opus-4.5:
+    host_model_id: "Claude Opus 4.5 (copilot)"
+  claude-haiku-4.5:
+    host_model_id: "Claude Haiku 4.5 (copilot)"

@@ -11,7 +11,8 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
     jsonschema = None
 
 from models import Artifact, Report
-from mappers import SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import Workspace
 from utils import ArtifactValidator
 
 
@@ -20,7 +21,7 @@ class SchemaChecker:
     mappers-level `ArtifactValidator` (shared with `ArtifactMapper` + the postcondition
     hook); this service loops it into a report and adds catalog integrity + native-JSON validation."""
 
-    def __init__(self, workspace: Workspace, schemas: SchemaMapper, validator: ArtifactValidator | None = None) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, validator: ArtifactValidator | None = None) -> None:
         self.workspace = workspace
         self.schemas = schemas
         self.validator = validator or ArtifactValidator(workspace, schemas)
@@ -124,7 +125,11 @@ class SchemaChecker:
             referrer=schema_dict,
             store=store,
         )
-        validator = jsonschema.Draft7Validator(schema_dict, resolver=resolver)
+        # validator_for() picks the validator class matching schema_dict's own declared $schema
+        # (draft 2020-12 for the artifact/work-item $ref-subtyping family) instead of a hardcoded
+        # draft, so top-level $ref composes with sibling keywords instead of silently ignoring them.
+        validator_cls = jsonschema.validators.validator_for(schema_dict)
+        validator = validator_cls(schema_dict, resolver=resolver)
         for err in sorted(validator.iter_errors(data), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(err)}")
         return report

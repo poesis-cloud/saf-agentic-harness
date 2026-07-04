@@ -12,7 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from mappers import SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import Workspace
 from models import Artifact
 from utils import ArtifactValidator
 
@@ -52,7 +53,7 @@ def _story_fixture(tmp_path: Path, monkeypatch, story_id: str, body: str) -> tup
     monkeypatch.setattr(Workspace, "detect", classmethod(detect_override))
 
     workspace = Workspace.detect()
-    schemas = SchemaMapper(workspace)
+    schemas = SchemaCatalog(workspace)
     validator = ArtifactValidator(workspace, schemas)
     raw_schemas = schemas.load_raw()
     story_schema = raw_schemas.get("story")

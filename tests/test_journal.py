@@ -17,13 +17,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import jsonschema
 
-from mappers import LogMapper, SchemaMapper, Workspace
+from config import FrameworkConfig, SchemaCatalog
+from mappers import LogMapper, Workspace
 
 
 def _validator() -> jsonschema.Draft7Validator:
     """The envelope validator with a $ref resolver over the per-command payload schemas."""
     ws = Workspace.detect()
-    schemas = SchemaMapper(ws)
+    schemas = SchemaCatalog(ws)
     envelope = schemas.journal_schema()
     assert envelope is not None, "journal.schema.json must exist"
     store = schemas.journal_payload_store()

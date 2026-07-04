@@ -15,12 +15,11 @@ from pathlib import Path
 from typing import Callable
 
 from models import Report
+from config import ConfigError, FrameworkConfig, SchemaCatalog
 from mappers import (
     ArtifactMapper,
     LogMapper,
-    SchemaMapper,
     Workspace,
-    WorkflowMapper,
 )
 from utils import ArtifactValidator
 from services import (
@@ -32,7 +31,6 @@ from services import (
     OrchestrationService,
     SchemaChecker,
     StepChecker,
-    TransitionPolicy,
 )
 from .command import Command
 
@@ -41,9 +39,6 @@ from .command import Command
 def _configure_check_artifact(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--unit-id", help="validate only one artifact by its globally-unique id")
     parser.add_argument("--path", type=Path, help="validate one native JSON artifact (*.artifact.json) directly against its schema")
-    parser.add_argument("--to", help="with --unit-id: target status of a status edge to evaluate against the transition guard")
-    parser.add_argument("--gate", choices=["accept", "reject"], help="with --to: explicit decision for an edge that crosses a gate")
-    parser.add_argument("--orchestrator", help="with --to: committing orchestrator (owner check is policy-driven)")
 
 
 def _configure_check_step(parser: argparse.ArgumentParser) -> None:
@@ -66,8 +61,8 @@ def _configure_orchestrate(parser: argparse.ArgumentParser) -> None:
 
 # --- the registry (metadata; runners are bound in Application) ---------------
 COMMANDS: list[Command] = [
-    Command("check-artifact", "validate artifact state (FSM, linkage, schema, gates)",
-            "The STATE plane. With no args: sweep every artifact — status FSM, scope/frontmatter coherence, parent linkage, blocking open_items across gates, and JSON Schema conformance.\n  --unit-id <id>   scope every check to one unit (ids are globally unique across the workspace).\n  --path <file>    validate one native JSON artifact (*.artifact.json) directly against its schema.\n  --to <status>    with --unit-id: evaluate that status edge against the transition guard (legal edge, no blocking open_items, gate accept/reject) and report OK-to-commit or blocked.\nThe harness never writes — it reports the edge; the orchestrator commits.\nExample: harness.py --workspace-root workspace check-artifact --unit-id my-unit",
+    Command("check-artifact", "validate artifact state (linkage, schema, open-items)",
+            "The STATE plane. With no args: sweep every artifact — scope/frontmatter coherence, parent linkage, blocking open_items, and JSON Schema conformance.\n  --unit-id <id>   scope every check to one unit (ids are globally unique across the workspace).\n  --path <file>    validate one native JSON artifact (*.artifact.json) directly against its schema.\nThe harness never writes — it reports findings; the orchestrator commits.\nExample: harness.py --workspace-root workspace check-artifact --unit-id my-unit",
             _configure_check_artifact),
     Command("check-step", "evaluate one step's preconditions and postconditions and append the step line to the session ledger",
             "The CONDITIONS plane. Evaluate a step's `conditions` (each is `kind: precondition|postcondition`, `type: after|state`, `id`): `type: after` checks a predecessor step (resolved from the run ledger), `type: state` asserts on the persisted workspace via CEL (artifact selection + predicate). Authorization is also checked at precondition. The workflow config is resolved from --orchestration; scope is derived from the resolved unit's workspace path. The step's canonical, schema-valid line is ALWAYS appended to the per-session run ledger (logs/hooks/<session>.jsonl, selected by --session) — that same ledger feeds predecessor `after` checks and the session-close review.\nExample: harness.py check-step --orchestration my-workflow --step my-step --unit-id my-unit --session abc123",
@@ -76,7 +71,7 @@ COMMANDS: list[Command] = [
             "Read a host lifecycle event (JSON on stdin) and route it to the deterministic checks: preToolUse authorizes the write (deny ungranted), postToolUse validates the written native-JSON artifact, session-close reviews the recorded steps' postconditions, sessionStart injects deterministic context. Emits the host's decision JSON on stdout; exit 2 = deny/fail. The shared host adapter (adapters/dispatch.sh <event> <env>) calls this; the CLI stays the single source of truth.\nExample: cat event.json | harness.py hook --event preToolUse",
             _configure_hook),
     Command("orchestrate", "resolve the next orchestration action (dispatch | halt | done) for a workflow + unit",
-            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts}), `halt` (a gate is next, or no step is eligible while work remains), or `done` (every step's output artifact exists). The model resolves deterministically from the actor's role via config/llm.yaml. The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow my-workflow --unit my-unit",
+            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts} — the model routed from the step's weighted capabilities against conf/model-profiles.conf.yaml; see harness/README.md 'Model Routing'), `halt` (a gate is next, no step is eligible while work remains, or the step is unroutable), or `done` (every step's output artifact exists). The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow my-workflow --unit my-unit",
             _configure_orchestrate),
 ]
 
@@ -91,9 +86,15 @@ class Application:
     def __init__(self, workspace: Workspace) -> None:
         self.workspace = workspace
 
-        # mappers (data-mappers)
-        workflows = WorkflowMapper(workspace)
-        schemas = SchemaMapper(workspace)
+        # configuration plane — parsed AND contract-validated at initialization; every CLI
+        # interaction fails fast (ConfigError) on an invalid conf/*.conf.yaml before any
+        # command logic runs.
+        schemas = SchemaCatalog(workspace)
+        self.config = FrameworkConfig(workspace.framework_root, workspace.schemas_dir, schemas)
+        workflows = self.config.workflows
+        self.schemas = schemas
+
+        # mappers (workspace data access)
         self.validator = ArtifactValidator(workspace, schemas)
         artifacts = ArtifactMapper(workspace, self.validator)
         self.artifacts = artifacts
@@ -101,13 +102,15 @@ class Application:
         self.logs = logs
 
         # services (in dependency order — no cycles)
-        policy = TransitionPolicy()
         self.schema_checker = SchemaChecker(workspace, schemas, self.validator)
-        self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker, policy)
+        self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker)
         cel = CelEvaluator(workspace, artifacts, schemas)
         self.step_checker = StepChecker(workspace, workflows, artifacts, logs, cel, self.schema_checker)
-        self.schemas = schemas
-        self.router = ModelRouter(workspace)
+        self.policy = AuthorizationPolicy(
+            self.config.access_control_list,
+            singleton_path_kind=self.config.workspace_layout.singleton_path_kind(),
+        )
+        self.router = ModelRouter(self.config.model_profiles)
         self.orchestration = OrchestrationService(workspace, workflows, artifacts, self.router)
 
         self._runners: dict[str, Callable[[argparse.Namespace], Report]] = {
@@ -121,22 +124,10 @@ class Application:
     def _run_check_artifact(self, args: argparse.Namespace) -> Report:
         if args.path is not None:
             return self.schema_checker.check_json(args.path.resolve())
-        report = Report()
-        if args.to is not None:
-            if not args.unit_id:
-                report.error("check-artifact", "--to requires --unit-id (the unit whose status edge to check)")
-                return report
-            return self.artifact_checker.check_transition(args.unit_id, args.to, args.gate, args.orchestrator)
         if args.unit_id is not None:
-            sub, targets = self.artifact_checker.check_target(args.unit_id, None)
-            report.extend(sub)
-            if len(targets) != 1:
-                return report
-            report.extend(self.artifact_checker.check_gate_packet(args.unit_id))
-            return report
-        report.extend(self.artifact_checker.check_all())
-        report.extend(self.artifact_checker.check_gate_packet(None))
-        return report
+            sub, _ = self.artifact_checker.check_target(args.unit_id, None)
+            return sub
+        return self.artifact_checker.check_all()
 
     def _run_check_step(self, args: argparse.Namespace) -> Report:
         ledger = self.workspace.session_ledger(args.session)
@@ -154,7 +145,7 @@ class Application:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        hooks = HookService(self.workspace, self.schemas, self.logs, AuthorizationPolicy(), env=args.env, artifacts=self.artifacts)
+        hooks = HookService(self.workspace, self.schemas, self.logs, self.policy, self.config.workflows, self.router, env=args.env, artifacts=self.artifacts)
         decision = hooks.handle(args.event, payload)
         report = decision.report
         for command in hooks.commands_for(decision.phase):   # map-driven, write-scope only
@@ -232,7 +223,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     workspace_root = args.workspace_root or args.portfolio_root
     workspace = Workspace.detect(None, workspace_root)
-    report = Application(workspace).dispatch(args)
+    try:
+        application = Application(workspace)
+    except ConfigError as exc:
+        # invalid framework configuration — render every finding and fail before any command runs.
+        return exc.report.print_json(strict=True) if args.json else exc.report.print(strict=True)
+    report = application.dispatch(args)
     if args.command in ("hook", "orchestrate"):
         # the action/decision JSON is already on stdout; exit non-zero = deny/error.
         return 2 if any(f.severity == "error" for f in report.findings) else 0

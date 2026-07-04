@@ -10,7 +10,8 @@ import lark
 from celpy import celtypes
 
 from models import Artifact
-from mappers import ArtifactMapper, SchemaMapper, Workspace
+from config import SchemaCatalog
+from mappers import ArtifactMapper, Workspace
 
 
 class CelEvaluator:
@@ -36,7 +37,7 @@ class CelEvaluator:
         self,
         workspace: Workspace,
         artifacts: ArtifactMapper,
-        schemas: SchemaMapper | None = None,
+        schemas: SchemaCatalog | None = None,
     ) -> None:
         self.workspace = workspace
         self.artifacts = artifacts
@@ -75,18 +76,26 @@ class CelEvaluator:
     def _schema_properties_index(self) -> dict[str, set[str]]:
         """Map every artifact schema_id (and its artifact_kind alias) to its closed set of
         authored property names — the `__`-prefixed harness-injected keys are excluded, since
-        they are not part of an artifact's queryable state. Cached per evaluator instance."""
+        they are not part of an artifact's queryable state. Every methodology schema extends the
+        generic base contract via a top-level $ref, so the base's properties (slug, sources) are
+        part of each closed set too. Cached per evaluator instance."""
         if self._schema_prop_index is None:
             index: dict[str, set[str]] = {}
             if self.schemas is not None:
                 from models import Report
+                base = self.schemas.base_artifact_schema() or {}
+                base_props = {
+                    key
+                    for key in base.get("properties", {}).keys()
+                    if not key.startswith("__")
+                }
                 schemas = self.schemas.load_raw(Report())
                 for schema_id, schema_dict in schemas.items():
                     props = {
                         key
                         for key in schema_dict.get("properties", {}).keys()
                         if not key.startswith("__")
-                    }
+                    } | base_props
                     metadata = schema_dict.get("x-artifact", {})
                     index[schema_id] = props
                     kind = metadata.get("kind")

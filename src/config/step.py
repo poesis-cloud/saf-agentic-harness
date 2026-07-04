@@ -45,6 +45,22 @@ class Step:
         return [str(s) for s in raw] if isinstance(raw, list) else []
 
     @property
+    def capabilities(self) -> dict[str, float]:
+        """The step's weighted capability demand: capability tag -> weight (0-10). Static per
+        step; the ModelRouter multiplies these weights against the model catalog's
+        capability_scores to resolve this step's dispatch model."""
+        raw = self._data.get("capabilities")
+        if not isinstance(raw, dict):
+            return {}
+        weights: dict[str, float] = {}
+        for tag, weight in raw.items():
+            try:
+                weights[str(tag)] = float(weight)
+            except (TypeError, ValueError):
+                continue
+        return weights
+
+    @property
     def output(self) -> str:
         """The single artifact KIND this step produces or updates (effect-determinism)."""
         return str(self._data.get("output") or "")

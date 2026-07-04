@@ -2,8 +2,7 @@
 
 Each service operates on the model entities via the repositories: `WorkflowChecker`
 (workflow constitution, pytest), `SchemaChecker`, `ArtifactChecker` (state plane),
-`StepChecker` (check-step), `CelEvaluator` (the only check language),
-`TransitionPolicy` (the status-transition policy loaded from framework config). Services
+`StepChecker` (check-step), `CelEvaluator` (the only check language). Services
 depend on models + mappers — never on the CLI; the CLI wires them together.
 """
 
@@ -18,7 +17,6 @@ from .model_router import ModelRouter
 from .orchestration_service import OrchestrationService
 from .schema_checker import SchemaChecker
 from .step_checker import StepChecker
-from .transition_policy import TransitionPolicy
 from .workflow_checker import WorkflowChecker
 
 __all__ = [
@@ -32,6 +30,5 @@ __all__ = [
     "OrchestrationService",
     "SchemaChecker",
     "StepChecker",
-    "TransitionPolicy",
     "WorkflowChecker",
 ]
