@@ -26,13 +26,20 @@ from models import Report
 
 from .errors import ConfigError
 
+# The harness's OWN contract schemas are harness-owned and live with the harness code —
+# resolved structurally from this package, never configured (config files describe the
+# embedding framework and the workspace, not the harness itself).
+HARNESS_CONTRACTS_DIR = Path(__file__).resolve().parents[2] / "contracts"
+# Host adapter bindings are harness-owned INTERNAL configuration — same structural home.
+HARNESS_ADAPTERS_DIR = Path(__file__).resolve().parents[2] / "adapters"
+
 
 class ConfigLoader:
     """Reads and contract-validates the framework configuration files."""
 
-    def __init__(self, framework_root: Path, contracts_dir: Path) -> None:
+    def __init__(self, framework_root: Path, contracts_dir: Path | None = None) -> None:
         self.framework_root = framework_root
-        self.contracts_dir = contracts_dir
+        self.contracts_dir = contracts_dir or HARNESS_CONTRACTS_DIR
 
     # --- paths ----------------------------------------------------------------
     def conf_path(self, name: str) -> Path:

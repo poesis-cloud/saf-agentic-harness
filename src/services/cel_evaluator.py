@@ -279,6 +279,20 @@ class CelEvaluator:
             return f"set_predicate: {predicate_err}"
         return None
 
+    def state_condition_findings(self, workflow: Any) -> list[tuple[str, str]]:
+        """(step_id, message) for every `type: state` condition in the workflow whose selector /
+        predicate fails static schema validation — unknown alias schema, uncompilable CEL, or a
+        property reference not declared by the aliased artifact schema. Design-time only (needs
+        no workspace); the constitution gate runs it over the whole workflow catalog."""
+        findings: list[tuple[str, str]] = []
+        for step in workflow.steps:
+            for condition in step.conditions:
+                if condition.type == "state" and condition.set_selector is not None:
+                    error = self.validate_state_condition(condition.set_selector, condition.set_predicate)
+                    if error:
+                        findings.append((step.id, f"condition {condition.id!r}: {error}"))
+        return findings
+
     def evaluate_state(self, selector: dict[str, Any] | None, predicate_src: str | None, unit_id: str | None = None) -> tuple[str, str]:
         """Evaluate a `type: state` condition. SELECT a set via `set_query` (the `unit_id` runtime
         constant is in scope, so `epic.filter(e, e.id == unit_id)` scopes to the acting unit), then

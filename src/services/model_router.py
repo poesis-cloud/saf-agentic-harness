@@ -51,9 +51,11 @@ class ModelRouter:
             "reason": "scored on " + ", ".join(sorted(weighted)),
         }
 
-    def validate_dispatch(self, agent: str, model: str | None) -> str | None:
-        """Return an error string if a ``(agent, model)`` dispatch is off-policy, else None: a
-        resolved model must be set (never Auto/omitted) and be a known catalog id."""
+    def validate_dispatch(self, model: str | None) -> str | None:
+        """Return an error string if a host-proposed dispatch model is off-policy, else None: a
+        resolved model must be set (never Auto/omitted) and be a known catalog id. This guards the
+        HOOK plane, where the model arrives from the host payload — a binding produced by
+        :meth:`resolve` is a catalog id by construction and needs no re-check."""
         if not model or str(model).strip().lower() == "auto":
             return "no resolved model set (never pass Auto or omit model); resolve from the step's capabilities via conf/model-profiles.conf.yaml"
         if not self.is_known_model(model):

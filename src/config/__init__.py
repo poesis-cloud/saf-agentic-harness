@@ -11,8 +11,9 @@ on an invalid configuration before any command logic runs.
 """
 
 from .errors import ConfigError
-from .loader import ConfigLoader
+from .loader import ConfigLoader, HARNESS_CONTRACTS_DIR
 from .access_control_list import AccessControlList
+from .framework_layout import FrameworkLayout
 from .model_profiles import ModelProfiles
 from .workspace_layout import WorkspaceLayout
 from .condition import Condition
@@ -28,6 +29,8 @@ __all__ = [
     "ConfigError",
     "ConfigLoader",
     "FrameworkConfig",
+    "FrameworkLayout",
+    "HARNESS_CONTRACTS_DIR",
     "ModelProfiles",
     "SchemaCatalog",
     "Step",

@@ -26,7 +26,7 @@ verify:
 
 ## check-catalog: run just the artifact schema/template catalog check (also part of verify).
 check-catalog:
-	$(PYTEST) tests/test_catalog.py -q
+	$(PYTEST) tests/integration/test_catalog.py -q
 
 ## test: alias for the constitution gate (same pytest suite as verify).
 test: verify

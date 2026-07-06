@@ -84,11 +84,13 @@ class Log:
     def entries(self) -> list[LogEntry]:
         return [LogEntry(line) for line in self.lines]
 
-    def executed_steps(self) -> list[str]:
-        """Steps whose LATEST step-bearing line is 'completed' (replay re-opens a step)."""
+    def executed_steps(self, orchestration: str | None = None) -> list[str]:
+        """Steps whose LATEST step-bearing line is 'completed' (replay re-opens a step).
+        When ``orchestration`` is given, only that workflow's lines count — step ids are only
+        unique within one workflow."""
         latest: dict[str, str] = {}
         for entry in self.entries():
-            if entry.step:
+            if entry.step and (orchestration is None or entry.orchestration == orchestration):
                 latest[entry.step] = str(entry.status)
         return [step for step, status in latest.items() if status == "completed"]
 

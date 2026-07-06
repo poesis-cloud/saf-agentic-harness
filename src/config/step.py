@@ -31,14 +31,6 @@ class Step:
         return self._data.get("actor")
 
     @property
-    def kind(self) -> str:
-        return str(self._data.get("kind") or "")
-
-    @property
-    def delegates_to(self) -> Any:
-        return self._data.get("delegates_to")
-
-    @property
     def skills(self) -> list[str]:
         """The skill ids the dispatched agent loads for this step (per-step, not per-workflow)."""
         raw = self._data.get("skills")
@@ -61,9 +53,11 @@ class Step:
         return weights
 
     @property
-    def output(self) -> str:
-        """The single artifact KIND this step produces or updates (effect-determinism)."""
-        return str(self._data.get("output") or "")
+    def artifacts(self) -> list[str]:
+        """The artifact(s) this step produces or updates, each identified by a schema slug (the
+        artifact kind) or a URI (a specific artifact instance). Most steps declare exactly one."""
+        raw = self._data.get("artifacts")
+        return [str(a) for a in raw] if isinstance(raw, list) else []
 
     @property
     def conditions(self) -> list[Condition]:

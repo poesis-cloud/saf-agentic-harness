@@ -1,4 +1,9 @@
-"""SchemaCatalog — loads and validates the artifact-schema catalog + the harness contracts."""
+"""SchemaCatalog — loads and validates the artifact-schema catalog + the harness contracts.
+
+The methodology-specific artifact schemas live in the FRAMEWORK's schema registry (declared by
+conf/framework.conf.yaml, default `schemas/`); the harness's own contract schemas live with the
+harness code (harness/contracts/, resolved structurally). The workspace is never involved —
+schemas are framework definition data, not workspace data."""
 
 from __future__ import annotations
 
@@ -14,6 +19,9 @@ except ImportError:  # pragma: no cover - exercised only in minimal Python runti
 from models import Report
 from text import bool_value, list_value
 
+from .framework_layout import FrameworkLayout
+from .loader import HARNESS_CONTRACTS_DIR
+
 
 class SchemaCatalog:
     """The configuration catalog for JSON schemas.
@@ -25,8 +33,18 @@ class SchemaCatalog:
     ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
     ARTIFACT_TEMPLATE_SUFFIX = ".artifact-template.md"
 
-    def __init__(self, workspace: Any) -> None:
+    def __init__(self, workspace: Any, layout: FrameworkLayout | None = None) -> None:
         self.workspace = workspace
+        self.layout = layout or FrameworkLayout({})
+
+    # --- framework-side roots -------------------------------------------------
+    def skills_root(self) -> Path:
+        """The framework directory skills (and their colocated templates) live under."""
+        return self.layout.skills_root(self.workspace.framework_root)
+
+    def registry_dir(self) -> Path:
+        """The framework's artifact schema registry."""
+        return self.layout.schemas_registry(self.workspace.framework_root)
 
     # --- pure helpers -------------------------------------------------------
     @classmethod
@@ -62,15 +80,16 @@ class SchemaCatalog:
         This is the raw data model for Alternative 1 (schemas as pure data, not classes).
         """
         local_report = report or Report()
-        root = self.workspace.skills_root
-        # Methodology-specific artifact schemas live in the framework root schemas/ directory;
-        # the harness-owned generic base schema lives in harness/contracts/artifact.schema.json.
-        registry = self.workspace.framework_root / "schemas"
+        base = self.workspace.framework_root.parent
+        # Methodology-specific artifact schemas live in the framework's schema registry
+        # (conf/framework.conf.yaml paths.schemas); the harness-owned generic base schema lives
+        # in harness/contracts/artifact.schema.json (structural).
+        registry = self.registry_dir()
         schemas_by_id: dict[str, dict[str, Any]] = {}
         seen_ids: dict[str, Path] = {}
         
         for path in sorted(registry.glob(f"*{self.ARTIFACT_SCHEMA_SUFFIX}")):
-            label = self.workspace.label(path, root.parent)
+            label = self.workspace.label(path, base)
             try:
                 data = json.loads(self.workspace.read_text(path))
             except json.JSONDecodeError as exc:
@@ -107,7 +126,7 @@ class SchemaCatalog:
             if schema_id in seen_ids:
                 local_report.error(
                     label,
-                    f"duplicate artifact schema id {schema_id!r}; first declared at {self.workspace.label(seen_ids[schema_id], root.parent)}",
+                    f"duplicate artifact schema id {schema_id!r}; first declared at {self.workspace.label(seen_ids[schema_id], base)}",
                 )
                 continue
             
@@ -118,7 +137,7 @@ class SchemaCatalog:
 
     # --- harness schemas ----------------------------------------------------
     def workflow_schema_path(self) -> Path:
-        return self.workspace.schemas_dir / "workflow.conf.schema.json"
+        return HARNESS_CONTRACTS_DIR / "workflow.conf.schema.json"
 
     def workflow_schema(self) -> dict[str, Any] | None:
         path = self.workflow_schema_path()
@@ -127,7 +146,7 @@ class SchemaCatalog:
         return json.loads(self.workspace.read_text(path))
 
     def journal_schema_path(self) -> Path:
-        return self.workspace.schemas_dir / "journal.schema.json"
+        return HARNESS_CONTRACTS_DIR / "journal.schema.json"
 
     def journal_schema(self) -> dict[str, Any] | None:
         path = self.journal_schema_path()
@@ -139,7 +158,7 @@ class SchemaCatalog:
         """The per-command payload schemas keyed by `$id` — the store a $ref resolver uses to
         resolve the envelope's `oneOf` payload references (journal/<command>.payload.schema.json)."""
         store: dict[str, Any] = {}
-        payload_dir = self.workspace.schemas_dir / "journal"
+        payload_dir = HARNESS_CONTRACTS_DIR / "journal"
         if payload_dir.is_dir():
             for path in sorted(payload_dir.glob("*.payload.schema.json")):
                 schema = json.loads(self.workspace.read_text(path))
@@ -149,7 +168,7 @@ class SchemaCatalog:
         return store
 
     def base_artifact_schema_path(self) -> Path:
-        return self.workspace.schemas_dir / "artifact.schema.json"
+        return HARNESS_CONTRACTS_DIR / "artifact.schema.json"
 
     def base_artifact_schema(self) -> dict[str, Any] | None:
         """The generic harness-owned artifact base schema that methodology-specific artifact
@@ -160,7 +179,7 @@ class SchemaCatalog:
         return json.loads(self.workspace.read_text(path))
 
     def framework_definitions_schema_path(self) -> Path:
-        return self.workspace.framework_root / "schemas" / "framework-definitions.schema.json"
+        return self.registry_dir() / "framework-definitions.schema.json"
 
     def framework_definitions_schema(self) -> dict[str, Any] | None:
         """The framework-owned reusable definitions schema referenced by methodology-specific

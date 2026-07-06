@@ -13,24 +13,29 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import jsonschema
+from referencing import Registry, Resource
+from referencing.jsonschema import DRAFT7
 
 from config import FrameworkConfig, SchemaCatalog
 from mappers import LogMapper, Workspace
 
 
 def _validator() -> jsonschema.Draft7Validator:
-    """The envelope validator with a $ref resolver over the per-command payload schemas."""
+    """The envelope validator with a `referencing` Registry over the per-command payload schemas."""
     ws = Workspace.detect()
     schemas = SchemaCatalog(ws)
     envelope = schemas.journal_schema()
     assert envelope is not None, "journal.schema.json must exist"
     store = schemas.journal_payload_store()
     store[envelope["$id"]] = envelope
-    resolver = jsonschema.RefResolver.from_schema(envelope, store=store)
-    return jsonschema.Draft7Validator(envelope, resolver=resolver)
+    registry = Registry().with_resources(
+        (uri, Resource.from_contents(doc, default_specification=DRAFT7))
+        for uri, doc in store.items()
+    )
+    return jsonschema.Draft7Validator(envelope, registry=registry)
 
 
 def _errors(validator: jsonschema.Draft7Validator, entry: dict) -> list[str]:
@@ -55,7 +60,7 @@ _HOOK = {
 _ORCHESTRATE = {
     "command": "orchestrate", "trigger": "agent", "run": "R-01", "orchestration": "test-orchestration",
     "step": "step-1", "unit": "U-01", "status": "dispatch",
-    "payload": {"action": "dispatch", "workflow": "test-orchestration", "step": "step-1", "actor": "@test-actor", "model": "GPT-5.4 (copilot)", "unit": "U-01", "output": "artifact"},
+    "payload": {"action": "dispatch", "workflow": "test-orchestration", "step": "step-1", "actor": "@test-actor", "model": "GPT-5.4 (copilot)", "unit": "U-01", "artifacts": ["artifact"]},
 }
 
 

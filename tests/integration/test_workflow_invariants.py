@@ -29,7 +29,7 @@ from pathlib import Path
 
 # Make the top-level src modules importable: add ``harness/src`` to sys.path so
 # ``python3 harness/tests/test_workflow_invariants.py`` resolves them from any cwd.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config import Workflow
 from config import FrameworkConfig
@@ -61,26 +61,16 @@ def _workflow_path(workspace: Workspace, name: str) -> Path:
     return workspace.framework_root / "conf" / "workflows" / f"{name}.workflow.conf.yaml"
 
 
-def violations_root_completeness(workspace: Workspace) -> list[str]:
-    out: list[str] = []
-    repo = FrameworkConfig.detect(workspace).workflows
-    for oid in ROOT_ORCHESTRATIONS:
-        path = _workflow_path(workspace, oid)
-        if not path.is_file():
-            out.append(f"{oid}: missing root workflow at {path}")
-            continue
-        workflow = repo.load(path)
-        if not workflow.is_root:
-            out.append(f"{path}: id {workflow.id!r} is not a root id, expected one of {ROOT_ORCHESTRATIONS}")
-        if workflow.parent:
-            out.append(f"{path}: root workflow must not declare `parent`")
-    return out
+def violations_advisory_graph(workspace: Workspace) -> list[str]:
+    """The advisory workflow-level `after` graph must resolve and stay acyclic (catalog-level)."""
+    report = FrameworkConfig.detect(workspace).workflows.catalog_report()
+    return [f"{f.path}: {f.message}" for f in report.findings if f.severity == "error"]
 
 
 def violations_one_actor(workspace: Workspace) -> list[str]:
     out: list[str] = []
     for workflow in _workflows(workspace):
-        label = workspace.label(workflow.path, workspace.skills_root)
+        label = workspace.label(workflow.path, workspace.framework_root)
         for step in workflow.steps:
             actor = _norm(step.actor)
             if not _ACTOR_RE.match(actor):
@@ -88,24 +78,13 @@ def violations_one_actor(workspace: Workspace) -> list[str]:
     return out
 
 
-def violations_delegates_to(workspace: Workspace) -> list[str]:
-    out: list[str] = []
-    for workflow in _workflows(workspace):
-        label = workspace.label(workflow.path, workspace.skills_root)
-        for step in workflow.steps:
-            target = step.delegates_to
-            if not target:
-                continue
-            resolved = workspace.framework_root / "conf" / "workflows" / f"{target}.workflow.conf.yaml"
-            if not resolved.is_file():
-                out.append(f"{label}: step {step.raw_id!r} delegates_to {target!r} → no workflow at {resolved}")
-    return out
+
 
 
 def violations_legacy_header_keys_absent(workspace: Workspace) -> list[str]:
     out: list[str] = []
     for workflow in _workflows(workspace):
-        label = workspace.label(workflow.path, workspace.skills_root)
+        label = workspace.label(workflow.path, workspace.framework_root)
         block = workflow.block
         for key in ("skills", "drives", "fsm"):
             if key in block:
@@ -114,16 +93,15 @@ def violations_legacy_header_keys_absent(workspace: Workspace) -> list[str]:
 
 
 _CHECKS = (
-    ("root-completeness", violations_root_completeness),
+    ("advisory-graph coherence", violations_advisory_graph),
     ("one-actor-per-step (Invariant 1)", violations_one_actor),
-    ("delegates_to resolves", violations_delegates_to),
     ("legacy-header cleanup", violations_legacy_header_keys_absent),
 )
 
 
 # --- pytest entry points (discovered if pytest is available; assert-based) ----------------------
-def test_every_root_has_workflow() -> None:
-    violations = violations_root_completeness(_workspace())
+def test_advisory_graph_is_coherent() -> None:
+    violations = violations_advisory_graph(_workspace())
     assert not violations, "\n".join(violations)
 
 
@@ -132,9 +110,7 @@ def test_one_actor_per_step() -> None:
     assert not violations, "\n".join(violations)
 
 
-def test_delegates_to_resolves() -> None:
-    violations = violations_delegates_to(_workspace())
-    assert not violations, "\n".join(violations)
+
 
 
 def test_legacy_header_keys_absent() -> None:

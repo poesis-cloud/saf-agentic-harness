@@ -35,7 +35,9 @@ class Artifact:
 
     @property
     def artifact_id(self) -> str:
-        value = self.fields.get("id")
+        """The unit's identity: its `slug` (the one universal identity field every artifact
+        schema requires), falling back to the path stem for files authored without one."""
+        value = self.fields.get("slug")
         return str(value) if value not in (None, "") else self.path.stem
 
     @property

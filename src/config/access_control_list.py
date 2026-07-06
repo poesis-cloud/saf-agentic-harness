@@ -1,8 +1,9 @@
 """AccessControlList — the typed view over conf/access-control-list.conf.yaml.
 
-Whole-resource RBAC data: actors (agent files) hold roles; roles carry privileges of one artifact
-plus one action verb. This class only exposes the configured facts; answering `allows(actor,
-action, resource)` is the `AuthorizationPolicy` service's job.
+Whole-resource RBAC: actors (agent files) hold roles; roles carry privileges of one artifact
+plus one action verb. This view owns the authorization query itself — ``allows(actor, action,
+resource)`` — since it is a pure function of the configured facts (resolving a write path to its
+resource is the AuthorizationChecker's job; answering the grant question is this view's).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from typing import Any
 
 
 class AccessControlList:
-    """Typed accessors over the validated ACL document."""
+    """Typed accessors + the authorization query over the validated ACL document."""
 
     def __init__(self, data: dict[str, Any]) -> None:
         self._data = data
@@ -58,6 +59,31 @@ class AccessControlList:
     def privileges(self, actor: str) -> dict[str, set[str]] | None:
         """The {'artifacts': set, 'actions': set} privilege entry for a normalized actor, or None."""
         return self._load().get(self.normalize(actor))
+
+    # --- the authorization query ---------------------------------------------
+    @staticmethod
+    def _resource_aliases(resource: str) -> set[str]:
+        """A resource is granted under its schema filename OR its stem — both alias one grant."""
+        aliases = {resource.strip()}
+        if resource.endswith(".artifact.schema.json"):
+            aliases.add(resource[: -len(".artifact.schema.json")])
+        else:
+            aliases.add(f"{resource}.artifact.schema.json")
+        return aliases
+
+    def allows(self, actor: str, action: str, resource: str) -> bool:
+        """Whole-resource RBAC: does the actor hold the action verb on the resource (under any
+        of its aliases)? Unknown actors and ungranted verbs/resources are denied."""
+        perms = self.privileges(actor)
+        if not perms:
+            return False
+        needed = self._resource_aliases(resource)
+        normalized_action = str(action or "").strip().upper()
+        for artifact in perms.get("artifacts", set()):
+            if self._resource_aliases(artifact).intersection(needed):
+                if normalized_action in perms["actions"]:
+                    return True
+        return False
 
 
 __all__ = ["AccessControlList"]

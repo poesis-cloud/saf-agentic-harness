@@ -14,11 +14,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config import FrameworkConfig, SchemaCatalog
 from mappers import LogMapper, Workspace
-from services import AuthorizationPolicy, HookService, ModelRouter
+from config import AccessControlList
+from services import HookService, ModelRouter
 
 
 def _schema_path_example(schemas: dict[str, dict], schema_id: str, variables: dict[str, str]) -> str | None:
@@ -47,36 +48,24 @@ def _schema_path_example(schemas: dict[str, dict], schema_id: str, variables: di
     return None
 
 
-def _agents_with_privilege(policy: AuthorizationPolicy, action: str, resource: str) -> list[str]:
+def _agents_with_privilege(policy: AccessControlList, action: str, resource: str) -> list[str]:
     return [agent for agent, privs in policy.agents().items() if policy.allows(agent, action, resource)]
 
 
-def _agents_without_privilege(policy: AuthorizationPolicy, action: str, resource: str) -> list[str]:
+def _agents_without_privilege(policy: AccessControlList, action: str, resource: str) -> list[str]:
     return [agent for agent, privs in policy.agents().items() if not policy.allows(agent, action, resource)]
-
-
-SINGLETON_PATH_KIND = {
-    "portfolio-manifest.yaml": "portfolio-manifest",
-    "_registry.yaml": "portfolio-manifest",
-    "strategic-themes.md": "strategic-themes",
-    "portfolio-vision.md": "portfolio-vision",
-    "portfolio-roadmap.md": "portfolio-roadmap",
-    "art/*/art-manifest.yaml": "art-manifest",
-    "art/*/teams/*/team-manifest.yaml": "team-manifest",
-    "products/*/product-manifest.yaml": "product-manifest",
-}
 
 
 def _svc(workspace: Workspace | None = None) -> HookService:
     ws = workspace or Workspace.detect()
     cfg = FrameworkConfig.detect(ws)
-    return HookService(ws, SchemaCatalog(ws), LogMapper(ws), AuthorizationPolicy(cfg.access_control_list, singleton_path_kind=SINGLETON_PATH_KIND), cfg.workflows, ModelRouter(cfg.model_profiles))
+    return HookService(ws, SchemaCatalog(ws), LogMapper(ws), cfg.access_control_list, cfg.workspace_layout, cfg.workflows, ModelRouter(cfg.model_profiles), binding=cfg.adapter_binding("github-copilot"))
 
 
 def main() -> int:
     workspace = Workspace.detect()
     cfg = FrameworkConfig.detect(workspace)
-    policy = AuthorizationPolicy(cfg.access_control_list)
+    policy = cfg.access_control_list
     schemas = SchemaCatalog(workspace).load_raw()
     workflows = cfg.workflows.all()
     router = ModelRouter(cfg.model_profiles)
@@ -115,7 +104,8 @@ def main() -> int:
             failures.append(f"{artifact_non_owners[0]} artifact.status edit should deny (property-level dropped), got {d.permission}")
 
     # 4. A read-only tool is never blocked, regardless of actor.
-    singleton_path = next((p for p in SINGLETON_PATH_KIND if "." not in p), "portfolio-manifest.yaml")
+    singletons = cfg.workspace_layout.singleton_path_kind()
+    singleton_path = next((p for p in singletons if "." not in p), "portfolio-manifest.yaml")
     d = svc.handle("preToolUse", {"agent": artifact_non_owners[0] if artifact_non_owners else "unknown", "tool": "read_file", "tool_input": {"filePath": singleton_path}})
     if d.permission != "allow":
         failures.append(f"read_file should never block, got {d.permission}")
@@ -129,21 +119,22 @@ def main() -> int:
         failures.append("unit-scope check-step must not auto-run at a boundary")
 
     # 6. sessionStart injects orchestrator context + invariants as additionalContext,
-    #    including the suborchestration skill map (sub-id -> procedure skill) for the active root.
-    roots = [w for w in workflows if getattr(w, "is_root", False)]
-    if not roots:
-        failures.append("no root workflow found")
+    #    including the workflow catalog map (workflow-id -> procedure skill + advisory position).
+    facilitator = ""
+    if not workflows:
+        failures.append("no workflow found")
     else:
-        root = roots[0]
-        facilitator = str(root.facilitator).lstrip("@") if root.facilitator else ""
+        first = workflows[0]
+        facilitator = str(first.facilitator).lstrip("@") if first.facilitator else ""
         d = svc.handle("sessionStart", {"agent": facilitator})
-        if f"orchestration {root.id}: facilitate @{facilitator}" not in d.context:
+        if f"orchestration {first.id}: facilitate @{facilitator}" not in d.context:
             failures.append(f"sessionStart should inject the {facilitator} orchestrator context")
-        subs = [w for w in workflows if getattr(w, "parent", None) == root.id]
-        if subs:
-            sub_id = str(subs[0].id)
-            if f"on suborchestration {sub_id}" not in d.context:
-                failures.append(f"sessionStart should inject the {sub_id} suborchestration skill map")
+        other = next((w for w in workflows if str(w.id) != str(first.id)), None)
+        if other is not None and f"on suborchestration {other.id}" not in d.context:
+            failures.append(f"sessionStart should inject the {other.id} workflow skill map")
+        sequenced = next((w for w in workflows if w.after_ids), None)
+        if sequenced is not None and f"naturally after {', '.join(sequenced.after_ids)}" not in d.context:
+            failures.append(f"sessionStart should inject the advisory position of {sequenced.id}")
 
     # 7. Dispatch governance (preToolUse on runSubagent): the (target agent, model) selection is
     #    gated against the model catalog — Auto/omitted/unknown models deny; a known catalog id allows.
@@ -174,35 +165,32 @@ def main() -> int:
     # 8. A dispatched CHILD step session inherits ITS step's context (Option B — correlate-by-actor
     #    via the run journal's open `dispatch`): given an orchestrate dispatch to a step actor, that
     #    actor's sessionStart injects the step's procedure skill (per-step injection), NOT the
-    #    orchestrator's root+sub map. Discover a sub-workflow step that carries instructions/prompts
-    #    or delegates to another workflow so _inject_step produces context. Pick a sub whose
-    #    facilitator differs from the root facilitator so the root-facilitator session has no open
-    #    dispatch and falls back to the orchestrator map.
+    #    orchestrator's workflow catalog map. Discover a workflow step that carries
+    #    instructions/prompts/skills and whose actor differs from the reference facilitator so the
+    #    facilitator session has no open dispatch and falls back to the orchestrator map.
     child_frame: tuple[Any, Any, str] | None = None
-    root = roots[0] if roots else None
-    root_facilitator = str(root.facilitator).lstrip("@") if root and root.facilitator else ""
-    for sub in (w for w in workflows if getattr(w, "parent", None) and hasattr(w, "steps")):
-        sub_facilitator = str(sub.facilitator).lstrip("@") if sub.facilitator else ""
-        if sub_facilitator == root_facilitator:
+    for wf in (w for w in workflows if hasattr(w, "steps")):
+        wf_facilitator = str(wf.facilitator).lstrip("@") if wf.facilitator else ""
+        if wf_facilitator == facilitator:
             continue
-        for s in sub.steps:
+        for s in wf.steps:
             has_guidance = bool(getattr(s, "instructions", None) or getattr(s, "prompts", None))
-            has_skill = bool(getattr(s, "skills", None) or getattr(s, "delegates_to", None))
+            has_skill = bool(getattr(s, "skills", None))
             if has_guidance or has_skill:
-                child_frame = (sub, s, str(s.id))
+                child_frame = (wf, s, str(s.id))
                 break
         if child_frame:
             break
 
     if child_frame is None:
-        failures.append("no sub-workflow step with instructions/prompts/skills found for a different facilitator")
-    elif root:
+        failures.append("no workflow step with instructions/prompts/skills found for a different facilitator")
+    else:
         sub, step, step_id = child_frame
         unit_id = "test-unit-01"
         with tempfile.TemporaryDirectory() as tmp:
             ws2 = Workspace.detect(workspace_root=Path(tmp))
             cfg2 = FrameworkConfig.detect(ws2)
-            svc2 = HookService(ws2, SchemaCatalog(ws2), LogMapper(ws2), AuthorizationPolicy(cfg2.access_control_list), cfg2.workflows, ModelRouter(cfg2.model_profiles))
+            svc2 = HookService(ws2, SchemaCatalog(ws2), LogMapper(ws2), cfg2.access_control_list, cfg2.workspace_layout, cfg2.workflows, ModelRouter(cfg2.model_profiles), binding=cfg2.adapter_binding("github-copilot"))
             step_actor = str(sub.facilitator).lstrip("@") if sub.facilitator else "step-actor"
             LogMapper(ws2).append_entry(
                 ws2.run_journal("R-child"), command="orchestrate",
@@ -213,11 +201,11 @@ def main() -> int:
             if str(sub.id) not in child.context or step_id not in child.context:
                 failures.append(f"child sessionStart should inherit its step skill, got {child.context!r}")
             if "facilitate" in child.context:
-                failures.append("a child step session must not get the orchestrator root map")
-            # an actor with no open dispatch falls back to the orchestrator map (root facilitator).
-            orch = svc2.handle("sessionStart", {"agent": root_facilitator})
-            if f"orchestration {root.id}: facilitate @{root_facilitator}" not in orch.context:
-                failures.append("an un-dispatched root facilitator should get the orchestrator map")
+                failures.append("a child step session must not get the orchestrator catalog map")
+            # an actor with no open dispatch falls back to the orchestrator map.
+            orch = svc2.handle("sessionStart", {"agent": facilitator})
+            if f"facilitate @{facilitator}" not in orch.context:
+                failures.append("an un-dispatched facilitator should get the orchestrator map")
 
     if failures:
         for f in failures:

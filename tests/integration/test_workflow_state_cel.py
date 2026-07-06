@@ -18,17 +18,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from config import Workflow
-from config import FrameworkConfig, SchemaCatalog
+from config import FrameworkConfig, SchemaCatalog, Workflow
 from mappers import Workspace
-from services import WorkflowChecker
+from services import CelEvaluator
 
 
-def _checker() -> WorkflowChecker:
+def _cel() -> CelEvaluator:
     ws = Workspace.detect()
-    return WorkflowChecker(ws, FrameworkConfig.detect(ws).workflows, SchemaCatalog(ws))
+    return CelEvaluator(ws, None, SchemaCatalog(ws))
 
 
 def _workflow(*conditions: dict) -> Workflow:
@@ -37,7 +36,7 @@ def _workflow(*conditions: dict) -> Workflow:
         "workflow": {
             "id": "synthetic",
             "facilitator": "@x",
-            "steps": [{"id": "s1", "kind": "author", "actor": "@x", "conditions": list(conditions)}],
+            "steps": [{"id": "s1", "actor": "@x", "conditions": list(conditions)}],
         }
     }
     return Workflow(data, Path("synthetic/workflow.yaml"))
@@ -57,18 +56,19 @@ def _state(cond_id: str, artifact_types: list[dict], set_query: str, set_predica
 
 # --- (1) every authored workflow passes the state-CEL gate ----------------------
 def test_authored_workflows_state_cel_valid() -> None:
-    report = _checker().check()
-    state_errors = [
-        f
-        for f in report.findings
-        if f.severity == "error" and any(k in f.message for k in ("set_query", "set_predicate", "set_selector", "unknown schema_id"))
+    cel = _cel()
+    workflows = FrameworkConfig.detect(Workspace.detect()).workflows.all()
+    findings = [
+        f"{wf.id}/{step_id}: {message}"
+        for wf in workflows
+        for step_id, message in cel.state_condition_findings(wf)
     ]
-    assert not state_errors, "\n".join(f"{f.path}: {f.message}" for f in state_errors)
+    assert not findings, "\n".join(findings)
 
 
 # --- (2) the gate catches violations (not vacuously green) ----------------------
 def _findings(*conditions: dict) -> list[tuple[str, str]]:
-    return _checker().state_condition_findings(_workflow(*conditions))
+    return _cel().state_condition_findings(_workflow(*conditions))
 
 
 def test_valid_state_condition_passes() -> None:

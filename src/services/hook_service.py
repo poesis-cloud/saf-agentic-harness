@@ -28,10 +28,9 @@ from typing import Any
 import yaml
 
 from models import Report
-from config import SchemaCatalog, WorkflowCatalog
+from config import AccessControlList, SchemaCatalog, WorkflowCatalog, WorkspaceLayout
 from mappers import ArtifactMapper, LogMapper, Workspace
 from .authorization_checker import AuthorizationChecker
-from .authorization_policy import AuthorizationPolicy
 from .model_router import ModelRouter
 # Host event name -> normalized workflow concept. Hosts vary, so a new env adds rows; the core
 # reasons on the workflow's own vocabulary (precondition / postcondition + the session boundaries).
@@ -69,19 +68,18 @@ class HookService:
     POSTCONDITION_AUTO_RUN = ["check-artifact"]
     SESSION_OPEN_INJECT = ["workflow", "instructions", "skills"]
 
-    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, logs: LogMapper, policy: AuthorizationPolicy, workflows: WorkflowCatalog, router: ModelRouter, env: str = "github-copilot", artifacts: ArtifactMapper | None = None) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, logs: LogMapper, acl: AccessControlList, layout: WorkspaceLayout, workflows: WorkflowCatalog, router: ModelRouter, binding: dict[str, Any] | None = None, artifacts: ArtifactMapper | None = None) -> None:
         self.workspace = workspace
         self.logs = logs
-        self.policy = policy
+        self.acl = acl
+        self.layout = layout
         self.artifacts = artifacts
-        self.authz = AuthorizationChecker(workspace, schemas, logs, policy)
+        self.authz = AuthorizationChecker(workspace, schemas, logs, acl, layout)
         self.workflows = workflows
         self.router = router
-        self.binding = self._load_binding(env)
-
-    def _load_binding(self, env: str) -> dict[str, Any]:
-        path = self.workspace.harness_dir / "adapters" / env / "tools.yaml"
-        return yaml.safe_load(self.workspace.read_text(path)) or {} if path.is_file() else {}
+        # The validated host adapter binding (FrameworkConfig.adapter_binding(env)) — injected,
+        # never loaded here: config loading is the config plane's single act.
+        self.binding = binding or {}
 
     def commands_for(self, phase: str) -> list[str]:
         """CLI commands the adapter auto-runs at this phase: write-scope check-artifact at postcondition;
@@ -121,12 +119,13 @@ class HookService:
         return self._inject_orchestrator(actor, wants)
 
     def _inject_orchestrator(self, actor: str, wants: list[str]) -> str:
-        """The orchestrator session's context: the root it facilitates + the suborchestration skill
-        map (each sub-id → procedure skill + instructions + prompts), so the driver loads the right
-        resources the moment it enters a sub. The active actor scopes it to the root it facilitates."""
+        """The orchestrator session's context: the workflow catalog map — for each workflow the
+        actor facilitates, its header + guidance; and for EVERY workflow its procedure skill and
+        advisory position (`after`), so the driver can relay the harness's `propose` and load the
+        right resources the moment the user assents into a workflow."""
         all_wf = self.workflows.all()
         blocks: list[str] = []
-        for wf in (w for w in all_wf if w.is_root):
+        for wf in all_wf:
             if actor and str(wf.facilitator).lstrip("@") != actor.lstrip("@"):
                 continue
             if "workflow" in wants:
@@ -138,28 +137,27 @@ class HookService:
                     blocks.append("follow instructions: " + ", ".join(instr))
                 if prompts:
                     blocks.append("reference prompts: " + ", ".join(prompts))
-            subs = [s for s in all_wf if s.parent == wf.id]
-            for sub in sorted(subs, key=lambda s: str(s.id)):
-                parts: list[str] = []
-                if "skills" in wants and sub.id:
-                    parts.append("load skill " + str(sub.id))
-                if "resources" in wants or "instructions" in wants:
-                    instr = self._aggregate_guidance(sub, "instructions")
-                    prompts = self._aggregate_guidance(sub, "prompts")
-                    if instr:
-                        parts.append("follow instructions " + ", ".join(instr))
-                    if prompts:
-                        parts.append("reference prompts " + ", ".join(prompts))
-                if parts:
-                    blocks.append(f"on suborchestration {sub.id}: " + "; ".join(parts))
+        for wf in sorted(all_wf, key=lambda w: str(w.id)):
+            parts: list[str] = []
+            if "skills" in wants and wf.id:
+                parts.append("load skill " + str(wf.id))
+            if wf.after_ids:
+                parts.append("naturally after " + ", ".join(wf.after_ids))
+            if "resources" in wants or "instructions" in wants:
+                instr = self._aggregate_guidance(wf, "instructions")
+                prompts = self._aggregate_guidance(wf, "prompts")
+                if instr:
+                    parts.append("follow instructions " + ", ".join(instr))
+                if prompts:
+                    parts.append("reference prompts " + ", ".join(prompts))
+            if parts:
+                blocks.append(f"on suborchestration {wf.id}: " + "; ".join(parts))
         return "\n".join(blocks)
 
     def _inject_step(self, frame: Any, wants: list[str]) -> str:
         """A dispatched child step session inherits the step it was dispatched for and loads that
-        step's skills (per-step injection). The skill resolves in precedence: an explicit step-level
-        `skills`, else the target suborchestration id as its procedure skill (a delegate step IS the
-        sub). Instruction and prompt refs come from the step's properties (new model) or from scanning
-        conditions for `expression: instruction` invariants (old model, during migration)."""
+        step's skills (per-step injection, from the step-level `skills` list). Instruction and
+        prompt refs come from the step's properties."""
         orchestration = frame.orchestration
         step_id = frame.step
         wf = self._workflow_by_id(orchestration)
@@ -190,10 +188,6 @@ class HookService:
     def _step_skills(self, wf: Any, step: Any) -> list[str]:
         if step is not None and step.skills:
             return step.skills
-        if step is not None and step.delegates_to:
-            target = self._workflow_by_id(str(step.delegates_to).rstrip("/").split("/")[-1])
-            if target is not None and target.id:
-                return [str(target.id)]
         return []
 
     def _aggregate_guidance(self, wf: Any, guidance_type: str) -> list[str]:
@@ -243,10 +237,10 @@ class HookService:
             return HookDecision(reason=f"write {outputs} has no actor; authorship cannot be verified", phase="precondition", outputs=outputs)
         for ref in outputs:
             path = ref.split("#", 1)[0]  # any #property suffix is ignored — whole-resource RBAC
-            resource = self.policy.singleton_kind(path) or self.authz.resource_for(path)
+            resource = self.layout.singleton_kind(path) or self.authz.resource_for(path)
             if resource is None:
                 continue
-            if not self.policy.allows(actor, action, resource):
+            if not self.acl.allows(actor, action, resource):
                 return HookDecision("deny", f"{actor} lacks privilege {action}_{resource}", "precondition", outputs=outputs)
         return HookDecision(phase="precondition", outputs=outputs)
 
@@ -312,7 +306,7 @@ class HookService:
         choice and corrects via denial + injected context (the dispatch starts the child step-session)."""
         agent = self._dispatch_agent(payload)
         model = self._dispatch_model(payload)
-        error = self.router.validate_dispatch(agent, model)
+        error = self.router.validate_dispatch(model)
         context = self._routing_context(agent)
         if error:
             return HookDecision("deny", f"dispatch {agent or '<agent>'}: {error}", "precondition", context=context)
@@ -333,12 +327,12 @@ class HookService:
         return self.workspace.session_ledger(self._session(payload))
 
     def _active_orchestration(self, actor: str) -> str | None:
-        """The root orchestration this actor facilitates (so a session-open marker records which
+        """The first workflow this actor facilitates (so a session-open marker records which
         workflow the session runs, giving session-close the context to review it), or None."""
         if not actor:
             return None
         for wf in self.workflows.all():
-            if wf.is_root and str(wf.facilitator).lstrip("@") == actor.lstrip("@"):
+            if str(wf.facilitator).lstrip("@") == actor.lstrip("@"):
                 return str(wf.id)
         return None
 
@@ -395,7 +389,7 @@ class HookService:
         if not isinstance(args, dict):
             return ""
         value = self._first(args, self.binding.get("dispatch_agent_keys", ["agentName", "agent"]))
-        return self.policy.normalize(str(value)) if value else ""
+        return AccessControlList.normalize(str(value)) if value else ""
 
     def _dispatch_model(self, payload: dict[str, Any]) -> str:
         args = self._first(payload, self.binding.get("input_keys", ["tool_input"])) or {}

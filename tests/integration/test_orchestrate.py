@@ -12,18 +12,19 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config import Workflow
 from config import FrameworkConfig
 from mappers import ArtifactMapper, Workspace
-from services import AuthorizationPolicy, ModelRouter, OrchestrationService
+from mappers import LogMapper
+from services import ModelRouter, OrchestrationService
 
 
 def _engine() -> OrchestrationService:
     ws = Workspace.detect()
     cfg = FrameworkConfig.detect(ws)
-    return OrchestrationService(ws, cfg.workflows, ArtifactMapper(ws), ModelRouter(cfg.model_profiles))
+    return OrchestrationService(ws, cfg.workflows, ArtifactMapper(ws), ModelRouter(cfg.model_profiles), LogMapper(ws))
 
 
 def _sample_workflow() -> Workflow:
@@ -33,7 +34,7 @@ def _sample_workflow() -> Workflow:
     carry weighted capabilities so the router resolves from the model catalog.
     """
     cfg = FrameworkConfig.detect(Workspace.detect())
-    policy = AuthorizationPolicy(cfg.access_control_list)
+    policy = cfg.access_control_list
     agents = sorted(policy.agents().keys())
     assert len(agents) >= 3, "ACL must define at least three agents for the synthetic workflow"
 
@@ -51,15 +52,13 @@ def _sample_workflow() -> Workflow:
                     {
                         "id": "draft",
                         "actor": f"@{author}",
-                        "kind": "author",
-                        "output": "artifact",
+                        "artifacts": ["artifact"],
                         "capabilities": caps,
                     },
                     {
                         "id": "review",
                         "actor": f"@{reviewer}",
-                        "kind": "challenge",
-                        "output": "review",
+                        "artifacts": ["review"],
                         "capabilities": caps,
                         "conditions": [
                             {"id": "after_draft", "kind": "precondition", "type": "after", "step_id": "draft"},
@@ -68,13 +67,12 @@ def _sample_workflow() -> Workflow:
                     {
                         "id": "approve",
                         "actor": f"@{gatekeeper}",
-                        "kind": "gate",
+                        "capabilities": caps,
                         "conditions": [{"id": "after_review", "kind": "precondition", "type": "after", "step_id": "review"}],
                     },
                     {
                         "id": "land",
                         "actor": f"@{gatekeeper}",
-                        "kind": "commit",
                         "conditions": [{"id": "after_approve", "kind": "precondition", "type": "after", "step_id": "approve"}],
                     },
                 ],
@@ -94,7 +92,7 @@ def test_first_step_dispatches_policy_valid() -> None:
     # the model resolved and clears the role-default floor (validate_dispatch returned no error).
     assert action["model"]
     actor = action["actor"].lstrip("@")
-    assert engine.router.validate_dispatch(actor, action["model"]) is None
+    assert engine.router.validate_dispatch(action["model"]) is None
 
 
 def test_second_step_routes_on_default() -> None:
@@ -105,22 +103,33 @@ def test_second_step_routes_on_default() -> None:
     assert action["step"] == "review"
     # routes on the actor-derived role default; dispatch stays on-policy.
     actor = action["actor"].lstrip("@")
-    assert engine.router.validate_dispatch(actor, action["model"]) is None
+    assert engine.router.validate_dispatch(action["model"]) is None
     assert action["routing"]["model"] == action["model"]
     assert action["routing"]["score"] > 0
 
 
-def test_gate_halts() -> None:
-    action = _engine().next_action(_sample_workflow(), completed={"draft", "review"}, unit="u-1")
-    assert action["action"] == "halt"
-    assert action["reason"] == "gate"
-    assert action["step"] == "approve"
+def test_catalog_propose_without_workflow() -> None:
+    # no --workflow: the engine PROPOSES the eligible next natural workflow(s) from the catalog.
+    action = _engine().orchestrate(run=None)
+    assert action["action"] == "propose"
+    assert action["completed"] == []
+    # entry points (no advisory predecessors) are eligible from a cold start.
+    assert "epic-lean-business-case" in action["eligible"]
+    assert "iteration-planning" in action["eligible"]
+    # advisory-sequenced workflows are not (their predecessors are not complete)...
+    assert "verification" not in action["eligible"]
+
+
+def test_advisory_sequence_never_constrains_direct_drive() -> None:
+    # ...but the user may still drive them directly: assent, not the DAG, starts a workflow.
+    action = _engine().orchestrate("verification", unit="u-1")
+    assert action["action"] == "dispatch"
 
 
 def test_blocked_when_predecessor_unmet() -> None:
     # Defensive branch: every remaining step waits on an unmet predecessor (here a dangling id),
     # so nothing is eligible while work remains -> the engine halts (blocked) rather than looping.
-    policy = AuthorizationPolicy(FrameworkConfig.detect(Workspace.detect()).access_control_list)
+    policy = FrameworkConfig.detect(Workspace.detect()).access_control_list
     agents = sorted(policy.agents().keys())
     author = agents[0] if agents else "developer"
     wf = Workflow(
@@ -132,7 +141,6 @@ def test_blocked_when_predecessor_unmet() -> None:
                     {
                         "id": "only",
                         "actor": f"@{author}",
-                        "kind": "author",
                         "conditions": [{"id": "after_missing", "kind": "precondition", "type": "after", "step_id": "missing"}],
                     }
                 ],
@@ -157,15 +165,15 @@ def test_unknown_workflow_is_error() -> None:
     assert action["action"] == "error"
 
 
-def test_real_root_workflow_drives_from_id() -> None:
+def test_real_workflow_drives_from_id() -> None:
     """Smoke: a real root workflow resolves to a concrete first action from its id alone (no unit
     artifacts on disk -> the cursor is empty -> the first authored step dispatches or halts at a gate)."""
     engine = _engine()
-    wf = next((w for w in FrameworkConfig.detect(Workspace.detect()).workflows.all() if w.is_root), None)
-    assert wf is not None, "expected at least one root workflow"
+    wf = next(iter(FrameworkConfig.detect(Workspace.detect()).workflows.all()), None)
+    assert wf is not None, "expected at least one workflow"
     action = engine.orchestrate(str(wf.id), unit=None)
-    assert action["action"] in {"dispatch", "halt", "done"}
+    assert action["action"] in {"dispatch", "propose", "halt", "done"}
     if action["action"] == "dispatch":
         # a real dispatch must carry a resolved, on-policy model.
         assert action["model"]
-        assert engine.router.validate_dispatch(str(action.get("actor", "")).lstrip("@"), action["model"]) is None
+        assert engine.router.validate_dispatch(action["model"]) is None

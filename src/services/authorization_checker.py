@@ -6,10 +6,9 @@ import fnmatch
 from pathlib import Path
 
 from models import Report
-from config import SchemaCatalog
+from config import AccessControlList, SchemaCatalog, WorkspaceLayout
 from mappers import LogMapper, Workspace
 from text import frontmatter, parse_frontmatter
-from .authorization_policy import AuthorizationPolicy
 
 
 class AuthorizationChecker:
@@ -24,11 +23,12 @@ class AuthorizationChecker:
     Read-only and deterministic: it never mutates artifacts; it reports the ungranted write so the
     orchestration reverts it through a privileged author and re-runs."""
 
-    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, logs: LogMapper, policy: AuthorizationPolicy) -> None:
+    def __init__(self, workspace: Workspace, schemas: SchemaCatalog, logs: LogMapper, acl: AccessControlList, layout: WorkspaceLayout) -> None:
         self.workspace = workspace
         self.schemas = schemas
         self.logs = logs
-        self.policy = policy
+        self.acl = acl
+        self.layout = layout
 
     def resource_for(self, path: str) -> str | None:
         """Resolve a write path to its resource = the artifact's schema name (schema_id). Match the
@@ -74,7 +74,7 @@ class AuthorizationChecker:
             report.error(label, "run log not found or empty; nothing to authorize")
             return report
         for index, line in enumerate(log.lines, start=1):
-            actor = self.policy.normalize(str(line.get("actor") or ""))
+            actor = AccessControlList.normalize(str(line.get("actor") or ""))
             action = str(line.get("action") or "update").strip().lower()
             outputs = line.get("outputs") or []
             if not outputs:
@@ -84,11 +84,11 @@ class AuthorizationChecker:
                 continue
             for ref in outputs:
                 path = str(ref).split("#", 1)[0]  # any #property suffix is ignored — whole-resource RBAC
-                resource = self.policy.singleton_kind(path) or self.resource_for(path)
+                resource = self.layout.singleton_kind(path) or self.resource_for(path)
                 if resource is None:
                     report.warn(f"{label}:{index}", f"no resource for output {ref!r}; cannot authorize {actor!r}")
                     continue
-                if not self.policy.allows(actor, action, resource):
+                if not self.acl.allows(actor, action, resource):
                     report.error(f"{label}:{index}", f"{actor!r} lacks privilege {action}_{resource} (no agent grant)")
         return report
 

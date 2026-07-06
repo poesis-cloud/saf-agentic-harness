@@ -17,7 +17,8 @@
         "orchestrate",
         "check-step",
         "check-artifact",
-        "hook"
+        "hook",
+        "session-review"
       ]
     },
     "trigger": {
@@ -146,6 +147,20 @@
       "properties": {
         "command": {
           "const": "check-artifact"
+        }
+      },
+      "required": [
+        "command"
+      ]
+    },
+    {
+      "description": "session-review: the durable session-close boundary-review summary.",
+      "properties": {
+        "command": {
+          "const": "session-review"
+        },
+        "payload": {
+          "$ref": "https://poesis.cloud/safe-agentic-framework/journal/session-review.payload.schema.json"
         }
       },
       "required": [

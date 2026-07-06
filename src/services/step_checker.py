@@ -43,6 +43,7 @@ class StepChecker:
         unit_id: str,
         log_path: Path | None = None,
         record: bool = False,
+        counts_out: dict[str, int] | None = None,
     ) -> Report:
         report = Report()
         workflow = self.workflows.find(orchestration_id)
@@ -129,6 +130,9 @@ class StepChecker:
                 report.error(label, f"step '{step_id}' condition '{cond_id}': unknown condition type {ctype!r} (expected after|state)")
 
         print(f"check-step {orchestration_id}/{step_id} unit={unit_id}: pass={counts['pass']}, fail={counts['fail']}, skipped={counts['skipped']}", file=sys.stderr)
+        if counts_out is not None:
+            for key, value in counts.items():
+                counts_out[key] = counts_out.get(key, 0) + value
         for entry in results:
             if entry["result"] == "skipped":
                 why = entry.get("reason") or ""
@@ -157,8 +161,9 @@ class StepChecker:
     def review_session(self, ledger_path: Path) -> Report:
         """Session-close review: read the per-session ledger and re-evaluate every step it recorded
         against the FINAL artifact state (so postconditions that only hold once later artifacts exist
-        are caught at the boundary), then print a coverage summary. Read-only — never appends to the
-        ledger (record=False), so a review leaves no trace of itself."""
+        are caught at the boundary), then append ONE durable `session-review` summary entry to the
+        ledger — the auditable proof the boundary check ran and with what outcome. The re-evaluation
+        itself is read-only (record=False): only the summary line is written."""
         report = Report()
         log = self.logs.read(ledger_path)
         if log is None:
@@ -170,11 +175,32 @@ class StepChecker:
                 key = (str(orchestration), str(step), str(unit))
                 if key not in steps:
                     steps.append(key)
+        totals: dict[str, int] = {"pass": 0, "fail": 0, "skipped": 0}
         for orchestration, step, unit in steps:
-            report.extend(self.check_step(orchestration, step, unit, ledger_path, record=False))
+            report.extend(self.check_step(orchestration, step, unit, ledger_path, record=False, counts_out=totals))
         writes = sum(1 for entry in log.entries() if entry.outputs)
         denials = sum(1 for entry in log.entries() if entry.permission == "deny")
         units = len({unit for _, _, unit in steps})
+        failures = [f for f in report.findings if f.severity == "error"]
+        payload = {
+            "steps": len(steps),
+            "units": units,
+            "conditions": totals,
+            "writes": writes,
+            "denials": denials,
+            "findings": [
+                {"severity": f.severity, "path": f.path, "message": f.message}
+                for f in report.findings
+            ],
+        }
+        self.logs.append_entry(
+            ledger_path,
+            command="session-review",
+            payload=payload,
+            trigger="host",
+            status="failed" if failures else "completed",
+        )
         label = self.workspace.label(ledger_path, self.workspace.framework_root)
         print(f"session-review {label}: steps={len(steps)} units={units} writes={writes} denied={denials}", file=sys.stderr)
+        return report
         return report

@@ -10,10 +10,11 @@
   ],
   "properties": {
     "action": {
-      "description": "The single resolved action for this (workflow, unit) at this point in the run.",
+      "description": "The single resolved action for this (workflow, unit) at this point in the run. `propose` is the advisory action: with no workflow in scope it names the eligible next natural workflow(s); a `done` payload may also carry advisory successors.",
       "type": "string",
       "enum": [
         "dispatch",
+        "propose",
         "halt",
         "done",
         "error"
@@ -24,7 +25,7 @@
       "type": "string"
     },
     "reason": {
-      "description": "For halt: gate | blocked | unroutable | off-policy-dispatch. For error: the failure cause.",
+      "description": "For halt: blocked | unroutable. For propose: the advisory framing. For error: the failure cause.",
       "type": "string"
     },
     "step": {
@@ -74,12 +75,15 @@
         "null"
       ]
     },
-    "output": {
-      "description": "The single artifact kind the dispatched step produces.",
+    "artifacts": {
+      "description": "The artifact(s) the dispatched step produces, each identified by a schema slug or a URI.",
       "type": [
-        "string",
+        "array",
         "null"
-      ]
+      ],
+      "items": {
+        "type": "string"
+      }
     },
     "unmet_predecessors": {
       "description": "For a blocked halt: the `after` predecessors that are not yet complete.",

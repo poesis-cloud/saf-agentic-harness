@@ -1,8 +1,10 @@
-"""Workspace — the filesystem context shared by every repository.
+"""Workspace — the filesystem context of the DATA plane the harness checks.
 
-Holds the framework + workspace roots and resolves the well-known locations (skills root,
-harness + schema dirs) and labels. Injecting one Workspace replaces the framework_root /
-workspace_root that the old procedural harness threaded through every call.
+Holds the framework root (where the embedding framework lives — needed to resolve conf/ and to
+label findings) and the workspace root (the data the harness CRUDs its domain entities from —
+this framework calls it the portfolio). Framework-side layout (skills, agents, schema registry)
+is configuration — declared in conf/framework.conf.yaml and exposed by the config plane
+(`FrameworkLayout`), never resolved here: the workspace is NOT the framework.
 """
 
 from __future__ import annotations
@@ -27,29 +29,12 @@ class Workspace:
     def default_framework_root(cls) -> Path:
         script = Path(__file__).resolve()
         for parent in script.parents:
-            if (parent / "plugin.json").is_file() or (parent / ".github" / "skills").is_dir():
+            if (parent / "plugin.json").is_file() or (parent / "conf").is_dir():
                 return parent
         # __file__ = harness/src/mappers/workspace.py; the last-ditch fallback walks up past
-        # src/mappers/ and the harness project when no plugin.json / skills marker is found
+        # src/mappers/ and the harness project when no plugin.json / conf marker is found
         # (the marker walk above is the normal, depth-independent path).
         return script.parents[7]
-
-    @property
-    def skills_root(self) -> Path:
-        # Resolve the skills root structurally from the deployment shape — no marker file. A host
-        # integration nests skills under `.github/skills/` or a `skills/` subdir; the standalone
-        # ("colocated") shape is the framework root itself, where harness/, layers/, and schemas are its
-        # direct children — confirmed by the presence of harness/ rather than a sentinel, so the
-        # framework's own structure stays independent of where it is mounted.
-        github_root = self.framework_root / ".github" / "skills"
-        if github_root.is_dir():
-            return github_root
-        if (self.framework_root / "harness").is_dir():
-            return self.framework_root
-        plugin_root = self.framework_root / "skills"
-        if plugin_root.is_dir():
-            return plugin_root
-        raise FileNotFoundError(f"no skills directory found under {self.framework_root}")
 
     @property
     def workspace_root(self) -> Path:
@@ -61,14 +46,6 @@ class Workspace:
         relative artifact refs resolve. Tracks ``workspace_root`` so artifact reads follow the
         workspace data, not the framework code; defaults to the framework root."""
         return self.workspace_root.parent
-
-    @property
-    def harness_dir(self) -> Path:
-        return self.skills_root / "harness"
-
-    @property
-    def schemas_dir(self) -> Path:
-        return self.harness_dir / "contracts"
 
     def session_ledger(self, session_id: str | None) -> Path:
         """The per-session run ledger (JSONL): the single append-only record the hook funnel writes

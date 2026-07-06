@@ -146,12 +146,11 @@
       ]
     },
     "step": {
-      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for workspace-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. NOTE: a step's own `kind` (author/challenge/delegate/render/gate/commit/verify/direct/…) is the step's nature and is unrelated to a condition's `kind` (precondition/postcondition).",
+      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list using `type: after|state`: `after` binds `step_id` for structural dependencies, `state` binds `set_selector` + `set_predicate` for workspace-state assertions. Behavioral guidance (instructions, prompts) is attached at the step level via step.instructions and step.prompts. Exactly one `actor` per step (one actor per turn): a turn taken by several participants is several forked steps, not one. 1 step = 1 agent = 1 session; the step's nature is expressed by its `id`, `actor`, `conditions`, and `capabilities` — there is no separate `kind` taxonomy (nothing in the harness branches on it).",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
-        "kind",
         "actor",
         "capabilities"
       ],
@@ -159,16 +158,7 @@
         "id": {
           "$ref": "#/definitions/identifier"
         },
-        "kind": {
-          "type": "string",
-          "minLength": 1
-        },
         "actor": {
-          "type": "string",
-          "minLength": 1
-        },
-        "delegates_to": {
-          "description": "For kind: delegate — the sub-workflow this step runs (path under workflows/).",
           "type": "string",
           "minLength": 1
         },
@@ -242,10 +232,14 @@
           },
           "additionalProperties": false
         },
-        "output": {
-          "description": "The single artifact KIND this step produces or updates (effect-determinism, invariant 15). Resolves to a real, owned, typed artifact via the artifact catalog + ACL.",
-          "type": "string",
-          "minLength": 1
+        "artifacts": {
+          "description": "The artifact(s) this step produces or updates (effect-determinism, invariant 15), each identified by a schema slug (the artifact KIND, e.g. 'adr' — resolved via the artifact catalog + ACL) or a URI (a specific artifact instance). Most steps declare exactly one; a step may declare several when it delivers more than one artifact kind.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "conditions": {
           "description": "The step's flat obligations list — each condition is either an `after` dependency or a `state` assertion.",
@@ -291,11 +285,12 @@
   },
   "properties": {
     "workflow": {
-      "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`/`parent`) plus the `steps` that constitute it. Root workflows carry no parent; sub-workflows declare kind/parent.",
+      "description": "The single root node. Carries the workflow header (`id`, `facilitator`, optional `kind`, optional advisory `after`) plus the `steps` that constitute it. Every workflow is atomic — it realizes fully and delivers artifacts; `after` declares its NATURAL position in the methodology's sequence (which predecessors normally come first). The sequence is advisory, never constraining: the harness uses it to PROPOSE the next natural workflow(s) to the user, who may equally reiterate a done workflow or go back — assent, not the DAG, starts a workflow.",
       "type": "object",
       "additionalProperties": false,
       "required": [
         "id",
+        "facilitator",
         "steps"
       ],
       "properties": {
@@ -306,8 +301,13 @@
           "type": "string",
           "minLength": 1
         },
-        "parent": {
-          "$ref": "#/definitions/identifier"
+        "after": {
+          "description": "Advisory predecessors: the workflow ids that NATURALLY come before this one. Shapes the harness's `propose` action only — never a hard gate.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/identifier"
+          }
         },
         "facilitator": {
           "type": "string",
@@ -321,36 +321,7 @@
             "$ref": "#/definitions/step"
           }
         }
-      },
-      "allOf": [
-        {
-          "if": {
-            "required": [
-              "parent"
-            ]
-          },
-          "then": {
-            "required": [
-              "kind",
-              "parent"
-            ]
-          }
-        },
-        {
-          "if": {
-            "not": {
-              "required": [
-                "parent"
-              ]
-            }
-          },
-          "then": {
-            "required": [
-              "facilitator"
-            ]
-          }
-        }
-      ]
+      }
     }
   }
 }

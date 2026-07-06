@@ -7,8 +7,10 @@ from pathlib import Path
 
 try:
     import jsonschema
+    from referencing import Registry, Resource
 except ImportError:  # pragma: no cover - exercised only in minimal Python runtimes
     jsonschema = None
+    Registry = Resource = None
 
 from models import Artifact, Report
 from config import SchemaCatalog
@@ -35,7 +37,7 @@ class SchemaChecker:
 
     def catalog(self) -> Report:
         report = Report()
-        root = self.workspace.skills_root
+        root = self.schemas.skills_root()
         schemas = self.schemas.load_raw(report)
         template_suffix = self.schemas.ARTIFACT_TEMPLATE_SUFFIX
         schema_suffix = self.schemas.ARTIFACT_SCHEMA_SUFFIX
@@ -120,16 +122,14 @@ class SchemaChecker:
             defs_id = framework_defs.get("$id")
             if defs_id:
                 store[str(defs_id)] = framework_defs
-        resolver = jsonschema.RefResolver(
-            base_uri=str(schema_dict.get("$id", "")),
-            referrer=schema_dict,
-            store=store,
+        # A `referencing` Registry resolves the $ref chain locally; validator_for() picks the
+        # validator class matching schema_dict's own declared $schema (draft 2020-12 for the
+        # artifact $ref-subtyping family), so top-level $ref composes with sibling keywords.
+        registry = Registry().with_resources(
+            (uri, Resource.from_contents(doc)) for uri, doc in store.items()
         )
-        # validator_for() picks the validator class matching schema_dict's own declared $schema
-        # (draft 2020-12 for the artifact/work-item $ref-subtyping family) instead of a hardcoded
-        # draft, so top-level $ref composes with sibling keywords instead of silently ignoring them.
         validator_cls = jsonschema.validators.validator_for(schema_dict)
-        validator = validator_cls(schema_dict, resolver=resolver)
+        validator = validator_cls(schema_dict, registry=registry)
         for err in sorted(validator.iter_errors(data), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(err)}")
         return report

@@ -13,32 +13,23 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config import FrameworkConfig, SchemaCatalog
 from mappers import LogMapper, Workspace
-from services import AuthorizationChecker, AuthorizationPolicy
-
-
-SINGLETON_PATH_KIND = {
-    "portfolio-manifest.yaml": "portfolio-manifest",
-    "_registry.yaml": "portfolio-manifest",
-    "strategic-themes.md": "strategic-themes",
-    "portfolio-vision.md": "portfolio-vision",
-    "portfolio-roadmap.md": "portfolio-roadmap",
-    "art/*/art-manifest.yaml": "art-manifest",
-    "art/*/teams/*/team-manifest.yaml": "team-manifest",
-    "products/*/product-manifest.yaml": "product-manifest",
-}
+from config import AccessControlList
+from services import AuthorizationChecker
 
 
 def _check(lines: list[dict]) -> tuple[int, int]:
     workspace = Workspace.detect()
+    cfg = FrameworkConfig.detect(workspace)
     checker = AuthorizationChecker(
         workspace,
         SchemaCatalog(workspace),
         LogMapper(workspace),
-        AuthorizationPolicy(FrameworkConfig.detect(workspace).access_control_list, singleton_path_kind=SINGLETON_PATH_KIND),
+        cfg.access_control_list,
+        cfg.workspace_layout,
     )
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as handle:
         for line in lines:
@@ -77,18 +68,18 @@ def _schema_path_example(schemas: dict[str, dict], schema_id: str, variables: di
     return None
 
 
-def _agents_with_privilege(policy: AuthorizationPolicy, action: str, resource: str) -> list[str]:
+def _agents_with_privilege(policy: AccessControlList, action: str, resource: str) -> list[str]:
     return [agent for agent, privs in policy.agents().items() if policy.allows(agent, action, resource)]
 
 
-def _agents_without_privilege(policy: AuthorizationPolicy, action: str, resource: str) -> list[str]:
+def _agents_without_privilege(policy: AccessControlList, action: str, resource: str) -> list[str]:
     return [agent for agent, privs in policy.agents().items() if not policy.allows(agent, action, resource)]
 
 
 def main() -> int:
     failures: list[str] = []
     workspace = Workspace.detect()
-    policy = AuthorizationPolicy(FrameworkConfig.detect(workspace).access_control_list, singleton_path_kind=SINGLETON_PATH_KIND)
+    policy = FrameworkConfig.detect(workspace).access_control_list
     schemas = SchemaCatalog(workspace).load_raw()
     agents = sorted(policy.agents().keys())
     if not agents:
@@ -96,11 +87,12 @@ def main() -> int:
         return 1
 
     # Discover the workspace singleton path from the test's own mapping.
-    singleton_path = next((p for p in SINGLETON_PATH_KIND if not p.startswith(".")), None)
+    singletons = FrameworkConfig.detect(workspace).workspace_layout.singleton_path_kind()
+    singleton_path = next((p for p in singletons if not p.startswith(".")), None)
     if singleton_path is None:
-        failures.append("no singleton path in SINGLETON_PATH_KIND")
+        failures.append("no singleton path in the workspace layout")
         return 1
-    singleton_resource = SINGLETON_PATH_KIND[singleton_path]
+    singleton_resource = singletons[singleton_path]
 
     # Pick an agent that owns the singleton and one that does not.
     owners = _agents_with_privilege(policy, "update", singleton_resource)
@@ -108,7 +100,7 @@ def main() -> int:
     if not owners:
         # Fall back to strategic-themes if portfolio-manifest has no owner (methodology may not define it).
         singleton_path = "strategic-themes.md"
-        singleton_resource = SINGLETON_PATH_KIND[singleton_path]
+        singleton_resource = singletons[singleton_path]
         owners = _agents_with_privilege(policy, "update", singleton_resource)
         non_owners = _agents_without_privilege(policy, "update", singleton_resource)
     if not owners:

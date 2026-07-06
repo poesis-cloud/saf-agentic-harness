@@ -120,34 +120,6 @@ def parse_frontmatter(frontmatter_text: str) -> dict[str, Any]:
     return result
 
 
-def parse_contract(block: str) -> dict[str, Any]:
-    # Prefer real YAML so nested blocks parse correctly.
-    if yaml is not None:
-        try:
-            data = yaml.safe_load(block)
-        except Exception:
-            data = None
-        if isinstance(data, dict):
-            return json_safe(data)
-    contract: dict[str, Any] = {}
-    current_key: str | None = None
-    for raw_line in block.splitlines():
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("- ") and current_key:
-            contract.setdefault(current_key, [])
-            if isinstance(contract[current_key], list):
-                contract[current_key].append(parse_scalar(stripped[2:].strip()))
-            continue
-        key_value = re.match(r"^([A-Za-z_][\w-]*):\s*(.*)$", stripped)
-        if key_value:
-            current_key = key_value.group(1)
-            value = key_value.group(2)
-            contract[current_key] = [] if value == "" else parse_scalar(value)
-    return contract
-
-
 # --- markdown structure -----------------------------------------------------
 def markdown_body(text: str) -> str:
     lines = text.splitlines()

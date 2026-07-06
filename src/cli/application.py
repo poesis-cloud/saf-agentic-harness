@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from models import Report
-from config import ConfigError, FrameworkConfig, SchemaCatalog
+from config import ConfigError, FrameworkConfig
 from mappers import (
     ArtifactMapper,
     LogMapper,
@@ -24,7 +24,6 @@ from mappers import (
 from utils import ArtifactValidator
 from services import (
     ArtifactChecker,
-    AuthorizationPolicy,
     CelEvaluator,
     HookService,
     ModelRouter,
@@ -54,8 +53,8 @@ def _configure_hook(parser: argparse.ArgumentParser) -> None:
 
 
 def _configure_orchestrate(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workflow", required=True, help="workflow id (root or sub-workflow id) to drive")
-    parser.add_argument("--unit", help="artifact id the workflow acts on (its artifacts drive the step cursor)")
+    parser.add_argument("--workflow", help="workflow id to drive; omit to get the advisory `propose` (the next natural workflow(s) from the catalog's workflow-level after graph)")
+    parser.add_argument("--unit", help="artifact slug the workflow acts on")
     parser.add_argument("--run", help="run id selecting the per-run journal (workspace/logs/<run>.jsonl); the resolved action is appended there as one enveloped entry")
 
 
@@ -70,8 +69,8 @@ COMMANDS: list[Command] = [
     Command("hook", "environment-hook adapter: funnel a lifecycle event through the harness",
             "Read a host lifecycle event (JSON on stdin) and route it to the deterministic checks: preToolUse authorizes the write (deny ungranted), postToolUse validates the written native-JSON artifact, session-close reviews the recorded steps' postconditions, sessionStart injects deterministic context. Emits the host's decision JSON on stdout; exit 2 = deny/fail. The shared host adapter (adapters/dispatch.sh <event> <env>) calls this; the CLI stays the single source of truth.\nExample: cat event.json | harness.py hook --event preToolUse",
             _configure_hook),
-    Command("orchestrate", "resolve the next orchestration action (dispatch | halt | done) for a workflow + unit",
-            "The DRIVE plane. Recompute the step cursor from the unit's ARTIFACTS (never a prior log line) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, output, instructions, prompts} — the model routed from the step's weighted capabilities against conf/model-profiles.conf.yaml; see harness/README.md 'Model Routing'), `halt` (a gate is next, no step is eligible while work remains, or the step is unroutable), or `done` (every step's output artifact exists). The harness never writes — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow my-workflow --unit my-unit",
+    Command("orchestrate", "resolve the next orchestration action (dispatch | propose | halt | done) for a workflow + unit",
+            "The DRIVE plane. With --workflow: recompute the step cursor from the RUN JOURNAL (a step counts as completed when its latest journaled check-step line for that workflow says so) and return exactly one action as JSON on stdout: `dispatch` (the next eligible step with its resolved {actor, model, skills, artifacts, instructions, prompts} — the model routed from the step's weighted capabilities against conf/model-profiles.conf.yaml; see harness/README.md 'Model Routing'), `halt` (no step is eligible while work remains, or the step is unroutable), or `done` (every step journaled complete; carries the advisory `propose` successors). Without --workflow: return `propose` — the eligible next natural workflow(s) from the catalog's advisory workflow-level `after` graph; the sequence never constrains — the user may (re)run any workflow, and assent starts it. The harness never writes artifacts — it returns the action; the host commits it.\nExample: harness.py orchestrate --workflow my-workflow --unit my-unit --run r-1",
             _configure_orchestrate),
 ]
 
@@ -88,9 +87,10 @@ class Application:
 
         # configuration plane — parsed AND contract-validated at initialization; every CLI
         # interaction fails fast (ConfigError) on an invalid conf/*.conf.yaml before any
-        # command logic runs.
-        schemas = SchemaCatalog(workspace)
-        self.config = FrameworkConfig(workspace.framework_root, workspace.schemas_dir, schemas)
+        # command logic runs. The framework (the application embedding the harness) and the
+        # workspace (the data plane — this framework's portfolio) are distinct planes.
+        self.config = FrameworkConfig.detect(workspace)
+        schemas = self.config.schemas
         workflows = self.config.workflows
         self.schemas = schemas
 
@@ -106,12 +106,8 @@ class Application:
         self.artifact_checker = ArtifactChecker(workspace, artifacts, self.schema_checker)
         cel = CelEvaluator(workspace, artifacts, schemas)
         self.step_checker = StepChecker(workspace, workflows, artifacts, logs, cel, self.schema_checker)
-        self.policy = AuthorizationPolicy(
-            self.config.access_control_list,
-            singleton_path_kind=self.config.workspace_layout.singleton_path_kind(),
-        )
         self.router = ModelRouter(self.config.model_profiles)
-        self.orchestration = OrchestrationService(workspace, workflows, artifacts, self.router)
+        self.orchestration = OrchestrationService(workspace, workflows, artifacts, self.router, logs)
 
         self._runners: dict[str, Callable[[argparse.Namespace], Report]] = {
             "check-artifact": self._run_check_artifact,
@@ -145,7 +141,7 @@ class Application:
             payload = {}
         if not isinstance(payload, dict):
             payload = {}
-        hooks = HookService(self.workspace, self.schemas, self.logs, self.policy, self.config.workflows, self.router, env=args.env, artifacts=self.artifacts)
+        hooks = HookService(self.workspace, self.schemas, self.logs, self.config.access_control_list, self.config.workspace_layout, self.config.workflows, self.router, binding=self.config.adapter_binding(args.env), artifacts=self.artifacts)
         decision = hooks.handle(args.event, payload)
         report = decision.report
         for command in hooks.commands_for(decision.phase):   # map-driven, write-scope only

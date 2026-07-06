@@ -19,8 +19,10 @@ from typing import TYPE_CHECKING, Any
 
 try:
     import jsonschema
+    from referencing import Registry, Resource
 except ImportError:  # pragma: no cover - exercised only in minimal Python runtimes
     jsonschema = None
+    Registry = Resource = None
 
 from models import Artifact, Report
 from text import markdown_body, section_map, section_tree
@@ -152,17 +154,16 @@ class ArtifactValidator:
             if defs_id:
                 store[str(defs_id)] = framework_defs
         
-        resolver = jsonschema.RefResolver(
-            base_uri=str(schema.get("$id", "")),
-            referrer=schema,
-            store=store,
+        # A `referencing` Registry resolves the $ref chain (methodology schema -> base artifact
+        # contract) from local resources only — never a remote fetch. validator_for() selects the
+        # validator class matching this schema's own declared $schema (draft 2020-12 for the
+        # artifact $ref-subtyping family): under Draft-07 a top-level $ref makes sibling keywords
+        # silently ignored; 2020-12 composes them.
+        registry = Registry().with_resources(
+            (uri, Resource.from_contents(doc)) for uri, doc in store.items()
         )
-        # validator_for() selects the validator class matching this schema's own declared
-        # $schema (e.g. draft 2020-12 for the artifact/work-item $ref-subtyping family) rather
-        # than a hardcoded draft. This matters: under Draft-07, a top-level $ref makes sibling
-        # keywords (properties/required/etc.) silently ignored; 2020-12 composes them.
         validator_cls = jsonschema.validators.validator_for(schema)
-        validator = validator_cls(schema, resolver=resolver)
+        validator = validator_cls(schema, registry=registry)
         for error in sorted(validator.iter_errors(self._schema_data(artifact)), key=lambda item: list(item.absolute_path)):
             report.error(label, f"{schema_id} schema violation: {self.schemas.format_schema_error(error)}")
         

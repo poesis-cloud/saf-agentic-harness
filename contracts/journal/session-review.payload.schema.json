@@ -1,0 +1,86 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://poesis.cloud/safe-agentic-framework/journal/session-review.payload.schema.json",
+    "title": "session-review journal payload",
+    "description": "The durable audit record of the session-close boundary review: at stop/sessionEnd the harness re-evaluates every step the session recorded against the FINAL workspace state and appends this summary to the session ledger — so a later audit can prove the boundary check happened and with what outcome, not just infer it from an absence of denials.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "steps",
+        "units",
+        "conditions",
+        "findings"
+    ],
+    "properties": {
+        "steps": {
+            "description": "How many distinct (orchestration, step, unit) recordings were re-evaluated.",
+            "type": "integer",
+            "minimum": 0
+        },
+        "units": {
+            "description": "How many distinct units those steps acted on.",
+            "type": "integer",
+            "minimum": 0
+        },
+        "conditions": {
+            "description": "Aggregated condition outcomes across the re-evaluated steps.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "pass",
+                "fail",
+                "skipped"
+            ],
+            "properties": {
+                "pass": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "fail": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "skipped": {
+                    "type": "integer",
+                    "minimum": 0
+                }
+            }
+        },
+        "writes": {
+            "description": "How many ledger lines carried write outputs during the session.",
+            "type": "integer",
+            "minimum": 0
+        },
+        "denials": {
+            "description": "How many hook decisions denied during the session.",
+            "type": "integer",
+            "minimum": 0
+        },
+        "findings": {
+            "description": "The review's failure findings (empty = reviewed clean).",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                    "severity",
+                    "message"
+                ],
+                "properties": {
+                    "severity": {
+                        "enum": [
+                            "error",
+                            "warning"
+                        ]
+                    },
+                    "path": {
+                        "type": "string"
+                    },
+                    "message": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}

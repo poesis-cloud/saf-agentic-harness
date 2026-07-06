@@ -34,12 +34,12 @@ class Workflow:
         return self.block.get("facilitator")
 
     @property
-    def parent(self) -> Any:
-        return self.block.get("parent")
-
-    @property
-    def is_root(self) -> bool:
-        return self.parent is None
+    def after_ids(self) -> list[str]:
+        """Advisory workflow-level predecessors: the workflow ids that NATURALLY come before
+        this one in the methodology's sequence. Shapes the harness's `propose` action only —
+        never a hard gate (the user may run any workflow at any time)."""
+        raw = self.block.get("after")
+        return [str(w) for w in raw] if isinstance(raw, list) else []
 
     @property
     def steps(self) -> list[Step]:

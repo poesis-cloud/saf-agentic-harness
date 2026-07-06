@@ -17,11 +17,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from config import FrameworkConfig, SchemaCatalog
 from mappers import ArtifactMapper, InvalidArtifactError, LogMapper, Workspace
-from services import AuthorizationPolicy, HookService, ModelRouter
+from services import HookService, ModelRouter
 from utils import ArtifactValidator
 
 # An artifact frontmatter that parses but violates the epic schema (missing most required fields).
@@ -81,7 +81,7 @@ def main() -> int:
         bad.write_text(INVALID_ARTIFACT)
         repo = _repo(ws)
         cfg = FrameworkConfig.detect(ws)
-        hooks = HookService(ws, SchemaCatalog(ws), LogMapper(ws), AuthorizationPolicy(cfg.access_control_list), cfg.workflows, ModelRouter(cfg.model_profiles), artifacts=repo)
+        hooks = HookService(ws, SchemaCatalog(ws), LogMapper(ws), cfg.access_control_list, cfg.workspace_layout, cfg.workflows, ModelRouter(cfg.model_profiles), binding=cfg.adapter_binding("github-copilot"), artifacts=repo)
 
         payload = {"tool": "create_file", "tool_input": {"filePath": str(bad)}}
         decision = hooks._postcondition(payload)

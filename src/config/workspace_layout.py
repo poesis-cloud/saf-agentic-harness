@@ -1,12 +1,13 @@
 """WorkspaceLayout — the typed view over conf/workspace.conf.yaml (the workspace blueprint).
 
 A recursive tree of nodes binding workspace paths (with <slug> placeholders) to artifact schemas,
-templates, and cardinalities. Also derives the singleton path->kind map the authorization plane
-uses to classify well-known single-instance files.
+templates, and cardinalities. Also answers the singleton path->kind question the authorization
+plane asks to classify well-known single-instance files.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
 from typing import Any, Iterator
 
@@ -47,6 +48,14 @@ class WorkspaceLayout:
             if schema and str(node.get("cardinality")) == "1":
                 mapping[self._glob_of(str(node["path"]))] = self._kind_of(str(schema))
         return mapping
+
+    def singleton_kind(self, path: str) -> str | None:
+        """The artifact kind of a well-known single-instance file, or None if the path matches
+        no singleton node."""
+        for pattern, kind in self.singleton_path_kind().items():
+            if fnmatch.fnmatch(path, pattern):
+                return kind
+        return None
 
     def schema_bindings(self) -> dict[str, str]:
         """fnmatch pattern -> artifact schema filename, for every schema-bound node."""
