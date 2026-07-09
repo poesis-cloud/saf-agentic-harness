@@ -11,7 +11,8 @@
         "read",
         "update",
         "delete"
-      ]
+      ],
+      "description": "The set of write actions recognized by the authorization plane and adapter bindings."
     }
   }
 }

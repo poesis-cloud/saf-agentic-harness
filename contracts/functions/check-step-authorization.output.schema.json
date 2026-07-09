@@ -12,9 +12,11 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "allowed"
+              "const": "allowed",
+              "description": "Success status for check-step-authorization."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "authorization": {
           "$ref": "#/$defs/authorization",
@@ -22,7 +24,8 @@
             "required": [
               "failureMessage"
             ]
-          }
+          },
+          "description": "The authorization decision details."
         }
       }
     },
@@ -51,12 +54,14 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
@@ -74,25 +79,32 @@
       "properties": {
         "actor": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The acting agent identity."
         },
         "artifactPath": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The target artifact path."
         },
         "action": {
-          "$ref": "../actions.schema.json#/$defs/writeAction"
+          "$ref": "../actions.schema.json#/$defs/writeAction",
+          "description": "The requested write action."
         },
         "resource": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The artifact schema/resource the privilege applies to."
         },
         "failureMessage": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Why authorization was denied."
         }
       },
-      "unevaluatedProperties": false
+      "unevaluatedProperties": false,
+      "description": "Authorization decision details."
     }
-  }
+  },
+  "description": "Output contract for the check-step-authorization harness function."
 }

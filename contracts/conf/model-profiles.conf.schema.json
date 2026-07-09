@@ -22,25 +22,31 @@
         "properties": {
           "id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "Canonical model profile identifier."
           },
           "cost_rank": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 10
+            "maximum": 10,
+            "description": "Relative cost rank (1 = cheapest, 10 = most expensive)."
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable description of the model profile."
           },
           "notes": {
-            "type": "string"
+            "type": "string",
+            "description": "Additional notes or caveats for this profile."
           },
           "capability_scores": {
             "description": "0-10 relative judgments per capability tag.",
             "$ref": "#/definitions/capabilities"
           }
-        }
-      }
+        },
+        "description": "One model profile."
+      },
+      "description": "Canonical model catalog: capability scores and cost rank per model."
     }
   },
   "definitions": {
@@ -62,47 +68,56 @@
         "deep-reasoning": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Depth and quality of analytical reasoning."
         },
         "coding": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Code generation and software engineering capability."
         },
         "tool-use": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Reliability and fluency in using external tools."
         },
         "long-context": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Ability to retain and reason over long contexts."
         },
         "multimodal": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Ability to process and reason over non-text modalities."
         },
         "writing-quality": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Quality of prose and structured written output."
         },
         "instruction-following": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Adherence to detailed instructions and schemas."
         },
         "fast-iteration": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Speed of low-latency, iterative responses."
         },
         "schema-adherence": {
           "type": "number",
           "minimum": 0,
-          "maximum": 10
+          "maximum": 10,
+          "description": "Reliability of JSON/schema-structured output."
         }
       },
       "additionalProperties": false

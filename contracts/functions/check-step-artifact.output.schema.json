@@ -9,9 +9,11 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "valid"
+              "const": "valid",
+              "description": "Success status for check-step-artifact."
             }
-          }
+          },
+          "description": "The function outcome."
         }
       }
     },
@@ -36,7 +38,8 @@
           "properties": {
             "failureMessage": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Why the artifact failed schema validation."
             },
             "revert": {
               "type": "object",
@@ -49,17 +52,21 @@
                   "enum": [
                     "restored",
                     "deleted"
-                  ]
+                  ],
+                  "description": "Whether the file was restored from HEAD or deleted."
                 },
                 "from": {
                   "type": "string",
-                  "minLength": 1
+                  "minLength": 1,
+                  "description": "Source path restored from, when applicable."
                 }
               },
-              "unevaluatedProperties": false
+              "unevaluatedProperties": false,
+              "description": "The revert action taken on the invalid staged write."
             }
           },
-          "unevaluatedProperties": false
+          "unevaluatedProperties": false,
+          "description": "Details of the failed schema check and the revert action taken."
         }
       }
     },
@@ -68,15 +75,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the check-step-artifact harness function."
 }

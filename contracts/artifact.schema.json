@@ -22,7 +22,8 @@
       "minItems": 1,
       "items": {
         "type": "string",
-        "format": "uri-reference"
+        "format": "uri-reference",
+        "description": "A single workspace-relative URI reference to an upstream artifact this artifact was built from."
       }
     }
   }

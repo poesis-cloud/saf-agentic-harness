@@ -892,10 +892,22 @@ Contract schemas — [harness/contracts/functions/resolve-step-skills.input.sche
 ### 8. check-step-authorization
 
 Is this write a granted privilege of the acting agent? Plain whole-resource RBAC over
-structured privileges from `conf/access-control-list.conf.yaml` (actors → roles →
-`{action, artifact}` privileges), guarding every agent write live at the boundary. The same
-boundary also refuses writes whose staging baseline is not clean against `HEAD` — the commit
-gate's precondition (C6).
+structured privileges from `conf/access-control-list.conf.yaml`, guarding every agent write
+live at the boundary. The same boundary also refuses writes whose staging baseline is not
+clean against `HEAD` — the commit gate's precondition (C6).
+
+**ACL design principles**
+
+- **Roles are framework-defined.** The framework owns the role catalog: each role is a named
+  set of privileges, where each privilege is exactly one artifact schema slug plus one action
+  verb (`CREATE`, `READ`, `UPDATE`, `DELETE`). Roles are not declared by agents.
+- **Actors are role-to-agent mappings.** An actor assigns one or more framework-defined roles
+  to a single framework agent. Agents are the `.agent.md` files in the framework's
+  `agents/` directory, identified by the `name` value in their YAML frontmatter.
+- **Authorization is whole-resource.** The resource under test is the artifact kind (schema
+  slug); path-level or property-level granularity is intentionally not modeled.
+- **No implicit grants.** A write is denied unless at least one role held by the acting agent
+  explicitly grants the requested action on the artifact kind.
 
 **Interface**
 
@@ -942,8 +954,8 @@ Contract schemas — [harness/contracts/functions/check-step-authorization.input
 
 **Preconditions**
 
-- The ACL, workspace layout, and schema catalog are loaded (path → resource resolution needs
-  them), and the adapter has mapped the host write tool to a write `action`.
+- The ACL, workspace layout, and the framework's artifact schemas are loaded (path → resource
+  resolution needs them), and the adapter has mapped the host write tool to a write `action`.
 - Trigger — the write-starting boundary, once per pending write.
 
 **Postconditions**
@@ -956,8 +968,9 @@ Contract schemas — [harness/contracts/functions/check-step-authorization.input
 1. The actor is the AGENT (normalized agent identity) derived from the registered host
   session, never the skill and never a function input.
 2. The resource is the artifact's schema identity, resolved from the write path — via the
-   workspace layout's singleton map for well-known single-instance files, else via the schema
-   catalog's path patterns (disambiguated by the artifact's `type` when several match).
+   workspace layout's singleton map for well-known single-instance files, else via the
+   artifact schemas' own path patterns (disambiguated by the artifact's `type` when several
+   match).
 3. Authorization is whole-resource: any `#property` suffix on an artifact path is ignored.
 4. A write nobody granted is denied at the boundary — denial is the enforcement.
 5. A write whose staging baseline is not clean against `HEAD` is denied at the same boundary:
@@ -1010,8 +1023,8 @@ Contract schemas — [harness/contracts/functions/check-step-artifact.input.sche
 
 **Preconditions**
 
-- The schema catalog is loaded and the written path resolves to its artifact schema. Function 8
-  has already established a clean staging baseline: the target path was absent or
+- The framework's artifact schemas are loaded and the written path resolves to one of them.
+  Function 8 has already established a clean staging baseline: the target path was absent or
   tracked-and-clean against `HEAD`, so the staged write is the only staged content at its path.
 - Trigger — the write-ended boundary, after every write.
 
@@ -1162,7 +1175,7 @@ Contract schemas — [harness/contracts/functions/check-workspace.input.schema.j
 
 **Preconditions**
 
-- The schema catalog and workspace layout are loaded (fail-fast at load).
+- The framework's artifact schemas and the workspace layout are loaded (fail-fast at load).
 - A session is registered (function 0) — a human terminal session or a CI system session.
 - Trigger — a CI pipeline on the workspace repository (every push / pull request), or a human
   at a terminal.
@@ -1260,8 +1273,8 @@ Contract schemas — [harness/contracts/functions/check-configuration.input.sche
    DAGs, at least one positive capability weight per step; at catalog level, the advisory
    workflow graph resolves and is acyclic.
 3. Cross-configuration coherence holds: workflow actors exist in the ACL, capability tags belong
-   to the model catalog's vocabulary, step `artifact` slugs resolve to cataloged schemas, and
-   instruction/prompt/skill refs resolve to files in the framework layout.
+   to the model catalog's vocabulary, step `artifact` slugs resolve to one of the framework's
+   artifact schemas, and instruction/prompt/skill refs resolve to files in the framework layout.
 4. The layout environment is validated like any file configuration: every required layout
    variable is present (from the process environment or the `.env` file) and points to an
    existing directory.
@@ -1309,8 +1322,9 @@ artifact schemas, ACL grants, and the model catalog.
 
 #### C5 - Schema-bound persistence
 
-Every artifact is cataloged and schema-bound; every log entry is bound to the log-entry
-contract. The selector model has one selector type: selecting persisted artifacts. Where a
+Every artifact is schema-bound to one of the framework's artifact schemas; every log entry is
+bound to the log-entry contract. The selector model has one selector type: selecting persisted
+artifacts. Where a
 condition depends on log evidence, that evidence is read from the logs (part of workspace
 state) and asserted as state. Artifacts are the framework's content; logs are the harness's
 record — one workspace, two authors, no overlap.
@@ -1626,7 +1640,7 @@ this adapter binding entirely (the bash wrapper; the CI platform's ambient run i
 ```text
 .env                  # framework layout environment: where skills, agents, schemas, templates, workspace live
 conf/                 # env-agnostic framework configuration (owned by the embedding framework)
-  access-control-list.conf.yaml  # authorization grants (actors -> roles -> privileges)
+  access-control-list.conf.yaml  # framework-defined roles -> agents (from agents/) mapping; privileges are artifact-kind + action
   workspace.conf.yaml            # workspace layout blueprint (nodes: path -> schema/template/cardinality)
   model-profiles.conf.yaml       # canonical model catalog: capability_scores + cost_rank per model
   workflows/                     # *.workflow.conf.yaml — steps declare actor and weighted capabilities

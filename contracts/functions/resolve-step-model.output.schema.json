@@ -12,9 +12,11 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "resolved"
+              "const": "resolved",
+              "description": "Success status for resolve-step-model."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "profile": {
           "type": "object",
@@ -26,20 +28,25 @@
           "properties": {
             "id": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "Canonical model profile id."
             },
             "score": {
-              "type": "number"
+              "type": "number",
+              "description": "Weighted score for this step's capability demand."
             },
             "cost_rank": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "description": "Relative cost rank of the selected profile."
             },
             "reason": {
-              "type": "string"
+              "type": "string",
+              "description": "Human-readable rationale for the selection."
             }
           },
-          "unevaluatedProperties": false
+          "unevaluatedProperties": false,
+          "description": "The canonical model profile selected for this step's dispatch."
         }
       }
     },
@@ -48,15 +55,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step-model harness function."
 }

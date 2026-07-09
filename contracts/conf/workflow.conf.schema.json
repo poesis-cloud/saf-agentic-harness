@@ -157,17 +157,20 @@
       ],
       "properties": {
         "slug": {
-          "$ref": "#/definitions/identifier"
+          "$ref": "#/definitions/identifier",
+          "description": "URL-safe step identifier."
         },
         "actor": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The agent filename (or normalized identity) that acts this step."
         },
         "skills": {
           "description": "The ordered skill ids the dispatched agent loads for THIS step (per-step, not per-workflow). The harness injects them as deterministic context at sessionStart (inject-skills); a sub-orchestration is a step, so its procedure skill rides here.",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "description": "One skill id."
           }
         },
         "capabilities": {
@@ -188,47 +191,56 @@
             "deep-reasoning": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for analytical reasoning demand."
             },
             "coding": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for coding demand."
             },
             "tool-use": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for tool-use demand."
             },
             "long-context": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for long-context demand."
             },
             "multimodal": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for multimodal demand."
             },
             "writing-quality": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for writing-quality demand."
             },
             "instruction-following": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for instruction-following demand."
             },
             "fast-iteration": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for fast-iteration demand."
             },
             "schema-adherence": {
               "type": "number",
               "minimum": 0,
-              "maximum": 10
+              "maximum": 10,
+              "description": "Weight for schema-adherence demand."
             }
           },
           "additionalProperties": false
@@ -242,7 +254,8 @@
           "description": "The step's flat obligations list \u2014 each condition is either an `after` dependency or a `state` assertion.",
           "type": "array",
           "items": {
-            "$ref": "#/definitions/condition"
+            "$ref": "#/definitions/condition",
+            "description": "One condition."
           }
         },
         "instructions": {
@@ -250,14 +263,17 @@
           "oneOf": [
             {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "A single instruction reference."
             },
             {
               "type": "array",
               "items": {
                 "type": "string",
-                "minLength": 1
-              }
+                "minLength": 1,
+                "description": "One instruction reference."
+              },
+              "description": "An array of instruction references."
             }
           ]
         },
@@ -266,14 +282,17 @@
           "oneOf": [
             {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "A single prompt reference."
             },
             {
               "type": "array",
               "items": {
                 "type": "string",
-                "minLength": 1
-              }
+                "minLength": 1,
+                "description": "One prompt reference."
+              },
+              "description": "An array of prompt references."
             }
           ]
         }
@@ -292,30 +311,35 @@
       ],
       "properties": {
         "slug": {
-          "$ref": "#/definitions/identifier"
+          "$ref": "#/definitions/identifier",
+          "description": "URL-safe workflow identifier."
         },
         "kind": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Optional workflow classification (e.g. ceremony, governance)."
         },
         "after": {
           "description": "Advisory predecessors: the workflow ids that NATURALLY come before this one. Shapes the harness's `propose` action only \u2014 never a hard gate.",
           "type": "array",
           "minItems": 1,
           "items": {
-            "$ref": "#/definitions/identifier"
+            "$ref": "#/definitions/identifier",
+            "description": "One advisory predecessor workflow id."
           }
         },
         "facilitator": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "The orchestrator agent that drives instances of this workflow."
         },
         "steps": {
           "description": "The structurant steps constituting this workflow (one actor per step; fork/merge/loop via `after`).",
           "type": "array",
           "minItems": 1,
           "items": {
-            "$ref": "#/definitions/step"
+            "$ref": "#/definitions/step",
+            "description": "One step (one actor's turn)."
           }
         }
       }

@@ -11,17 +11,21 @@
   "properties": {
     "sessionId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The session this invocation runs in."
     },
     "parentSessionId": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The parent session that opened this session, if any."
     },
     "workflowSlug": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The workflow identifier to resolve the next step for."
     }
-  }
+  },
+  "description": "Input contract for the resolve-step harness function."
 }

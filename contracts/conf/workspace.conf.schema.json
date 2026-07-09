@@ -13,8 +13,10 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "#/definitions/node"
-      }
+        "$ref": "#/definitions/node",
+        "description": "One workspace node."
+      },
+      "description": "Recursive tree of workspace nodes."
     }
   },
   "definitions": {
@@ -34,7 +36,8 @@
         },
         "description": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Human-readable purpose of this node."
         },
         "cardinality": {
           "description": "How many instances of this node may exist at this position.",
@@ -58,10 +61,13 @@
         "children": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/node"
-          }
+            "$ref": "#/definitions/node",
+            "description": "One child node."
+          },
+          "description": "Child nodes nested under this node."
         }
-      }
+      },
+      "description": "One node in the workspace layout tree."
     }
   }
 }

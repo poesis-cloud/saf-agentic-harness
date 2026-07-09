@@ -6,13 +6,15 @@
   "$defs": {
     "sessionId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The session identifier observed or minted by the surrounding mechanism (adapter, bash wrapper, or CI platform)."
     },
     "parentSessionId": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The parent session identifier when this session was opened by another session; null for top-level sessions."
     }
   },
   "type": "object",
@@ -37,19 +39,23 @@
         "check-step-postconditions",
         "check-workspace",
         "check-configuration"
-      ]
+      ],
+      "description": "The harness function that produced this report."
     },
     "sessionId": {
-      "$ref": "#/$defs/sessionId"
+      "$ref": "#/$defs/sessionId",
+      "description": "The session this invocation ran in."
     },
     "parentSessionId": {
-      "$ref": "#/$defs/parentSessionId"
+      "$ref": "#/$defs/parentSessionId",
+      "description": "The parent session that opened this session, if any."
     },
     "workflowInstanceId": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The workflow instance this invocation belongs to, if any."
     }
   },
   "unevaluatedProperties": false

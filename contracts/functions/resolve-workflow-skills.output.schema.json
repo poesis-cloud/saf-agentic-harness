@@ -12,17 +12,21 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "resolved"
+              "const": "resolved",
+              "description": "Success status for resolve-workflow-skills."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "skills": {
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "One skill id."
           },
-          "minItems": 1
+          "minItems": 1,
+          "description": "Ordered skill ids injected into the agent's session context."
         }
       }
     },
@@ -31,15 +35,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-workflow-skills harness function."
 }

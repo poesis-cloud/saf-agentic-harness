@@ -21,10 +21,13 @@
         "properties": {
           "host_model_id": {
             "type": "string",
-            "minLength": 1
+            "minLength": 1,
+            "description": "The host-specific model identifier used at dispatch."
           }
-        }
-      }
+        },
+        "description": "The host binding for one canonical model profile."
+      },
+      "description": "Map of canonical model profile id -> host-specific model binding."
     }
   }
 }

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://poesis.cloud/safe-agentic-framework/conf/access-control-list.conf.schema.json",
   "title": "Access-control-list configuration schema",
-  "description": "Validation schema for conf/access-control-list.conf.yaml: whole-resource RBAC. Actors (agent files) hold roles; each role carries privileges of exactly one artifact plus one action verb (CREATE|READ|UPDATE|DELETE).",
+  "description": "Validation schema for conf/access-control-list.conf.yaml: framework-defined whole-resource RBAC. Roles are defined by the framework as named privilege sets (one artifact schema slug plus one action verb). Actors map those roles to framework agents (files in the framework's agents/ directory, identified by their frontmatter `name` slug).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,78 +11,109 @@
   ],
   "properties": {
     "actors": {
-      "description": "The agents known to the framework, each with the roles it holds.",
+      "description": "Mapping of framework-defined roles to the framework agents that hold them. Agents are defined as `.agent.md` files in the framework's agents/ directory and identified by their frontmatter `name` slug.",
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "roles"
-        ],
-        "properties": {
-          "id": {
-            "description": "The agent filename (e.g. business-owner.agent.md).",
-            "type": "string",
-            "pattern": "^[a-z0-9-]+\\.agent\\.md$"
-          },
-          "roles": {
-            "description": "Role ids assigned to this actor.",
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
+        "$ref": "#/$defs/actor"
+      }
+    },
+    "roles": {
+      "description": "Framework-defined privilege sets. Each role is a slug-named set of privileges; each privilege is one artifact schema slug plus one action verb (CREATE|READ|UPDATE|DELETE).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/role"
+      }
+    }
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "roles"
+      ],
+      "description": "One actor declaration: a framework agent (identified by its frontmatter `name` slug) and the roles assigned to it.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/agentSlug",
+          "description": "The agent's frontmatter `name` slug (e.g. business-owner)."
+        },
+        "roles": {
+          "description": "Role slugs assigned to this actor.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/roleSlug"
           }
         }
       }
     },
-    "roles": {
-      "description": "Named privilege sets. Each privilege is one artifact plus one action verb.",
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "privileges"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
+    "role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "privileges"
+      ],
+      "description": "One role declaration: a slug-named set of privileges.",
+      "properties": {
+        "slug": {
+          "$ref": "#/$defs/roleSlug",
+          "description": "The role slug referenced by actors."
+        },
+        "privileges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/privilege"
           },
-          "privileges": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "artifact",
-                "action"
-              ],
-              "properties": {
-                "artifact": {
-                  "description": "The artifact schema filename (or its stem) the privilege applies to.",
-                  "type": "string",
-                  "minLength": 1
-                },
-                "action": {
-                  "enum": [
-                    "CREATE",
-                    "READ",
-                    "UPDATE",
-                    "DELETE"
-                  ]
-                }
-              }
-            }
-          }
+          "description": "The privileges granted to holders of this role."
         }
       }
+    },
+    "privilege": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "action"
+      ],
+      "description": "One artifact+action privilege.",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/artifactSlug"
+        },
+        "action": {
+          "$ref": "#/$defs/action"
+        }
+      }
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "CREATE",
+        "READ",
+        "UPDATE",
+        "DELETE"
+      ],
+      "description": "The action verb (CREATE, READ, UPDATE, DELETE) permitted on the artifact."
+    },
+    "agentSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "URL-safe slug identifying a framework agent (matches the agent file's frontmatter `name` value, e.g. product-manager)."
+    },
+    "roleSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "URL-safe slug identifying a role."
+    },
+    "artifactSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "URL-safe slug naming an artifact kind — the stem of the artifact schema filename (e.g. product-vision from product-vision.artifact.schema.json)."
     }
   }
 }

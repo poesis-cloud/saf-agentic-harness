@@ -12,20 +12,25 @@
   "properties": {
     "sessionId": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The session this invocation runs in."
     },
     "parentSessionId": {
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "The parent session that opened this session, if any."
     },
     "artifactPath": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Workspace-relative path of the artifact being written."
     },
     "action": {
-      "$ref": "../actions.schema.json#/$defs/writeAction"
+      "$ref": "../actions.schema.json#/$defs/writeAction",
+      "description": "The write action (create or update) being requested."
     }
-  }
+  },
+  "description": "Input contract for the check-step-authorization harness function."
 }

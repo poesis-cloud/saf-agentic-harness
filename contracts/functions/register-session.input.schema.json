@@ -10,13 +10,17 @@
   "properties": {
     "agent": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "The framework-agent identity, when applicable."
     },
     "sessionId": {
-      "$ref": "../context.schema.json#/$defs/sessionId"
+      "$ref": "../context.schema.json#/$defs/sessionId",
+      "description": "The session this invocation runs in."
     },
     "parentSessionId": {
-      "$ref": "../context.schema.json#/$defs/parentSessionId"
+      "$ref": "../context.schema.json#/$defs/parentSessionId",
+      "description": "The parent session that opened this session, if any."
     }
-  }
+  },
+  "description": "Input contract for the register-session harness function."
 }

@@ -22,7 +22,8 @@
         "enum": [
           "create",
           "update"
-        ]
+        ],
+        "description": "The harness action verb this host tool performs."
       }
     },
     "delete_tools": {
@@ -30,40 +31,50 @@
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "description": "One host tool name that performs deletion."
       }
     },
     "tool_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the host tool name."
     },
     "input_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the tool's input argument."
     },
     "path_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the target artifact path."
     },
     "actor_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the acting agent identity."
     },
     "host_session_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the host-observed session id."
     },
     "host_parent_session_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the host-observed parent session id."
     },
     "dispatch_tools": {
       "description": "Host tool names that start a child step-session (subagent dispatch).",
       "type": "array",
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "description": "One host tool name that performs subagent dispatch."
       }
     },
     "dispatch_agent_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the dispatched agent identity."
     },
     "dispatch_model_keys": {
-      "$ref": "#/definitions/keyList"
+      "$ref": "#/definitions/keyList",
+      "description": "Ordered payload field names to probe for the model profile identifier."
     }
   },
   "definitions": {
@@ -73,7 +84,8 @@
       "minItems": 1,
       "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "description": "One payload field name."
       }
     }
   }

@@ -9,13 +9,16 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "valid"
+              "const": "valid",
+              "description": "Success status for check-workspace."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "workspaceChecks": {
           "type": "array",
-          "maxItems": 0
+          "maxItems": 0,
+          "description": "One finding per failed workspace check."
         }
       }
     },
@@ -36,6 +39,7 @@
           "minItems": 1,
           "items": {
             "type": "object",
+            "description": "One failed workspace check finding.",
             "required": [
               "filePath",
               "failureMessage"
@@ -43,15 +47,18 @@
             "properties": {
               "filePath": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Path of the workspace artifact or file with the failure."
               },
               "failureMessage": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Human-readable failure explanation."
               }
             },
             "unevaluatedProperties": false
-          }
+          },
+          "description": "One finding per failed workspace check."
         }
       }
     },
@@ -60,15 +67,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the check-workspace harness function."
 }

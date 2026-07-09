@@ -12,9 +12,11 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "pass"
+              "const": "pass",
+              "description": "Success status for check-step-postconditions."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "conditionChecks": {
           "type": "array",
@@ -26,14 +28,17 @@
             ],
             "properties": {
               "condition": {
-                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition"
+                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition",
+                "description": "The condition that was checked."
               },
               "outcome": {
-                "const": "pass"
+                "const": "pass",
+                "description": "Whether the condition passed or failed."
               },
               "failureMessage": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
               }
             },
             "if": {
@@ -58,8 +63,10 @@
                 ]
               }
             },
-            "unevaluatedProperties": false
-          }
+            "unevaluatedProperties": false,
+            "description": "One condition outcome; failure requires a failureMessage."
+          },
+          "description": "One outcome entry per condition checked."
         }
       }
     },
@@ -85,18 +92,21 @@
             ],
             "properties": {
               "condition": {
-                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition"
+                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition",
+                "description": "The condition that was checked."
               },
               "outcome": {
                 "type": "string",
                 "enum": [
                   "pass",
                   "fail"
-                ]
+                ],
+                "description": "Whether the condition passed or failed."
               },
               "failureMessage": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
               }
             },
             "if": {
@@ -121,7 +131,8 @@
                 ]
               }
             },
-            "unevaluatedProperties": false
+            "unevaluatedProperties": false,
+            "description": "One condition outcome; at least one must be fail."
           },
           "contains": {
             "properties": {
@@ -132,7 +143,8 @@
             "required": [
               "outcome"
             ]
-          }
+          },
+          "description": "One outcome entry per condition checked; at least one must be fail."
         }
       }
     },
@@ -141,15 +153,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the check-step-postconditions harness function."
 }

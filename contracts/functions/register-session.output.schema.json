@@ -12,9 +12,11 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "registered"
+              "const": "registered",
+              "description": "Success status for register-session."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "session": {
           "type": "object",
@@ -24,16 +26,20 @@
           "properties": {
             "agent": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "The framework-agent identity, when applicable."
             },
             "sessionId": {
-              "$ref": "../context.schema.json#/$defs/sessionId"
+              "$ref": "../context.schema.json#/$defs/sessionId",
+              "description": "The registered session id."
             },
             "parentSessionId": {
-              "$ref": "../context.schema.json#/$defs/parentSessionId"
+              "$ref": "../context.schema.json#/$defs/parentSessionId",
+              "description": "The registered parent session id, if any."
             }
           },
-          "unevaluatedProperties": false
+          "unevaluatedProperties": false,
+          "description": "The registered session metadata."
         }
       }
     },
@@ -42,15 +48,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the register-session harness function."
 }

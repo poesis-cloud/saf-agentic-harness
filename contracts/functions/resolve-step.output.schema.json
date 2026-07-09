@@ -12,12 +12,15 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "step-resolution"
+              "const": "step-resolution",
+              "description": "Success status for resolve-step."
             }
-          }
+          },
+          "description": "The function outcome."
         },
         "step": {
-          "$ref": "../conf/workflow.conf.schema.json#/definitions/step"
+          "$ref": "../conf/workflow.conf.schema.json#/definitions/step",
+          "description": "The resolved step object from the workflow configuration."
         }
       }
     },
@@ -37,15 +40,18 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/$defs/errorStatus"
+              "$ref": "../report.schema.json#/$defs/errorStatus",
+              "description": "Error status."
             }
           },
           "required": [
             "error"
-          ]
+          ],
+          "description": "The function outcome on error."
         }
       }
     }
   ],
-  "unevaluatedProperties": false
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step harness function."
 }
