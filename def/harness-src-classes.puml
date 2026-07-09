@@ -18,17 +18,19 @@ package "CD - Harness source classes (src/)" <<Frame>> {
 
   package "commands" {
     interface Command {
-      +execute_function(payload: dict) : dict
+      +execute_function(invocation: FunctionInvocation) : Report
     }
     class HookCommand {
       -_normalizer : HookNormalizer
       -_correlator : SessionCorrelator
       -_commands : Mapping[Boundary, Command]
-      +execute_function(payload: dict) : dict
+      +execute_function(invocation: FunctionInvocation) : Report
+    }
+    class RegisterSessionCommand {
+      -_registrar : SessionRegistrar
     }
     class ResolveStepCommand {
       -_step_resolver : StepResolver
-      -_model_resolver : StepModelResolver
     }
     class ResolveStepModelCommand {
       -_model_resolver : StepModelResolver
@@ -42,23 +44,20 @@ package "CD - Harness source classes (src/)" <<Frame>> {
     class CheckStepAuthorizationCommand {
       -_checker : StepAuthorizationChecker
     }
-    class CheckStepArtifactsCommand {
+    class CheckStepArtifactCommand {
       -_checker : StepArtifactChecker
     }
-    class InjectWorkflowInstructionsCommand {
-      -_injector : WorkflowInstructionInjector
+    class ResolveWorkflowInstructionsCommand {
+      -_resolver : WorkflowInstructionResolver
     }
-    class InjectWorkflowSkillsCommand {
-      -_injector : WorkflowSkillInjector
+    class ResolveWorkflowSkillsCommand {
+      -_resolver : WorkflowSkillResolver
     }
-    class InjectStepInstructionsCommand {
-      -_injector : StepInstructionInjector
+    class ResolveStepInstructionsCommand {
+      -_resolver : StepInstructionResolver
     }
-    class InjectStepSkillsCommand {
-      -_injector : StepSkillInjector
-    }
-    class AuditWorkflowInstanceCommand {
-      -_auditor : WorkflowInstanceAuditor
+    class ResolveStepSkillsCommand {
+      -_resolver : StepSkillResolver
     }
     class CheckWorkspaceCommand {
       -_checker : WorkspaceChecker
@@ -67,43 +66,65 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       -_checker : ConfigurationChecker
     }
     note bottom of ResolveStepCommand
-      The one composing command: function 1's ""out""
-      embeds function 2's binding, so this command
-      invokes StepResolver then StepModelResolver
-      and merges both results into the contract JSON -
-      the services stay independent of each other.
+      No command composes services: functions 3 and 4
+      are fully independent - whoever needs both
+      (the orchestrator per its instructions, or the
+      adapter on one hook) composes them OUTSIDE
+      the harness.
     end note
     note bottom of Command
       Commands are the JSON boundary: parse the
-      function's ""in"" object, invoke the service(s),
-      render the typed result(s) to the ""out"" object
-      per ""contracts/functions/<function>.io.schema.json"".
+      FunctionInvocation input object (session
+      attribution fields + function-specific fields),
+      invoke the service, and return the exact concrete
+      Report object that becomes command ""out"" and
+      log entry ""report"".
     end note
   }
 
   package "services" {
 
+    package "session_registration" {
+      class SessionRegistrar {
+        -_session_log_store : SessionLogStore
+        +register_session(actor: str, agent: str | None, session_id: str, parent_session_id: str | None) : SessionRegistrationReport
+      }
+      class SessionRegistrationReport <<dataclass>> {
+        +session : SessionRef
+      }
+      class SessionRef <<dataclass>> {
+        +actor : str
+        +agent : str | None
+        +session_id : str
+        +parent_session_id : str | None
+      }
+    }
+
     package "step_resolution" {
       class StepResolver {
-        -_workspace : Workspace
+        -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +resolve_step(workflow_slug: str, workflow_instance_id: str | None) : StepResolution
+        +resolve_step(invocation: FunctionInvocation, workflow_slug: str) : StepResolutionReport
       }
-      class StepResolution <<dataclass>> {
+      class StepResolutionReport <<dataclass>> {
         +workflow_slug : str
         +workflow_instance_id : str
         +step : Step | None
-        +successors : tuple[str, ...]
       }
     }
 
     package "model_resolution" {
       class StepModelResolver {
+        -_session_log_store : SessionLogStore
+        -_catalog : WorkflowCatalog
         -_profiles : ModelProfiles
-        +resolve_step_model(capabilities: Mapping[str, int]) : ModelBinding
+        +resolve_step_model(invocation: FunctionInvocation) : ModelProfileReport
       }
-      class ModelBinding <<dataclass>> {
-        +model : str
+      class ModelProfileReport <<dataclass>> {
+        +profile : ModelProfileBinding
+      }
+      class ModelProfileBinding <<dataclass>> {
+        +slug : str
         +score : float
         +cost_rank : int
         +reason : str
@@ -113,82 +134,103 @@ package "CD - Harness source classes (src/)" <<Frame>> {
     package "checking" {
       class StepPreconditionChecker {
         -_evaluator : ConditionEvaluator
-        -_workspace : Workspace
+        -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +check_step_preconditions(workflow_slug: str, workflow_instance_id: str, step_slug: str) : CheckReport
+        +check_step_preconditions(invocation: FunctionInvocation) : ConditionCheckReport
       }
       class StepPostconditionChecker {
         -_evaluator : ConditionEvaluator
-        -_workspace : Workspace
+        -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +check_step_postconditions(workflow_slug: str, workflow_instance_id: str, step_slug: str) : CheckReport
+        +check_step_postconditions(invocation: FunctionInvocation) : ConditionCheckReport
       }
       class StepAuthorizationChecker {
         -_acl : AccessControlList
         -_workspace_layout : WorkspaceLayout
-        -_workspace : Workspace
-        +check_step_authorization(actor: str, artifact_path: Path) : CheckReport
+        +check_step_authorization(invocation: FunctionInvocation, artifact_path: Path) : AuthorizationReport
       }
       class StepArtifactChecker {
-        -_workspace : Workspace
-        +check_step_artifacts(artifact_path: Path) : CheckReport
-      }
-      class WorkflowInstanceAuditor {
-        -_acl : AccessControlList
-        -_workspace : Workspace
-        +audit_workflow_instance(workflow_instance_id: str) : CheckReport
+        -_artifact_store : ArtifactStore
+        +check_step_artifact(invocation: FunctionInvocation, artifact_path: Path) : ArtifactCheckReport
       }
       class WorkspaceChecker {
-        -_workspace : Workspace
-        +check_workspace(scope: str, root: Path | None) : CheckReport
+        -_artifact_store : ArtifactStore
+        +check_workspace() : WorkspaceCheckReport
       }
       class ConfigurationChecker {
         -_loader : ConfigLoader
-        +check_configuration(root: Path) : CheckReport
+        +check_configuration() : ConfigurationCheckReport
       }
       class ConditionEvaluator {
-        -_workspace : Workspace
-        +evaluate_conditions(conditions: tuple[Condition, ...], log: Log) : tuple[ConditionOutcome, ...]
+        -_artifact_store : ArtifactStore
+        +evaluate_conditions(conditions: tuple[Condition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
+      }
+      class ConditionCheckReport <<dataclass>> {
+        +condition_checks : tuple[ConditionCheck, ...]
+      }
+      class AuthorizationReport <<dataclass>> {
+        +authorization : Authorization
+      }
+      class Authorization <<dataclass>> {
+        +actor : str
+        +artifact_path : Path
+        +failure_message : str | None
+      }
+      class ArtifactCheckReport <<dataclass>> {
+        +artifact_check : ArtifactCheck | None
+      }
+      class ArtifactCheck <<dataclass>> {
+        +failure_message : str
+        +revert : Revert | None
+      }
+      class Revert <<dataclass>> {
+        +action : str
+        +from_ref : str | None
+      }
+      class WorkspaceCheckReport <<dataclass>> {
+        +workspace_checks : tuple[Finding, ...]
+      }
+      class ConfigurationCheckReport <<dataclass>> {
+        +configuration_checks : tuple[Finding, ...]
       }
       class CheckReport <<dataclass>> {
-        +passed : bool
-        +reports : tuple[Report, ...]
-        +outcomes : tuple[ConditionOutcome, ...]
+        +findings : tuple[Finding, ...]
       }
-      class ConditionOutcome <<dataclass>> {
-        +condition_id : str
+      class ConditionCheck <<dataclass>> {
+        +condition : Condition
         +outcome : str
-        +report : str | None
+        +failure_message : str | None
       }
     }
 
-    package "injection" {
-      class WorkflowInstructionInjector {
+    package "context_resolution" {
+      class WorkflowInstructionResolver {
         -_catalog : WorkflowCatalog
-        +inject_workflow_instructions(facilitator: str) : Injection
+        +resolve_workflow_instructions(invocation: FunctionInvocation) : WorkflowInstructionsReport
       }
-      class WorkflowSkillInjector {
+      class WorkflowSkillResolver {
         -_catalog : WorkflowCatalog
-        +inject_workflow_skills(facilitator: str) : Injection
+        +resolve_workflow_skills(invocation: FunctionInvocation) : WorkflowSkillsReport
       }
-      class StepInstructionInjector {
+      class StepInstructionResolver {
         -_catalog : WorkflowCatalog
-        +inject_step_instructions(workflow_instance_id: str, step_slug: str) : Injection
+        +resolve_step_instructions(invocation: FunctionInvocation) : StepInstructionsReport
       }
-      class StepSkillInjector {
+      class StepSkillResolver {
         -_catalog : WorkflowCatalog
-        +inject_step_skills(workflow_instance_id: str, step_slug: str) : Injection
+        +resolve_step_skills(invocation: FunctionInvocation) : StepSkillsReport
       }
-      class Injection <<dataclass>> {
-        +step_slug : str | None
+      class WorkflowInstructionsReport <<dataclass>> {
         +instructions : tuple[str, ...]
-        +prompts : tuple[str, ...]
-        +skills : tuple[str, ...]
-        +catalog : Mapping[str, WorkflowPosition]
       }
-      class WorkflowPosition <<dataclass>> {
-        +after : tuple[str, ...]
-        +guidance : str
+      class WorkflowSkillsReport <<dataclass>> {
+        +skills : tuple[str, ...]
+      }
+      class StepInstructionsReport <<dataclass>> {
+        +instructions : tuple[str, ...]
+      }
+      class StepSkillsReport <<dataclass>> {
+        +skills : tuple[str, ...]
       }
     }
 
@@ -200,96 +242,159 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       }
       enum Boundary {
         SESSION_STARTED
-        OBSERVING
         STEP_STARTING
         STEP_STARTED
-        STEP_ENDING
-        STEP_ENDED
         WRITE_STARTING
         WRITE_ENDED
+        STEP_ENDED
       }
       class SessionCorrelator {
-        -_workspace : Workspace
-        +correlate_session(actor: str) : LogEntry | None
+        -_session_log_store : SessionLogStore
+        +correlate_session(session_id: str, parent_session_id: str | None, agent: str) : LogEntry | None
       }
     }
 
     note bottom of SessionCorrelator
       Hook-plane collaborator (used by HookCommand,
-      not by the injectors): resolves a session-start
-      event's actor to the open dispatch, supplying
-      the injectors' In (workflow_instance_id, step_slug)
-      or selecting the workflow injectors when none.
+      not by the resolvers): resolves a session-start
+      event to its unresolved step-resolution entry -
+      exact match via parentSessionId first,
+      resolution-actor heuristic (resolution actor ==
+      session agent) as fallback - supplying session
+      attribution fields to the context resolvers or
+      selecting the workflow context resolvers when none.
     end note
     note bottom of Boundary
       Lifecycle participles avoid the step/session clash
       (1 step = 1 session): STEP_STARTING is the dispatch
       about to open the step - it can DENY; STEP_STARTED is
       the step session having opened - it can only INJECT;
-      STEP_ENDING is the step session ending (record only);
       STEP_ENDED is the dispatch return - THE evaluation
       point. SESSION_STARTED is a non-step (facilitator)
-      session starting; OBSERVING records a user prompt.
+      session starting. STEP_STARTING and STEP_ENDED occur
+      in the dispatching (facilitator) session - their
+      entries journal to its log. Host events outside these
+      boundaries are adapter telemetry - never journaled.
     end note
   }
 
-  package "models" {
-    note as ModelsNote
-      ""models"" holds the PERSISTED dataclasses only:
-      the artifact and the journal (Report persists
-      inside every LogEntry). Frozen dataclasses -
-      public typed attributes, no getters/setters;
-      methods are derived queries (verb + subject).
+  package "stores" {
+    note as StoresNote
+      ""stores"" mirrors ""services"": one FAMILY subpackage
+      per store, each homing its own persisted (or
+      derived) dataclasses - no gateway, no facade.
+      Services depend on exactly the store(s) they need.
+      Frozen dataclasses throughout - public typed
+      attributes, no getters/setters.
     end note
 
-    class Artifact <<dataclass>> {
-      +ref : str
-      +kind : str
-      +data : Mapping[str, Any]
+    package "artifact_store" {
+      class ArtifactStore {
+        -_workspace_layout : WorkspaceLayout
+        -_validator : SchemaValidator
+        +discover_artifacts(selector: str) : tuple[Artifact, ...]
+        +scan_raw_paths(scope: Path) : Iterator[Path]
+        +validate_artifact(artifact_path: Path) : tuple[Finding, ...]
+        +commit_artifact(artifact_path: Path) : None
+        +revert_artifact(artifact_path: Path) : Finding
+      }
+      class Artifact <<dataclass>> {
+        +ref : str
+        +kind : str
+        +data : Mapping[str, Any]
+      }
+      class Finding <<dataclass>> {
+        +source : str
+        +rule : str
+        +message : str
+      }
+      note bottom of ArtifactStore
+        Owns the artifact side (C6): workspace state is
+        committed state (HEAD), the working tree is the
+        write staging area. ""discover_artifacts"" reads
+        committed state and raises on an invalid artifact;
+        ""scan_raw_paths"" enumerates the raw universe for
+        sweeps; ""commit_artifact"" promotes a validated
+        staged write into state and ""revert_artifact""
+        discards an invalid one - the harness's only
+        deliberate Git actions. Finding is homed here - the
+        schema-validation finding every check composes
+        (CheckReport.findings).
+      end note
     }
-    class Log <<dataclass>> {
-      +workflow_instance_id : str
-      +entries : tuple[LogEntry, ...]
-      +list_executed_steps() : frozenset[str]
-      +find_latest_outcome(step_slug: str) : LogEntry | None
-      +find_open_dispatch(actor: str) : LogEntry | None
-    }
-    class LogEntry <<dataclass>> {
-      +command : str
-      +workflow_instance_id : str
-      +step_slug : str | None
-      +artifact : str | None
-      +actor : str
-      +status : str
-      +report : str
-      +payload : Mapping[str, Any]
-    }
-    class Report <<dataclass>> {
-      +source : str
-      +rule : str
-      +message : str
-    }
-  }
 
-  package "workspace" {
-    class Workspace {
-      -_workspace_layout : WorkspaceLayout
-      -_validator : SchemaValidator
-      -_jsonl : JsonlStore
-      +discover_artifacts(selector: str) : tuple[Artifact, ...]
-      +scan_raw_paths(scope: Path) : Iterator[Path]
-      +validate_artifact(artifact_path: Path) : tuple[Report, ...]
-      +revert_artifact(artifact_path: Path) : Report
-      +open_workflow_instance(workflow_slug: str) : str
-      +load_instance_log(workflow_instance_id: str) : Log
-      +append_log_entry(workflow_instance_id: str, entry: LogEntry) : None
+    package "session_log_store" {
+      class FunctionInvocation <<dataclass>> {
+        +session_id : str
+        +parent_session_id : str | None
+        +fields : Mapping[str, Any]
+      }
+      class SessionLogStore {
+        -_jsonl : JsonlStore
+        +create_session_log(entry: LogEntry) : Log
+        +mint_workflow_instance_id(workflow_slug: str) : str
+        +load_session_log(session_id: str) : Log
+        +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
+        +append_log_entry(session_id: str, entry: LogEntry) : None
+      }
+      class Log <<dataclass>> {
+        +session_id : str
+        +entries : tuple[LogEntry, ...]
+      }
+      class LogEntry <<dataclass>> {
+        +ts : str
+        +report : Report
+      }
+      class StepRef <<dataclass>> {
+        +slug : str
+        +actor : str
+        +artifact : str | None
+      }
+      abstract class Report <<dataclass>> {
+        +context : Context
+        +outcome : Outcome
+      }
+      class Context <<dataclass>> {
+        +function : str
+        +actor : str
+        +session_id : str
+        +parent_session_id : str | None
+        +workflow_instance_id : str | None
+      }
+      class Outcome <<dataclass>> {
+        +status : str
+        +error : Error | None
+      }
+      class Error <<dataclass>> {
+        +code : str
+        +message : str
+        +retryable : bool | None
+      }
+      class WorkflowInstanceView <<dataclass>> {
+        +workflow_instance_id : str
+        +entries : tuple[LogEntry, ...]
+        +list_executed_steps() : frozenset[str]
+        +find_latest_outcome(step_slug: str) : LogEntry | None
+        +find_unresolved_step_resolution(actor: str) : LogEntry | None
+      }
+      LogEntry o-- Report
+      Report o-- Context
+      Report o-- Outcome
+      Outcome o-- Error
+      note bottom of SessionLogStore
+        Owns the log side: 1 session = 1 writer = 1 file,
+        created by function 0's registration entry (the
+        file's first line); ""load_workflow_instance_view""
+        assembles the cross-log ""WorkflowInstanceView"" -
+        discovery scan + ts ordering under the single-driver
+        invariant (see Logging). Report is the abstract base
+        every service result extends (the subtypes live with
+        their services); the log entry wraps the report with
+        ""ts"" only - context and outcome live on the Report
+        base. WorkflowInstanceView is assembled here, never
+        persisted.
+      end note
     }
-    note bottom of Workspace
-      The single data-access facade: artifacts AND
-      instance journals. Enforces C6:
-      ""discover_artifacts"" raises on an invalid artifact;
-      ""revert_artifact"" is the single deliberate write.
-    end note
   }
 
   package "config" {
@@ -305,11 +410,12 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +load_adapter_binding(env: str) : AdapterBinding
     }
     class FrameworkLayout <<dataclass>> {
+      +framework_dir : Path
       +skills_dir : Path
       +agents_dir : Path
       +schemas_dir : Path
       +templates_dir : Path
-      +workspace_root : Path
+      +workspace_dir : Path
     }
     class AccessControlList <<dataclass>> {
       +grants : Mapping[str, frozenset[str]]
@@ -337,7 +443,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +workflows : tuple[Workflow, ...]
       +find_workflow(slug: str) : Workflow
       +list_facilitated_workflows(actor: str) : tuple[Workflow, ...]
-      +list_successors(slug: str) : tuple[str, ...]
     }
     class Workflow <<dataclass>> {
       +slug : str
@@ -352,15 +457,16 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +artifact : str
       +skills : tuple[str, ...]
       +instructions : tuple[str, ...]
-      +prompts : tuple[str, ...]
-      +preconditions : tuple[Condition, ...]
-      +postconditions : tuple[Condition, ...]
+      +conditions : tuple[Condition, ...]
       +capabilities : Mapping[str, int]
     }
     class Condition <<dataclass>> {
+      +kind : str
+      +type : str
       +condition_id : str
-      +after : str | None
-      +state : str | None
+      +step_id : str | None
+      +set_selector : Mapping[str, Any] | None
+      +set_predicate : str | None
     }
     class AdapterBinding <<dataclass>> {
       +tool_classes : Mapping[str, str]
@@ -379,17 +485,31 @@ package "CD - Harness source classes (src/)" <<Frame>> {
   }
 
   package "utils" {
+    note as UtilsNote
+      Two layers: LOADERS - one per format - and
+      HIGHER-LEVEL utilities abstracting them
+      (SchemaValidator loads contracts through
+      JsonLoader; JsonlStore persists through it).
+    end note
     class EnvLoader {
       +load_env(path: Path) : Mapping[str, str]
+    }
+    class JsonLoader {
+      +load_json(path: Path) : dict
     }
     class YamlLoader {
       +load_yaml(path: Path) : dict
     }
+    class MarkdownLoader {
+      +load_markdown(path: Path) : dict
+    }
     class JsonlStore {
+      -_json : JsonLoader
       +load_entries(path: Path) : tuple[dict, ...]
       +append_entry(path: Path, obj: dict) : None
     }
     class SchemaValidator {
+      -_json : JsonLoader
       +validate_instance(instance: Any, contract: Path) : tuple[str, ...]
     }
   }
@@ -402,17 +522,17 @@ package "CD - Harness source classes (src/)" <<Frame>> {
 
   ' --- command surface: one command per harness function (1:1) ---
   Command <|.. HookCommand
+  Command <|.. RegisterSessionCommand
   Command <|.. ResolveStepCommand
   Command <|.. ResolveStepModelCommand
   Command <|.. CheckStepPreconditionsCommand
   Command <|.. CheckStepPostconditionsCommand
   Command <|.. CheckStepAuthorizationCommand
-  Command <|.. CheckStepArtifactsCommand
-  Command <|.. InjectWorkflowInstructionsCommand
-  Command <|.. InjectWorkflowSkillsCommand
-  Command <|.. InjectStepInstructionsCommand
-  Command <|.. InjectStepSkillsCommand
-  Command <|.. AuditWorkflowInstanceCommand
+  Command <|.. CheckStepArtifactCommand
+  Command <|.. ResolveWorkflowInstructionsCommand
+  Command <|.. ResolveWorkflowSkillsCommand
+  Command <|.. ResolveStepInstructionsCommand
+  Command <|.. ResolveStepSkillsCommand
   Command <|.. CheckWorkspaceCommand
   Command <|.. CheckConfigurationCommand
   Application ..> Command : builds + dispatches\n(composition root, at src root)
@@ -423,31 +543,51 @@ package "CD - Harness source classes (src/)" <<Frame>> {
   SchemaValidator ..> JsonSchemaLib : contract compilation\n+ instance validation
   YamlLoader ..> PyYamlLib : safe_load
 
-  ' --- result <-> model correlation ---
-  CheckReport "reports" o-- Report : every check finding is\na models.Report - the same\nshape the journal persists
-  CheckReport o-- ConditionOutcome
-  Injection o-- WorkflowPosition
-  StepResolution o-- Step : the configured step,\nverbatim
+  ' --- result <-> report correlation: every service result IS a Report subtype ---
+  Report <|-- SessionRegistrationReport
+  Report <|-- StepResolutionReport
+  Report <|-- ModelProfileReport
+  Report <|-- CheckReport
+  Report <|-- ConditionCheckReport
+  Report <|-- AuthorizationReport
+  Report <|-- ArtifactCheckReport
+  Report <|-- WorkspaceCheckReport
+  Report <|-- ConfigurationCheckReport
+  Report <|-- WorkflowInstructionsReport
+  Report <|-- WorkflowSkillsReport
+  Report <|-- StepInstructionsReport
+  Report <|-- StepSkillsReport
+  CheckReport "findings" o-- Finding : every check finding is\nthe Finding homed in\nstores/artifact_store
+  SessionRegistrationReport o-- SessionRef
+  ConditionCheckReport o-- ConditionCheck
+  AuthorizationReport o-- Authorization
+  ArtifactCheckReport o-- ArtifactCheck
+  ArtifactCheck o-- Revert
+  ModelProfileReport o-- ModelProfileBinding
+  StepResolutionReport o-- Step : the configured step,\nverbatim
   note on link
-    Results embed models.Report; when a command
-    journals its invocation, the result becomes the
-    LogEntry payload - so every report a service
-    returns is persisted verbatim in the journal.
+    Every service returns a Report subtype (homed in
+    stores/session_log_store); ""context"" and ""outcome""
+    live on the base - every result carries its function's
+    outcome by construction, under one shared field
+    name with function-owned values. The command
+    returns that exact object as the contract ""out""
+    JSON and the log entry persists it verbatim as
+    ""report"", wrapped by the entry's own ""ts"" only.
   end note
 
   ' --- one dependency direction ---
   "commands" ..> "services"
-  "services" ..> "workspace"
+  "services" ..> "stores"
   "services" ..> "config"
-  "services" ..> "models"
-  "workspace" ..> "models"
-  "workspace" ..> "utils"
+  "stores" ..> "utils"
   "config" ..> "utils"
 
   note bottom of "services"
     One service per harness function (1:1:1 with commands),
-    grouped in subpackages by family - resolution / checking /
-    injection / hooks - and each result dataclass is homed in
+    grouped in subpackages by family - session_registration /
+    step_resolution / model_resolution / checking /
+    context_resolution / hooks - and each result dataclass is homed in
     the subpackage of the classes returning it, exclusively.
     Dependencies are constructor-injected private attributes;
     method names are verb + subject; commands render the typed

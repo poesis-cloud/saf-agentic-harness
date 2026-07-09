@@ -137,7 +137,7 @@ class SchemaCatalog:
 
     # --- harness schemas ----------------------------------------------------
     def workflow_schema_path(self) -> Path:
-        return HARNESS_CONTRACTS_DIR / "workflow.conf.schema.json"
+        return HARNESS_CONTRACTS_DIR / "conf" / "workflow.conf.schema.json"
 
     def workflow_schema(self) -> dict[str, Any] | None:
         path = self.workflow_schema_path()

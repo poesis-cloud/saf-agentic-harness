@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/register-session.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "register-session output contract",
+  "oneOf": [
+    {
+      "required": [
+        "session"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "registered"
+            }
+          }
+        },
+        "session": {
+          "type": "object",
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "agent": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sessionId": {
+              "$ref": "../context.schema.json#/$defs/sessionId"
+            },
+            "parentSessionId": {
+              "$ref": "../context.schema.json#/$defs/parentSessionId"
+            }
+          },
+          "unevaluatedProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

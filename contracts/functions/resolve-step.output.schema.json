@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/resolve-step.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "resolve-step output contract",
+  "oneOf": [
+    {
+      "required": [
+        "step"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "step-resolution"
+            }
+          }
+        },
+        "step": {
+          "$ref": "../conf/workflow.conf.schema.json#/definitions/step"
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "no-next-step"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

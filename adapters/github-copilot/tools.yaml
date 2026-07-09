@@ -15,7 +15,8 @@ tool_keys: [tool, tool_name, toolName]
 input_keys: [tool_input, toolInput, arguments]
 path_keys: [filePath, path, file]
 actor_keys: [agent, agentName, actor, subagent]
-session_keys: [sessionId, session_id, session]
+host_session_keys: [sessionId, session_id, session]
+host_parent_session_keys: [parentSessionId, parent_session_id, parentSession]
 # Subagent dispatch (runSubagent): the tool that starts a child step-session. The harness governs the
 # (target agent, model) selection at preToolUse — see ModelRouter.validate_dispatch.
 dispatch_tools: [runSubagent]

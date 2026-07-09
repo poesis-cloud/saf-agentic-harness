@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/check-step-artifact.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "check-step-artifact output contract",
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "valid"
+            }
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "artifactCheck"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "reverted"
+            }
+          }
+        },
+        "artifactCheck": {
+          "type": "object",
+          "required": [
+            "failureMessage",
+            "revert"
+          ],
+          "properties": {
+            "failureMessage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "revert": {
+              "type": "object",
+              "required": [
+                "action"
+              ],
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "restored",
+                    "deleted"
+                  ]
+                },
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "unevaluatedProperties": false
+            }
+          },
+          "unevaluatedProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

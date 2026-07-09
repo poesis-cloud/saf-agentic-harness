@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/check-step-preconditions.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "check-step-preconditions output contract",
+  "oneOf": [
+    {
+      "required": [
+        "conditionChecks"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "pass"
+            }
+          }
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition"
+              },
+              "outcome": {
+                "const": "pass"
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "conditionChecks"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "fail"
+            }
+          }
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "$ref": "../conf/workflow.conf.schema.json#/definitions/condition"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ]
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false
+          },
+          "contains": {
+            "properties": {
+              "outcome": {
+                "const": "fail"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

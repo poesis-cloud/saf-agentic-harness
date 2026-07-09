@@ -1,6 +1,6 @@
 # GitHub Copilot adapter
 
-Canonical harness and hook documentation now lives in `../../../def/harness/README.md`. The
+Canonical harness and hook documentation now lives in `../../def/spec.md`. The
 adapters-folder overview (shared dispatch script, per-host layout, how to add a new host) lives in
 `../README.md`.
 

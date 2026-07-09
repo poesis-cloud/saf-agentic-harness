@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/check-step-authorization.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "check-step-authorization output contract",
+  "oneOf": [
+    {
+      "required": [
+        "authorization"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "allowed"
+            }
+          }
+        },
+        "authorization": {
+          "$ref": "#/$defs/authorization",
+          "not": {
+            "required": [
+              "failureMessage"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "authorization"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "denied"
+            }
+          }
+        },
+        "authorization": {
+          "$ref": "#/$defs/authorization",
+          "required": [
+            "failureMessage"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "authorization": {
+      "type": "object",
+      "required": [
+        "actor",
+        "artifactPath",
+        "action",
+        "resource"
+      ],
+      "properties": {
+        "actor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifactPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "$ref": "../actions.schema.json#/$defs/writeAction"
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failureMessage": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "unevaluatedProperties": false
+    }
+  }
+}

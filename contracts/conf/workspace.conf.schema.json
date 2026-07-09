@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://poesis.cloud/safe-agentic-framework/conf/workspace.conf.schema.json",
+  "title": "Workspace layout configuration schema",
+  "description": "Validation schema for conf/workspace.conf.yaml: the structural blueprint of the workspace. A recursive tree of nodes; each node binds a path (with <slug> placeholders) to an optional artifact schema + template and a cardinality. Artifact-to-artifact derivation constraints (which kinds a given artifact may declare as sources) live in the artifact schemas themselves \u2014 the node's `schema` binding is the join point.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nodes"
+  ],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/node"
+      }
+    }
+  },
+  "definitions": {
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "description",
+        "cardinality"
+      ],
+      "properties": {
+        "path": {
+          "description": "Workspace-relative path of this node. Folder or file; <slug> segments are placeholders.",
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cardinality": {
+          "description": "How many instances of this node may exist at this position.",
+          "enum": [
+            "1",
+            "0..1",
+            "1..*",
+            "0..*"
+          ]
+        },
+        "schema": {
+          "description": "The artifact schema filename (in schemas/) that validates this node's file.",
+          "type": "string",
+          "pattern": "\\.artifact\\.schema\\.json$"
+        },
+        "template": {
+          "description": "The artifact template path that seeds this node's file.",
+          "type": "string",
+          "minLength": 1
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/node"
+          }
+        }
+      }
+    }
+  }
+}

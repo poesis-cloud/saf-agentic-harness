@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/resolve-step-model.output.schema.json",
+  "$ref": "../report.schema.json",
+  "title": "resolve-step-model output contract",
+  "oneOf": [
+    {
+      "required": [
+        "profile"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "resolved"
+            }
+          }
+        },
+        "profile": {
+          "type": "object",
+          "required": [
+            "id",
+            "score",
+            "cost_rank"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "score": {
+              "type": "number"
+            },
+            "cost_rank": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "unevaluatedProperties": false
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/$defs/errorStatus"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

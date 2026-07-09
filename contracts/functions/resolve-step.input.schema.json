@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/resolve-step.input.schema.json",
+  "title": "resolve-step input contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId",
+    "workflowSlug"
+  ],
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parentSessionId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workflowSlug": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

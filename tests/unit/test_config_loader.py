@@ -74,7 +74,7 @@ roles:
 
     def test_paths_follow_naming_convention(self, loader, conf_root):
         assert loader.conf_path("workspace") == conf_root / "conf" / "workspace.conf.yaml"
-        assert loader.contract_path("workspace") == CONTRACTS_DIR / "workspace.conf.schema.json"
+        assert loader.contract_path("workspace") == CONTRACTS_DIR / "conf" / "workspace.conf.schema.json"
 
 
 class TestConfigError:

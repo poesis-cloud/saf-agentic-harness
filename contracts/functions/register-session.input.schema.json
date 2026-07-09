@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/register-session.input.schema.json",
+  "title": "register-session input contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId"
+  ],
+  "properties": {
+    "agent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sessionId": {
+      "$ref": "../context.schema.json#/$defs/sessionId"
+    },
+    "parentSessionId": {
+      "$ref": "../context.schema.json#/$defs/parentSessionId"
+    }
+  }
+}

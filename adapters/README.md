@@ -3,7 +3,7 @@
 Each supported host environment gets one subfolder here (`github-copilot/` today; Claude Code,
 Cursor, … follow the same shape). The harness core stays env-agnostic — it never hardcodes a
 host's event names, tool names, or payload keys; every host-specific detail is declared in that
-adapter's own files. Canonical harness documentation lives in `../../def/harness/README.md`.
+adapter's own files. Canonical harness documentation lives in `../def/spec.md`.
 
 ## Shared dispatch script
 

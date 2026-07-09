@@ -46,7 +46,7 @@ class ConfigLoader:
         return self.framework_root / "conf" / f"{name}.conf.yaml"
 
     def contract_path(self, name: str) -> Path:
-        return self.contracts_dir / f"{name}.conf.schema.json"
+        return self.contracts_dir / "conf" / f"{name}.conf.schema.json"
 
     # --- the one parse+validate act --------------------------------------------
     def load(self, name: str) -> dict[str, Any]:

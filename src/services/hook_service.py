@@ -317,7 +317,7 @@ class HookService:
             return ""
         return (f"routing: agent={agent}; the model must be a catalog id from "
                 "conf/model-profiles.conf.yaml, resolved deterministically from the dispatching "
-                "step's weighted capabilities (see harness/README.md 'Model Routing').")
+                "step's weighted capabilities (see harness/def/spec.md 'Model Routing').")
 
     # --- session ledger -----------------------------------------------------
     def ledger_path(self, payload: dict[str, Any]) -> Path:

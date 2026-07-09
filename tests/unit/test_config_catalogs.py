@@ -96,7 +96,12 @@ class TestFrameworkConfig:
         assert not report.has_errors(), [f.message for f in report.findings]
 
     def test_broken_single_file_config_fails_at_construction(self, conf_root):
-        # A valid framework layout but an invalid ACL -> FrameworkConfig must raise, not defer.
+        # A valid ACL -> FrameworkConfig must raise, not defer.
+        # NOTE: conf/framework.conf.yaml is legacy plumbing FrameworkConfig still hard-requires
+        # to construct; the target design sources framework layout from .env (harness/def/spec.md
+        # Configuration plane). Written here only so construction can proceed to the ACL check —
+        # not itself a tested concern, and slated for removal once the harness is reimplemented
+        # against the .env-based spec.
         write_conf(conf_root, "framework", FRAMEWORK_CONF)
         write_conf(conf_root, "access-control-list", "actors: []\nroles: []\n")
         with pytest.raises(ConfigError):
@@ -106,7 +111,9 @@ class TestFrameworkConfig:
         # Valid single-file configs; one invalid workflow file -> construction succeeds
         # (workflows are lazy) and validate_all() surfaces the violation.
         real_conf = Workspace.detect().framework_root / "conf"
-        for name in ("framework", "access-control-list", "model-profiles", "workspace"):
+        # conf/framework.conf.yaml: same legacy-plumbing note as above — not under test here.
+        write_conf(conf_root, "framework", FRAMEWORK_CONF)
+        for name in ("access-control-list", "model-profiles", "workspace"):
             write_conf(conf_root, name, (real_conf / f"{name}.conf.yaml").read_text(encoding="utf-8"))
         _write_workflow(conf_root, "broken", "workflow:\n  id: broken\n")
         config = FrameworkConfig(Workspace(conf_root, conf_root / "workspace"))

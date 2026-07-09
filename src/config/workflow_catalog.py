@@ -2,7 +2,7 @@
 
 Each `conf/workflows/*.workflow.conf.yaml` file is one workflow configuration. Loading IS
 validating (the config plane's rule): the file is parsed and checked against
-`harness/contracts/workflow.conf.schema.json` (via `ConfigLoader.load_path`), then the semantic
+`harness/contracts/conf/workflow.conf.schema.json` (via `ConfigLoader.load_path`), then the semantic
 rules JSON Schema cannot express are enforced in the same act — a non-empty steps model, unique
 step ids, resolvable `after` references, unique condition ids within a step, and an acyclic
 `after` DAG. Any violation raises `ConfigError`. The one semantic rule that needs more than the

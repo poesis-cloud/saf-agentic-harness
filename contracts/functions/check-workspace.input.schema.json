@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poesis.cloud/safe-agentic-framework/functions/check-workspace.input.schema.json",
+  "title": "check-workspace input contract",
+  "type": "object",
+  "required": [
+    "sessionId"
+  ],
+  "properties": {
+    "sessionId": {
+      "$ref": "../context.schema.json#/$defs/sessionId"
+    },
+    "parentSessionId": {
+      "$ref": "../context.schema.json#/$defs/parentSessionId"
+    }
+  },
+  "unevaluatedProperties": false
+}

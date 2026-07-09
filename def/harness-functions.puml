@@ -16,46 +16,50 @@ participant "Host\n(e.g. GitHub Copilot)" as Host
 participant "Harness" as Harness
 
 note over Harness
-  Every function invocation appends one
-  entry to the workflow-instance log
-  (functions 12-13 are instance-less).
+  Every completed function invocation appends one
+  entry to its session's log — logs/<sessionId>.log.jsonl
+  (functions 11-12 run under human or system sessions;
+  a workflow instance is a cross-log view, ordered by
+  ts under the single-driver invariant).
 end note
 
 == Conversation start ==
 User -> Host : engage a facilitator agent (VMO / RTE / SM)\nwith a request — a question or an intent
 Host -> Harness : hook ""sessionStart"" (agent session)
-Harness -> Harness : framework-agent gate (C7):\nactor resolves to a framework agent\n(else pass through, untouched and unlogged)
-Harness -> Harness : no open dispatch — an orchestrator session:\n""7 inject-workflow-instructions"" — catalog map + return-handling instructions\n""8 inject-workflow-skills"" — selection + procedure skills
-Harness --> Host : context to inject
-Host --> Orch : session opens carrying the catalog map and the\n""*-handling"" instructions for every harness return
+alt C7 gate — agent + host session ids resolve to a framework agent
+  Harness -> Harness : ""0 register-session"" — FIRST at every framework session:\nregisters sessionId (no parent here) + creates the session log
+  Harness -> Harness : no open dispatch — an orchestrator session:\n""1 resolve-workflow-instructions"" — selection + return-handling instructions\n(the selection instruction references the facilitated workflows)\n""2 resolve-workflow-skills"" — selection + procedure skills
+  Harness --> Host : context to inject
+  Host --> Orch : session opens carrying the workflow instructions:\nthe ""*-handling"" reaction for every selection and harness return
+else foreign session
+  Harness --> Host : pass through — untouched, unlogged
+end
 
 == Workflow selection (no harness call) ==
-Orch -> Orch : per ""workflow-selection-handling"" instruction —\nmatch the user's intent against the injected catalog map
+Orch -> Orch : per ""workflow-selection-handling"" instruction —\nmatch the user's intent to one facilitated workflow
 alt the intent maps to one workflow (the orchestrator's selection skill)
   Orch --> User : proposes it
 else ambiguous or unmatched intent (optional engagement turns)
   Orch --> User : engages — answers, asks which workflow to enter
   User -> Orch : clarifies the intent
 end
-User -> Orch : assent — start the workflow\n(or continue one by naming its instance id)
+User -> Orch : assent — start the workflow\n(or continue an unfinished one — the harness\nresumes its latest open instance)
 
-loop until ""1 resolve-step"" resolves no-next-step
+loop until ""3 resolve-step"" resolves no-next-step
 
 == Step resolution ==
-alt opening — no instance yet (first pass)
-  Orch -> Harness : ""1 resolve-step"" (workflowSlug)
-  Harness -> Harness : open the instance:\nmint the workflow-instance id + create its log
-else continuing — the instance is known
-  Orch -> Harness : ""1 resolve-step"" (workflowSlug, workflowInstanceId)
-end
-Harness -> Harness : ""2 resolve-step-model"" — resolved once, here\n(capabilities × catalog → model binding)
-Harness --> Orch : step resolution — configured step + model + instance\ncontext (the instance id: the orchestrator's handle)
-Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resolution verbatim
+Orch -> Harness : adapter-mediated invocation:\n""3 resolve-step"" (workflowSlug)
+Harness -> Harness : deduce the instance — continue the latest open one,\nor mint a new instance id (the opening is this very\nlog entry — no dedicated file, no id returned)
+Harness --> Orch : step resolution — the configured step, verbatim
+Orch -> Harness : adapter-mediated invocation:\n""4 resolve-step-model"" (session attribution only — standalone call)
+Harness -> Harness : deduce the session's in-flight step;\ncapabilities × catalog → model profile
+Harness --> Orch : model profile (the adapter maps it\nto the host model id)
+Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resolution + profile verbatim
 
 == Step dispatch (1 step = 1 agent = 1 session = 1 artifact) ==
-Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model, skills, instructions, prompts)
+Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model profile, skills, instructions)
 Host -> Harness : hook ""preToolUse"" dispatch (step-open)
-Harness -> Harness : ""3 check-step-preconditions"" — THE enforcement point
+Harness -> Harness : ""5 check-step-preconditions"" — THE enforcement point\n(journals to the dispatching facilitator session's log)
 alt preconditions hold
   Harness --> Host : allow
 else a precondition fails
@@ -65,37 +69,39 @@ else a precondition fails
 end
 Host -> Sub : open the step session
 Host -> Harness : hook ""sessionStart"" (step session)
-Harness -> Harness : open dispatch found — a step session:\n""9 inject-step-instructions"" — the step's refs\n""10 inject-step-skills"" — the step's skills
+Harness -> Harness : ""0 register-session"" — registers the step session:\nsessionId + parentSessionId (the dispatching session)
+Harness -> Harness : unresolved step-resolution correlated (exact match via parentSessionId,\nresolution-actor heuristic as fallback) — a step session:\n""6 resolve-step-instructions"" — the step's refs\n""7 resolve-step-skills"" — the step's skills
 Harness --> Host : context to inject
 Host --> Sub : session carries the step's constraints
 
 == Step work — every write guarded ==
 Sub -> Host : write artifact (host write tool)
 Host -> Harness : hook ""preToolUse"" write (write-open)
-Harness -> Harness : ""5 check-step-authorization""
+Harness -> Harness : ""8 check-step-authorization""
 alt privilege granted
-  Harness --> Host : allow
-  Host -> Host : execute the write
+  Harness --> Host : allow (staging baseline clean against HEAD)
+  Host -> Host : execute the write — lands in the working tree\n(the staging area, not yet workspace state)
 else no grant
   Harness --> Host : deny (missing privilege)
   Host --> Sub : write blocked, report returned
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
 Host -> Harness : hook ""postToolUse"" write (write-close)
-Harness -> Harness : ""6 check-step-artifacts""
+Harness -> Harness : ""9 check-step-artifact"" — the commit gate:\nvalidate the staged bytes
 alt write is schema-valid
-  Harness --> Host : valid
+  Harness -> Harness : commit the staged write — workspace state\n(HEAD) advances atomically, attributed to the session
+  Harness --> Host : outcome ""valid""
 else invalid write
-  Harness -> Harness : revert (restore last-committed / delete)
-  Harness --> Host : denied + schema reports
-  Host --> Sub : reports returned
-  Sub -> Sub : per its step instructions — rewrite per the\nschema reports and retry the write
+  Harness -> Harness : discard the staged write — restore from HEAD /\ndelete new: committed state never held the invalid\nbytes (C6 — transactional by construction)
+  Harness --> Host : outcome ""reverted"" + failure message
+  Host --> Sub : failure message returned
+  Sub -> Sub : per its step instructions — rewrite per the\nfailure message and retry the write
 end
 
 == Step close ==
 Sub --> Host : step session ends
 Host -> Harness : hook ""postToolUse"" dispatch (step-close)
-Harness -> Harness : ""4 check-step-postconditions"" — THE evaluation point:\nthe step outcome logs against the state the step left
+Harness -> Harness : ""10 check-step-postconditions"" — THE evaluation point:\nthe step outcome logs against the state the step left\n(journals to the dispatching facilitator session's log)
 alt postconditions hold — step journaled executed
   Harness --> Host : outcome pass
   Host --> Orch : dispatch returns — next iteration resolves the next step
@@ -108,9 +114,9 @@ end
 end
 
 == Workflow return ==
-Orch -> Harness : ""1 resolve-step"" (workflowSlug, workflowInstanceId)
-Harness --> Orch : ""no-next-step"" + advisory successors\n(a reversible observation — never "done")
-Orch -> Orch : per ""no-next-step-handling"" instruction
+Orch -> Harness : adapter-mediated invocation:\n""3 resolve-step"" (workflowSlug)
+Harness --> Orch : ""no-next-step""\n(a reversible observation — never "done")
+Orch -> Orch : per ""no-next-step-handling"" instruction\n(it names the advisory successors)
 Orch --> User : end-to-end workflow results (delivered artifacts)\n+ options: reiterate the workflow / take a successor
 note right of Orch
   The user sees workflow results only —
@@ -121,19 +127,20 @@ end note
 
 == Conversation close ==
 Host -> Harness : hook ""stop"" / ""sessionEnd""
-Harness -> Harness : record only — no policy at session close
+Harness -> Harness : adapter telemetry only — not a boundary:\nno function runs, nothing journals
 
-== Audit & global checks (on demand — also CI-triggered) ==
-Orch -> Harness : ""11 audit-workflow-instance"" (workflowInstanceId)
-Harness --> Orch : audit report — every recorded write\nre-verified against the ACL
-Orch -> Harness : ""12 check-workspace"" (scope)
-Harness --> Orch : reports (C6 proven when empty)
-Orch -> Harness : ""13 check-configuration"" (framework root)
-Harness --> Orch : reports (.env layout, conf files, adapters)
+== Global checks (direct session invocation — human terminal / CI system session) ==
+User -> Harness : bash wrapper (human) or CI step (system):\n""0 register-session"" — wrapper-minted sessionId\nor the CI platform's ambient run id
+User -> Harness : ""11 check-workspace""
+Harness --> User : workspace checks (C6 proven when empty)
+User -> Harness : ""12 check-configuration""
+Harness --> User : configuration checks (.env layout, conf files, adapters)
 note right of Harness
-  CI pipelines run 12 on the workspace
-  repository and 13 on the framework
-  repository as merge gates.
+  CI pipelines run 11 on the workspace
+  repository and 12 on the framework
+  repository as merge gates — journaled
+  to the invoking session's log like any
+  other function.
 end note
 
 @enduml
