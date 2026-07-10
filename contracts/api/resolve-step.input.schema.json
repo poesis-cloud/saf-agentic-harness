@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/resolve-step.input/v1",
+  "title": "resolve-step input contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId",
+    "workflowSlug"
+  ],
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The session this invocation runs in."
+    },
+    "parentSessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The parent session that opened this session, if any."
+    },
+    "workflowSlug": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The workflow identifier to resolve the next step for."
+    }
+  },
+  "description": "Input contract for the resolve-step harness function."
+}

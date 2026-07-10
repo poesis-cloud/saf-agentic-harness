@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/check-step-authorization.input/v1",
+  "title": "check-step-authorization input contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId",
+    "artifactPath",
+    "action"
+  ],
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The session this invocation runs in."
+    },
+    "parentSessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The parent session that opened this session, if any."
+    },
+    "artifactPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace-relative path of the artifact being written."
+    },
+    "action": {
+      "$ref": "../conf/framework/access-control-list.conf.schema.json#/definitions/action",
+      "description": "The requested action (CREATE or UPDATE)."
+    }
+  },
+  "description": "Input contract for the check-step-authorization harness function."
+}

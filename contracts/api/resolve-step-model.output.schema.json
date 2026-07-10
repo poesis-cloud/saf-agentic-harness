@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/resolve-step-model.output/v1",
+  "$ref": "../report.schema.json",
+  "title": "resolve-step-model output contract",
+  "oneOf": [
+    {
+      "required": [
+        "profile"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "resolved",
+              "description": "Success status for resolve-step-model."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "profile": {
+          "type": "object",
+          "required": [
+            "slug",
+            "score",
+            "costRank"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Canonical model profile slug."
+            },
+            "score": {
+              "type": "number",
+              "description": "Weighted score for this step's capability demand."
+            },
+            "costRank": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Relative cost rank of the selected profile."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Human-readable rationale for the selection."
+            }
+          },
+          "unevaluatedProperties": false,
+          "description": "The canonical model profile selected for this step's dispatch."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step-model harness function."
+}

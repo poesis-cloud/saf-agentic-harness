@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/resolve-step-instructions.output/v1",
+  "$ref": "../report.schema.json",
+  "title": "resolve-step-instructions output contract",
+  "oneOf": [
+    {
+      "required": [
+        "instructions"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "resolved",
+              "description": "Success status for resolve-step-instructions."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "instructions": {
+          "type": "array",
+          "items": {
+            "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/instructionSlug",
+            "description": "One instruction slug."
+          },
+          "description": "Ordered instruction slugs injected into the agent's session context."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step-instructions harness function."
+}

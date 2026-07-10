@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gsmarc://safe/harness/contracts/conf/adapters/models.conf/v1",
+  "title": "Host model binding configuration schema",
+  "description": "Validation schema for harness/adapters/<env>/models.yaml. The adapter maps canonical model profile ids from conf/model-profiles.conf.yaml to host-specific model identifiers used at dispatch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "modelBindings"
+  ],
+  "properties": {
+    "modelBindings": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hostModelId"
+        ],
+        "properties": {
+          "hostModelId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The host-specific model identifier used at dispatch."
+          }
+        },
+        "description": "The host binding for one canonical model profile."
+      },
+      "description": "Map of canonical model profile id -> host-specific model binding."
+    }
+  }
+}

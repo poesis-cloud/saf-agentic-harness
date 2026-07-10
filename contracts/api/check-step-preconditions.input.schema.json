@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/check-step-preconditions.input/v1",
+  "title": "check-step-preconditions input contract",
+  "type": "object",
+  "required": [
+    "sessionId"
+  ],
+  "properties": {
+    "sessionId": {
+      "$ref": "../context.schema.json#/definitions/sessionId",
+      "description": "The session this invocation runs in."
+    },
+    "parentSessionId": {
+      "$ref": "../context.schema.json#/definitions/parentSessionId",
+      "description": "The parent session that opened this session, if any."
+    }
+  },
+  "unevaluatedProperties": false,
+  "description": "Input contract for the check-step-preconditions harness function."
+}

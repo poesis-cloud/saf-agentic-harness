@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://poesis.cloud/safe-agentic-framework/context.schema.json",
+  "$id": "gsmarc://safe/harness/contracts/context/v1",
   "title": "Harness context contract",
   "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session registration. Session origin is recorded by register-session and recovered through sessionId when needed.",
-  "$defs": {
+  "definitions": {
     "sessionId": {
       "type": "string",
       "minLength": 1,
@@ -43,11 +43,11 @@
       "description": "The harness function that produced this report."
     },
     "sessionId": {
-      "$ref": "#/$defs/sessionId",
+      "$ref": "#/definitions/sessionId",
       "description": "The session this invocation ran in."
     },
     "parentSessionId": {
-      "$ref": "#/$defs/parentSessionId",
+      "$ref": "#/definitions/parentSessionId",
       "description": "The parent session that opened this session, if any."
     },
     "workflowInstanceId": {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://poesis.cloud/safe-agentic-framework/log-entry.schema.json",
+  "$id": "gsmarc://safe/harness/contracts/log-entry/v1",
   "title": "Harness log entry contract",
   "description": "One append-only log entry for one completed harness function invocation. The persisted log entry integrates the function report with its wall-clock write time; the report contains its session context and function-specific payload.",
   "type": "object",
@@ -19,7 +19,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/register-session.output.schema.json",
+          "$ref": "api/register-session.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -39,7 +39,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-workflow-instructions.output.schema.json",
+          "$ref": "api/resolve-workflow-instructions.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -59,7 +59,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-workflow-skills.output.schema.json",
+          "$ref": "api/resolve-workflow-skills.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -79,7 +79,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-step.output.schema.json",
+          "$ref": "api/resolve-step.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -99,7 +99,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-step-model.output.schema.json",
+          "$ref": "api/resolve-step-model.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -119,7 +119,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-step-preconditions.output.schema.json",
+          "$ref": "api/check-step-preconditions.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -139,7 +139,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-step-instructions.output.schema.json",
+          "$ref": "api/resolve-step-instructions.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -159,7 +159,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/resolve-step-skills.output.schema.json",
+          "$ref": "api/resolve-step-skills.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -179,7 +179,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-step-authorization.output.schema.json",
+          "$ref": "api/check-step-authorization.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -199,7 +199,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-step-artifact.output.schema.json",
+          "$ref": "api/check-step-artifact.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -219,7 +219,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-step-postconditions.output.schema.json",
+          "$ref": "api/check-step-postconditions.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -239,7 +239,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-workspace.output.schema.json",
+          "$ref": "api/check-workspace.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
@@ -259,7 +259,7 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "functions/check-configuration.output.schema.json",
+          "$ref": "api/check-configuration.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },

@@ -1,8 +1,8 @@
 # GitHub Copilot CLI / VS Code environment binding (env-specific tool/payload map).
 # The harness core stays env-agnostic and reads this map; another host (Claude Code, Cursor, …)
-# ships its own adapters/<env>/tools.yaml. `write`/`delete` map a host tool name to its action;
-# the *_keys lists name the payload fields to probe (first hit wins).
-write_tools:
+# ships its own adapters/<env>/tools.yaml. `writeTools`/`deleteTools` map a host tool name to its action;
+# the `*Keys` lists name the payload fields to probe (first hit wins).
+writeTools:
   create_file: create
   create_directory: create
   replace_string_in_file: update
@@ -10,15 +10,15 @@ write_tools:
   edit_notebook_file: update
   insert_edit_into_file: update
   apply_patch: update
-delete_tools: [delete_file]
-tool_keys: [tool, tool_name, toolName]
-input_keys: [tool_input, toolInput, arguments]
-path_keys: [filePath, path, file]
-actor_keys: [agent, agentName, actor, subagent]
-host_session_keys: [sessionId, session_id, session]
-host_parent_session_keys: [parentSessionId, parent_session_id, parentSession]
+deleteTools: [delete_file]
+toolKeys: [tool, tool_name, toolName]
+inputKeys: [tool_input, toolInput, arguments]
+pathKeys: [filePath, path, file]
+actorKeys: [agent, agentName, actor, subagent]
+hostSessionKeys: [sessionId, session_id, session]
+hostParentSessionKeys: [parentSessionId, parent_session_id, parentSession]
 # Subagent dispatch (runSubagent): the tool that starts a child step-session. The harness governs the
 # (target agent, model) selection at preToolUse — see ModelRouter.validate_dispatch.
-dispatch_tools: [runSubagent]
-dispatch_agent_keys: [agentName, agent, subagent, name]
-dispatch_model_keys: [model]
+dispatchTools: [runSubagent]
+dispatchAgentKeys: [agentName, agent, subagent, name]
+dispatchModelKeys: [model]

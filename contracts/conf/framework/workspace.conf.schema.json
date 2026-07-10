@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gsmarc://safe/harness/contracts/conf/framework/workspace.conf/v1",
+  "title": "Workspace layout configuration schema",
+  "description": "Validation schema for conf/workspace.conf.yaml: the structural blueprint of the workspace. A recursive tree of two dedicated node types: `artifactNode` (a file bound to an `artifact` schema slug + `template` slug and a required `cardinality`) and `folderNode` (a container of `children`, no schema/template/required cardinality of its own). Every node's `slug` is its OWN path segment only \u2014 the full workspace-relative path is deduced by concatenating ancestor slugs top-down; a `slug` may embed `<name>` VARIABLE placeholders (e.g. `<epic-slug>`), optionally mixed with literal text (e.g. `<epic-slug>.epic.md`), and the same variable name may recur across a node and its descendants. Artifact-to-artifact derivation constraints (which kinds a given artifact may declare as sources) live in the artifact schemas themselves \u2014 the node's `artifact` binding is the join point.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "nodes"
+  ],
+  "properties": {
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/definitions/artifactNode",
+            "description": "One artifact node."
+          },
+          {
+            "$ref": "#/definitions/folderNode",
+            "description": "One folder node."
+          }
+        ]
+      },
+      "description": "Recursive tree of workspace nodes."
+    }
+  },
+  "definitions": {
+    "artifactNode": {
+      "description": "An artifact (file) node: a leaf that binds its own path segment (`slug`) to an artifact schema (`artifact`) and template (`template`), with a required `cardinality`. Never has `children` \u2014 artifacts are files, not folders.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "description",
+        "cardinality",
+        "artifact",
+        "template"
+      ],
+      "properties": {
+        "slug": {
+          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/nodeSlug",
+          "description": "This artifact file's own path segment (not the full path: ancestors contribute their own segments)."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable purpose of this node."
+        },
+        "cardinality": {
+          "description": "How many instances of this artifact may exist at this position.",
+          "enum": [
+            "1",
+            "0..1",
+            "1..*",
+            "0..*"
+          ]
+        },
+        "artifact": {
+          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/artifactSlug",
+          "description": "The artifact kind that validates this node's file, identified by its schema slug (the centralized `artifactSlug`)."
+        },
+        "template": {
+          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/templateSlug",
+          "description": "The artifact template that seeds this node's file, identified by its template slug."
+        }
+      }
+    },
+    "folderNode": {
+      "description": "A folder node: a container of `children`, with no schema, template, or required cardinality of its own \u2014 only `slug` and `description` are required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "description",
+        "children"
+      ],
+      "properties": {
+        "slug": {
+          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/nodeSlug",
+          "description": "This folder's own path segment (not the full path: ancestors contribute their own segments)."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable purpose of this node."
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/definitions/artifactNode",
+                "description": "One artifact node."
+              },
+              {
+                "$ref": "#/definitions/folderNode",
+                "description": "One folder node."
+              }
+            ]
+          },
+          "description": "Child nodes nested under this folder."
+        }
+      }
+    }
+  }
+}

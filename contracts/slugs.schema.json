@@ -1,0 +1,60 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "gsmarc://safe/harness/contracts/slugs/v1",
+    "title": "Canonical framework slug definitions",
+    "description": "Centralized library of every canonical `*Slug` definition referenced across the harness's contracts. Every framework entity named by a slug uses the same URL-safe form (lowercase letters, digits, and hyphens: `[a-z0-9-]+`) and is also the filename stem used to locate the entity's definition \u2014 except `templateSlug` (nested `/`-separated path segments, since templates are organized per layer/actor, not in a flat directory) and `nodeSlug` (a workspace path segment, which may embed `<name>` VARIABLE placeholders). This file has no root shape of its own: it exists solely to be `$ref`'d \u2014 in-repo via `#/definitions/<slug>`, cross-file via `gsmarc://safe/harness/contracts/slugs/v1#/definitions/<slug>`.",
+    "definitions": {
+        "workflowSlug": {
+            "description": "URL-safe slug naming a workflow \u2014 the stem of the workflow configuration filename (e.g. verification from verification.workflow.conf.yaml).",
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+        },
+        "stepSlug": {
+            "description": "URL-safe slug naming a step within a workflow. Must be unique within the workflow; used in `stepCondition`'s `step` and in the run log.",
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+        },
+        "conditionSlug": {
+            "description": "URL-safe slug naming a condition, unique within its step; it appears in the run log's conditions[] entries.",
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+        },
+        "agentSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "URL-safe slug naming a framework agent \u2014 the value of the agent file's frontmatter `name` and the stem of the agent filename (e.g. product-manager from agents/product-manager.agent.md)."
+        },
+        "artifactSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "URL-safe slug naming an artifact kind \u2014 the stem of the artifact schema filename (e.g. product-vision from artifacts/product-vision.artifact.schema.json)."
+        },
+        "skillSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "URL-safe slug naming a skill \u2014 the stem of the skill filename under `FRAMEWORK_SKILLS_DIR` (e.g. code-review from skills/code-review.skill.md)."
+        },
+        "instructionSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "URL-safe slug naming an instruction file \u2014 the stem of the instruction filename under `FRAMEWORK_INSTRUCTIONS_DIR` (e.g. review-handoff from instructions/review-handoff.instructions.md)."
+        },
+        "roleSlug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$",
+            "description": "URL-safe slug naming a role \u2014 the role slug declared in `conf/access-control-list.conf.yaml` and referenced by actors."
+        },
+        "templateSlug": {
+            "description": "URL-safe slug naming an artifact template \u2014 the stem of the template filename under `FRAMEWORK_TEMPLATES_DIR`, path segments included (e.g. `layers/portfolio/actors/business-owner/artifacts/epic` from `templates/layers/portfolio/actors/business-owner/artifacts/epic.artifact-template.md`). Unlike other framework slugs, nested path segments are part of the slug \u2014 templates are organized per layer/actor, not in a flat directory.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9-]+(/[a-z0-9-]+)*$"
+        },
+        "nodeSlug": {
+            "description": "URL-safe path segment for a workspace node \u2014 this node's OWN segment only; the full workspace-relative path is deduced by concatenating ancestor slugs top-down. May embed one or more `<name>` VARIABLE placeholders (e.g. `<epic-slug>`) \u2014 angle brackets are the variable-marking syntax \u2014 optionally mixed with literal text (e.g. `<epic-slug>.epic.md`, `pi-<pi-slug>`). The same variable name may recur across a node and its descendants' slugs to bind consistently (e.g. a folder's `<epic-slug>` and its child file's `<epic-slug>.epic.md` share one binding).",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(<[a-z0-9-]+>|[a-z0-9.-]+)+$"
+        }
+    }
+}

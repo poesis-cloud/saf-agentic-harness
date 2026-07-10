@@ -26,7 +26,7 @@ and implementation parts prescribe its realization.
 ## Summary
 
 - [Terminology](#terminology) — the shared nouns: framework, workspace, artifact, log,
-  session, facilitator, workflow, workflow instance, step.
+  session, orchestrator, workflow, workflow instance, step.
 - [The harness functions](#the-harness-functions) — the functional contract: thirteen functions,
   numbered and ordered as they sequence in the diagram, each specified by its interface (with
   JSON I/O contract), pre/postconditions, and invariants.
@@ -93,14 +93,14 @@ and implementation parts prescribe its realization.
   step (1 step = 1 agent = 1 session = 1 artifact). Session ids are always observed or minted
   by the surrounding mechanism (adapter, bash wrapper, CI platform) — never self-reported by an
   agent.
-- **Facilitator** — the orchestrator agent a workflow declares to drive its instances. Its
+- **Orchestrator** — the orchestrator agent a workflow declares to drive its instances. Its
   session receives its workflow instructions — selection and return-handling (function 1) —
   and its procedure skills (function 2); it converses, obtains assent, calls resolution, and
-  dispatches steps. A facilitator is an **agent**; an agent is an **actor** only when acting at a step —
-  the facilitator normally never is: steps are acted by dispatched subagents.
+  dispatches steps. An orchestrator is an **agent**; an agent is an **actor** only when acting at a step —
+  the orchestrator normally never is: steps are acted by dispatched subagents.
 - **Workflow** — a configuration entity (`conf/workflows/*.workflow.conf.yaml`): an atomic,
   artifact-delivering unit of the methodology, made of steps. Each workflow declares its
-  **facilitator** — the orchestrator agent that drives its instances; the facilitator's
+  **orchestrator** — the orchestrator agent that drives its instances; the orchestrator's
   workflow instructions are injected at its session open (function 1).
 - **Workflow instance** — one run of one workflow, the way an object is an instance of a
   class: the workflow configuration is the definition; the instance is one dated execution of
@@ -162,10 +162,10 @@ persists) and the `outcome` object (`status`, plus the `error` detail — requir
 statuses, absent otherwise), and add one function-owned specific property where needed. Any
 session metadata beyond correlation, such as framework-agent identity when applicable, is
 recorded by function 0's registration and recovered through `sessionId` when needed. The
-normative schemas live at `harness/contracts/functions/<function>.input.schema.json` and
-`harness/contracts/functions/<function>.output.schema.json`; each function section links to
+normative schemas live at `harness/contracts/api/<function>.input.schema.json` and
+`harness/contracts/api/<function>.output.schema.json`; each function section links to
 them. Shared contracts live beside them:
-[harness/contracts/actions.schema.json](harness/contracts/actions.schema.json),
+[harness/contracts/conf/framework/access-control-list.conf.schema.json](harness/contracts/conf/framework/access-control-list.conf.schema.json) (action vocabulary),
 [harness/contracts/context.schema.json](harness/contracts/context.schema.json),
 [harness/contracts/report.schema.json](harness/contracts/report.schema.json), and
 [harness/contracts/log-entry.schema.json](harness/contracts/log-entry.schema.json).
@@ -194,7 +194,7 @@ per [Boundary Normalization](#boundary-normalization).
 Function 0 is **session-scoped**: triggered at every session start — orchestrator and step
 sessions alike — strictly before any other function of that session; it registers the
 session's identity and creates its log. Functions 1–2 **resolve the
-facilitator's workflow context** at its session start — selection and return-handling
+orchestrator's workflow context** at its session start — selection and return-handling
 instructions, procedure skills — which the adapter injects. Functions 3–4 are
 **resolution-scoped**: pure functions over
 the instance view of the logs plus validated configuration; they read no artifacts. Functions
@@ -259,7 +259,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/register-session.input.schema.json](harness/contracts/functions/register-session.input.schema.json) and [harness/contracts/functions/register-session.output.schema.json](harness/contracts/functions/register-session.output.schema.json).
+Contract schemas — [harness/contracts/api/register-session.input.schema.json](harness/contracts/api/register-session.input.schema.json) and [harness/contracts/api/register-session.output.schema.json](harness/contracts/api/register-session.output.schema.json).
 
 **Preconditions**
 
@@ -298,7 +298,7 @@ Contract schemas — [harness/contracts/functions/register-session.input.schema.
 ### 1. resolve-workflow-instructions
 
 Which workflow-context guidance does the orchestrator's session load? Deterministic
-resolution, at the session-started boundary, of the facilitator's workflow instructions —
+resolution, at the session-started boundary, of the orchestrator's workflow instructions —
 the adapter injects what this function resolves: one named instruction per orchestrator
 duty, so every selection and every harness return meets an instructed reaction, never an
 improvised one:
@@ -318,8 +318,8 @@ improvised one:
 
 **Interface**
 
-- **In** — `sessionId` + nullable `parentSessionId`. The facilitator is resolved from
-  the registered session; the instruction set is keyed by that facilitator.
+- **In** — `sessionId` + nullable `parentSessionId`. The orchestrator is resolved from
+  the registered session; the instruction set is keyed by that orchestrator.
 - **Out** — `WorkflowInstructionsReport`: the instruction refs.
 - **Caller usage** — the adapter renders the refs into the host's session context; the
   orchestrator starts its conversation already knowing its workflows and how to handle every
@@ -348,49 +348,49 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-workflow-instructions.input.schema.json](harness/contracts/functions/resolve-workflow-instructions.input.schema.json) and [harness/contracts/functions/resolve-workflow-instructions.output.schema.json](harness/contracts/functions/resolve-workflow-instructions.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-workflow-instructions.input.schema.json](harness/contracts/api/resolve-workflow-instructions.input.schema.json) and [harness/contracts/api/resolve-workflow-instructions.output.schema.json](harness/contracts/api/resolve-workflow-instructions.output.schema.json).
 
 **Preconditions**
 
 - A session opened with no unresolved `resolve-step` entry correlating to it (typically: its
   registration carries no `parentSessionId`) — an orchestrator session
   (a step session loads functions 6–7 instead).
-- The session's agent is a framework facilitator (C7 — foreign sessions pass
+- The session's agent is a framework orchestrator (C7 — foreign sessions pass
   through untouched).
 - Trigger — the session-started boundary (hook plane).
 
 **Postconditions**
 
-- The session context contains the facilitator's instruction refs — nothing more, nothing
+- The session context contains the orchestrator's instruction refs — nothing more, nothing
   chosen by the agent.
 - The invocation appends its own entry to the session's log (what was resolved, for which
-  facilitator).
+  orchestrator).
 
 **Invariants**
 
 1. The instruction set derives from configuration only: one framework-authored instruction
-   per orchestrator duty, keyed by facilitator; the selection instruction names the workflows
-   whose `facilitator` is the session's agent, with their advisory positions and guidance —
+   per orchestrator duty, keyed by orchestrator; the selection instruction names the workflows
+   whose `orchestrator` is the session's agent, with their advisory positions and guidance —
    static, no log reads.
 2. The instructions are framework-authored refs, one per duty and per harness return kind the
    orchestrator handles; every function-3 return the orchestrator receives — and the workflow
    selection itself — is covered by an injected instruction.
-3. Resolution is deterministic and facilitator-scoped: `sessionId` resolves to the
-  facilitator's registered session, and the configuration decides the refs — never the agent.
+3. Resolution is deterministic and orchestrator-scoped: `sessionId` resolves to the
+  orchestrator's registered session, and the configuration decides the refs — never the agent.
 
 ### 2. resolve-workflow-skills
 
 Which skills does the orchestrator's session load? The same session-kind correlation and
-determinism as function 1, for skills: the facilitator's procedure skills — its selection skill
+determinism as function 1, for skills: the orchestrator's procedure skills — its selection skill
 and one procedure skill per workflow it facilitates.
 
 **Interface**
 
-- **In** — `sessionId` + nullable `parentSessionId`. The facilitator is resolved from
+- **In** — `sessionId` + nullable `parentSessionId`. The orchestrator is resolved from
   the registered session.
 - **Out** — `WorkflowSkillsReport`: the skill ids to load.
 - **Caller usage** — the adapter loads the skills into the session; the orchestrator's toolbox
-  is its facilitator role's toolbox, by construction.
+  is its orchestrator role's toolbox, by construction.
 
 Example:
 
@@ -410,7 +410,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-workflow-skills.input.schema.json](harness/contracts/functions/resolve-workflow-skills.input.schema.json) and [harness/contracts/functions/resolve-workflow-skills.output.schema.json](harness/contracts/functions/resolve-workflow-skills.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-workflow-skills.input.schema.json](harness/contracts/api/resolve-workflow-skills.input.schema.json) and [harness/contracts/api/resolve-workflow-skills.output.schema.json](harness/contracts/api/resolve-workflow-skills.output.schema.json).
 
 **Preconditions**
 
@@ -420,7 +420,7 @@ Contract schemas — [harness/contracts/functions/resolve-workflow-skills.input.
 
 **Postconditions**
 
-- The session loads exactly the facilitator's declared skill set.
+- The session loads exactly the orchestrator's declared skill set.
 - The invocation appends its own entry to the session's log, alongside function 1's.
 
 **Invariants**
@@ -491,15 +491,13 @@ Example:
       "instructions": ["instructions/review.instructions.md"],
       "artifact": "review-report",
       "conditions": [
-        { "kind": "precondition", "type": "after", "id": "after_build", "step_id": "build" },
+        { "kind": "precondition", "slug": "after_build", "step": "build" },
         {
-          "kind": "postcondition", "type": "state", "id": "report_exists",
-          "set_selector": {
-            "set_type": "artifact",
-            "artifact_types": [{ "alias": "report", "schema_id": "review-report" }],
-            "set_query": "report.filter(a, a.slug == artifact)"
+          "kind": "postcondition", "slug": "report_exists",
+          "setSelector": {
+            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
           },
-          "set_predicate": "selected.size() == 1"
+          "setPredicate": "selected.size() == 1"
         }
       ],
       "capabilities": {
@@ -512,7 +510,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-step.input.schema.json](harness/contracts/functions/resolve-step.input.schema.json) and [harness/contracts/functions/resolve-step.output.schema.json](harness/contracts/functions/resolve-step.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harness/contracts/api/resolve-step.input.schema.json) and [harness/contracts/api/resolve-step.output.schema.json](harness/contracts/api/resolve-step.output.schema.json).
 
 **Preconditions**
 
@@ -538,10 +536,11 @@ Contract schemas — [harness/contracts/functions/resolve-step.input.schema.json
 1. The step cursor derives from the instance view of the logs only: a step counts as **executed** when
    its LATEST journaled `check-step-postconditions` outcome for this instance reports its
    postconditions holding (latest wins — a replayed or reopened step drops back out).
-2. Eligibility follows the authored step order: the first remaining step whose `after`
-   predecessors are all journaled executed. In a validated configuration (acyclic step DAG,
-   resolvable `after` references — enforced at load) an instance with a remaining step always
-   has exactly one next eligible step: there is no runtime "blocked" state.
+2. Eligibility follows the authored step order: the first remaining step whose `kind:
+   precondition` `stepCondition` predecessors are all journaled executed. In a validated
+   configuration (acyclic step DAG, resolvable `stepCondition` references — enforced at load)
+   an instance with a remaining step always has exactly one next eligible step: there is no
+   runtime "blocked" state.
 3. The step resolution is fully resolved by the harness — the agent relays it verbatim into the
    host dispatch (e.g. `runSubagent`), never chooses for itself. The model profile is NOT part
    of the resolution: it is function 4's, resolved by its own call between resolution and
@@ -567,7 +566,7 @@ Contract schemas — [harness/contracts/functions/resolve-step.input.schema.json
    simply stop being the latest — abandonment is not a state, and no register closes
    anything. Agents never pass or mint instance ids — the id surfaces read-only in the
    report's `context`.
-9. **One open workflow instance and one in-flight step per facilitator session**: a facilitator
+9. **One open workflow instance and one in-flight step per orchestrator session**: an orchestrator
    session drives at most one open workflow instance at a time, and between a step's resolution
    and its journaled outcome it resolves no other step. Running concurrent instances — whether
    of the same workflow or different workflows — is a deliberate non-goal for now. The log still
@@ -593,7 +592,7 @@ asks, never describes.
   its weighted `capabilities` from the workflow configuration: an agent never supplies
   weights (self-reporting).
 - **Out** — `ModelProfileReport`: the canonical model **profile**
-  `{id, score, cost_rank, reason}` — a catalog profile, not a host model id: the adapter's
+  `{slug, score, costRank, reason}` — a catalog profile, not a host model id: the adapter's
   `models.yaml` maps it to the host-specific id at dispatch. It always returns a profile
   (invariant 4).
 - **Caller usage** — the orchestrator calls it between function 3's resolution and the
@@ -616,12 +615,12 @@ Example:
       "workflowInstanceId": "verification-01J9XQ"
     },
     "outcome": { "status": "resolved" },
-    "profile": { "id": "claude-sonnet-4", "score": 144, "cost_rank": 2, "reason": "highest weighted capability score" }
+    "profile": { "slug": "claude-sonnet-4", "score": 144, "costRank": 2, "reason": "highest weighted capability score" }
   }
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-step-model.input.schema.json](harness/contracts/functions/resolve-step-model.input.schema.json) and [harness/contracts/functions/resolve-step-model.output.schema.json](harness/contracts/functions/resolve-step-model.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-step-model.input.schema.json](harness/contracts/api/resolve-step-model.input.schema.json) and [harness/contracts/api/resolve-step-model.output.schema.json](harness/contracts/api/resolve-step-model.output.schema.json).
 
 **Preconditions**
 
@@ -645,14 +644,14 @@ Contract schemas — [harness/contracts/functions/resolve-step-model.input.schem
    matter and HOW MUCH (the methodology's splitting discipline homogenizes per-unit complexity,
    so two instances of the same step carry the same weights). Every step must carry at least one
    positive weight — the config plane rejects an all-zero map at load.
-2. **Model catalog → `capability_scores` + `cost_rank` (static)**: `conf/model-profiles.conf.yaml`
+2. **Model catalog → `capabilities` + `costRank` (static)**: `conf/model-profiles.conf.yaml`
    scores every model 0–10 per tag and ranks its relative cost. The catalog owns the canonical
    tag vocabulary.
 3. **The score** is a pure weighted capability sum:
 
    $\text{Score}(m) = \sum_{\text{tag}} \text{capability\_score}_m[\text{tag}] \times \text{step.capabilities}[\text{tag}]$
 
-   Highest score wins; ties break toward lower `cost_rank`; if both are equal, the
+   Highest score wins; ties break toward lower `costRank`; if both are equal, the
    lexicographically lowest model `id` wins. Cost sensitivity emerges
    structurally: low, sparse weights compress candidate scores into a narrow band where the
    cheap-model tie-break dominates; high weights on discriminating tags let capability dominate
@@ -660,7 +659,7 @@ Contract schemas — [harness/contracts/functions/resolve-step-model.input.schem
 
    *Worked example* — a step weighting `deep-reasoning: 9`, two models scoring 9 vs 7 on it:
    $A = 81$, $B = 63$ — A wins on capability. At weight 3 the spread narrows ($27$ vs $21$) and,
-   across a larger candidate set, the `cost_rank` tie-break routes cheaper.
+   across a larger candidate set, the `costRank` tie-break routes cheaper.
 
 4. An empty catalog or an all-zero effective weight is **unroutable** — rejected at
    configuration load (invariant 1 plus catalog validation), so it cannot occur at runtime and
@@ -708,16 +707,14 @@ Example:
     },
     "outcome": { "status": "fail" },
     "conditionChecks": [
-      { "condition": { "kind": "precondition", "type": "after", "id": "after_build", "step_id": "build" }, "outcome": "pass" },
+      { "condition": { "kind": "precondition", "slug": "after_build", "step": "build" }, "outcome": "pass" },
       {
         "condition": {
-          "kind": "precondition", "type": "state", "id": "report_exists",
-          "set_selector": {
-            "set_type": "artifact",
-            "artifact_types": [{ "alias": "report", "schema_id": "review-report" }],
-            "set_query": "report.filter(a, a.slug == artifact)"
+          "kind": "precondition", "slug": "report_exists",
+          "setSelector": {
+            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
           },
-          "set_predicate": "selected.size() == 1"
+          "setPredicate": "selected.size() == 1"
         },
         "outcome": "fail", "failureMessage": "no artifact matches 'review-report'"
       }
@@ -726,7 +723,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-step-preconditions.input.schema.json](harness/contracts/functions/check-step-preconditions.input.schema.json) and [harness/contracts/functions/check-step-preconditions.output.schema.json](harness/contracts/functions/check-step-preconditions.output.schema.json).
+Contract schemas — [harness/contracts/api/check-step-preconditions.input.schema.json](harness/contracts/api/check-step-preconditions.input.schema.json) and [harness/contracts/api/check-step-preconditions.output.schema.json](harness/contracts/api/check-step-preconditions.output.schema.json).
 
 **Preconditions**
 
@@ -736,31 +733,36 @@ Contract schemas — [harness/contracts/functions/check-step-preconditions.input
 - Trigger — the step-starting boundary (THE enforcement point: a failing precondition denies
   the dispatch); optionally the orchestrator, probing before dispatch for early feedback
   (the in-flight step is deduced from its session ids/logs) — the probe is advisory,
-  the boundary enforces. Both run in the dispatching (facilitator) session: the step
+  the boundary enforces. Both run in the dispatching (orchestrator) session: the step
   session does not exist yet at this boundary.
 
 **Postconditions**
 
 - One log entry records the invocation: the per-condition checks plus the aggregate outcome —
-  appended to the dispatching (facilitator) session's log, the session the step-starting
+  appended to the dispatching (orchestrator) session's log, the session the step-starting
   boundary belongs to.
 - No artifact is touched — the invocation's own log entry is the only write: checking never
   mutates artifacts.
 
 **Invariants**
 
-1. `after` conditions: every referenced predecessor step must be journaled executed in the
-  correlated workflow instance. The instance view always exists once a step is in flight, so
-  there is no unevaluable case: a predecessor not journaled executed fails the condition —
-  never a silent pass.
-2. `state` conditions: `set_selector` binds artifact aliases and a CEL `set_query` to produce
-   `selected`; `set_predicate` is then evaluated over `selected`. The step's declared `artifact`
-   ref is in scope as a runtime constant. Every `<alias>.<property>` reference is statically
-   validated against the aliased artifact schema — an undeclared property is a hard error, not
-   a false pass. An empty selected set is a normal value: the predicate decides whether it
-   passes or fails.
-3. Condition ids are the audit handle: unique within a step, and every check logs the full
-   condition object with its outcome under that id.
+1. `stepCondition`: for `kind: precondition`, the referenced `step` (the predecessor) must be
+  journaled executed in the correlated workflow instance. The instance view always exists once
+  a step is in flight, so there is no unevaluable case: a predecessor not journaled executed
+  fails the condition — never a silent pass. A `kind: postcondition` `stepCondition` (naming a
+  successor) is advisory — a documentation cross-reference mirroring that successor's own
+  `kind: precondition` declaration — never itself re-checked as a hard gate: the DAG edge it
+  declares is enforced once, from the successor's side.
+2. `stateCondition`: `setSelector.setQuery` is a CEL expression that references artifacts
+   directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug ->
+   matching instances, e.g. `artifacts['review-report']`) to produce `selected`; `setPredicate`
+   is then evaluated over `selected`. The step's declared `artifact` ref is in scope as a
+   runtime constant. Every `artifacts['<slug>'].<property>` reference is statically validated
+   against that slug's artifact schema — an unresolvable slug or an undeclared property is a
+   hard error, not a false pass. An empty selected set is a normal value: the predicate decides
+   whether it passes or fails.
+3. Condition slugs are the audit handle: unique within a step, and every check logs the full
+   condition object with its outcome under that slug.
 
 ### 6. resolve-step-instructions
 
@@ -800,7 +802,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-step-instructions.input.schema.json](harness/contracts/functions/resolve-step-instructions.input.schema.json) and [harness/contracts/functions/resolve-step-instructions.output.schema.json](harness/contracts/functions/resolve-step-instructions.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-step-instructions.input.schema.json](harness/contracts/api/resolve-step-instructions.input.schema.json) and [harness/contracts/api/resolve-step-instructions.output.schema.json](harness/contracts/api/resolve-step-instructions.output.schema.json).
 
 **Preconditions**
 
@@ -869,7 +871,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/resolve-step-skills.input.schema.json](harness/contracts/functions/resolve-step-skills.input.schema.json) and [harness/contracts/functions/resolve-step-skills.output.schema.json](harness/contracts/functions/resolve-step-skills.output.schema.json).
+Contract schemas — [harness/contracts/api/resolve-step-skills.input.schema.json](harness/contracts/api/resolve-step-skills.input.schema.json) and [harness/contracts/api/resolve-step-skills.output.schema.json](harness/contracts/api/resolve-step-skills.output.schema.json).
 
 **Preconditions**
 
@@ -950,7 +952,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-step-authorization.input.schema.json](harness/contracts/functions/check-step-authorization.input.schema.json) and [harness/contracts/functions/check-step-authorization.output.schema.json](harness/contracts/functions/check-step-authorization.output.schema.json).
+Contract schemas — [harness/contracts/api/check-step-authorization.input.schema.json](harness/contracts/api/check-step-authorization.input.schema.json) and [harness/contracts/api/check-step-authorization.output.schema.json](harness/contracts/api/check-step-authorization.output.schema.json).
 
 **Preconditions**
 
@@ -1019,7 +1021,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-step-artifact.input.schema.json](harness/contracts/functions/check-step-artifact.input.schema.json) and [harness/contracts/functions/check-step-artifact.output.schema.json](harness/contracts/functions/check-step-artifact.output.schema.json).
+Contract schemas — [harness/contracts/api/check-step-artifact.input.schema.json](harness/contracts/api/check-step-artifact.input.schema.json) and [harness/contracts/api/check-step-artifact.output.schema.json](harness/contracts/api/check-step-artifact.output.schema.json).
 
 **Preconditions**
 
@@ -1088,13 +1090,11 @@ Example:
     "conditionChecks": [
       {
         "condition": {
-          "kind": "postcondition", "type": "state", "id": "report_exists",
-          "set_selector": {
-            "set_type": "artifact",
-            "artifact_types": [{ "alias": "report", "schema_id": "review-report" }],
-            "set_query": "report.filter(a, a.slug == artifact)"
+          "kind": "postcondition", "slug": "report_exists",
+          "setSelector": {
+            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
           },
-          "set_predicate": "selected.size() == 1"
+          "setPredicate": "selected.size() == 1"
         },
         "outcome": "pass"
       }
@@ -1103,21 +1103,21 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-step-postconditions.input.schema.json](harness/contracts/functions/check-step-postconditions.input.schema.json) and [harness/contracts/functions/check-step-postconditions.output.schema.json](harness/contracts/functions/check-step-postconditions.output.schema.json).
+Contract schemas — [harness/contracts/api/check-step-postconditions.input.schema.json](harness/contracts/api/check-step-postconditions.input.schema.json) and [harness/contracts/api/check-step-postconditions.output.schema.json](harness/contracts/api/check-step-postconditions.output.schema.json).
 
 **Preconditions**
 
 - The step was dispatched from a correlated unresolved `step-resolution` entry and its execution
   is being evaluated — at the step-ended boundary.
 - Trigger — the step-ended boundary (THE evaluation point: the step's session has ended, the
-  state it left is final). The invocation runs in the dispatching (facilitator) session — the
+  state it left is final). The invocation runs in the dispatching (orchestrator) session — the
   same session that owns the step's precondition check: at step-ended the step session has
   already closed.
 
 **Postconditions**
 
 - One log entry per step evaluation, carrying the step's outcome — the exact input of
-  function 3's cursor — appended to the dispatching (facilitator) session's log.
+  function 3's cursor — appended to the dispatching (orchestrator) session's log.
 - No artifact is touched — the invocation's own log entry is the only write.
 
 **Invariants**
@@ -1171,7 +1171,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-workspace.input.schema.json](harness/contracts/functions/check-workspace.input.schema.json) and [harness/contracts/functions/check-workspace.output.schema.json](harness/contracts/functions/check-workspace.output.schema.json).
+Contract schemas — [harness/contracts/api/check-workspace.input.schema.json](harness/contracts/api/check-workspace.input.schema.json) and [harness/contracts/api/check-workspace.output.schema.json](harness/contracts/api/check-workspace.output.schema.json).
 
 **Preconditions**
 
@@ -1247,7 +1247,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/functions/check-configuration.input.schema.json](harness/contracts/functions/check-configuration.input.schema.json) and [harness/contracts/functions/check-configuration.output.schema.json](harness/contracts/functions/check-configuration.output.schema.json).
+Contract schemas — [harness/contracts/api/check-configuration.input.schema.json](harness/contracts/api/check-configuration.input.schema.json) and [harness/contracts/api/check-configuration.output.schema.json](harness/contracts/api/check-configuration.output.schema.json).
 
 **Preconditions**
 
@@ -1269,8 +1269,8 @@ Contract schemas — [harness/contracts/functions/check-configuration.input.sche
 1. Every configuration file validates against its contract schema — parsing and validation are
    one act; an unvalidated parse never escapes.
 2. The semantic rules JSON Schema cannot express are enforced: non-empty steps, unique step
-   slugs, resolvable step `after` references, unique condition ids per step, acyclic step
-   DAGs, at least one positive capability weight per step; at catalog level, the advisory
+   slugs, resolvable `stepCondition` `step` references, unique condition slugs per step, acyclic
+   step DAGs, at least one positive capability weight per step; at catalog level, the advisory
    workflow graph resolves and is acyclic.
 3. Cross-configuration coherence holds: workflow actors exist in the ACL, capability tags belong
    to the model catalog's vocabulary, step `artifact` slugs resolve to one of the framework's
@@ -1440,7 +1440,7 @@ boundary** (authorization and schema validity, never step conditions).
 
 This keeps the harness env-agnostic: only the adapter maps host-specific event names and tool
 payloads, and only the adapter binding decides which tools are dispatches and which are writes.
-The step-starting and step-ended boundaries occur in the dispatching (facilitator) session —
+The step-starting and step-ended boundaries occur in the dispatching (orchestrator) session —
 their entries journal to its log; the step session's own log carries its registration (0), its
 context resolutions (6–7), and its write-boundary entries (8–9).
 Observational host events that do not enter one of these boundaries are adapter telemetry, not
@@ -1491,6 +1491,40 @@ Four placement rules settle the boundary questions:
   `report.schema.json`), with sibling constraints (`properties`, `required`, `oneOf`,
   `unevaluatedProperties`) added directly. `allOf` is reserved for true facets, conditional
   composition, or multi-source intersection — not for ordinary single-base extension.
+- **Contract identities follow the GSM `gsmarc://` `$id` convention.** Every schema declares a
+  canonical `$id` of the form `gsmarc://safe/<path>/<stem>/v1`, where `<path>` mirrors the file's
+  location under `harness/contracts/` or `artifacts/` and `<stem>` is the filename without
+  `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `safe`,
+  logical path, filename stem as the identity segment, and `/v1` version suffix. `$ref` links
+  use these canonical ids (or repo-relative paths where the loader resolves them), so a
+  contract can be moved or renamed only by updating its `$id` and every reference to it.
+- **Canonical slug convention, centralized.** Every framework entity named by a slug uses the
+  same URL-safe form: lowercase letters, digits, and hyphens (`[a-z0-9-]+`). Every `*Slug`
+  definition lives in ONE shared library,
+  [harness/contracts/slugs.schema.json](harness/contracts/slugs.schema.json) — no contract
+  defines its own copy; every reference is a `$ref` to it, in-repo (from within the library
+  itself) or cross-file via `gsmarc://safe/harness/contracts/slugs/v1#/definitions/<slug>`. The
+  slug is also the filename stem used to locate the entity's definition:
+  - `workflowSlug` = stem of `conf/workflows/<slug>.workflow.conf.yaml`,
+  - `stepSlug` = a step slug, unique within its workflow,
+  - `conditionSlug` = a condition slug, unique within its step,
+  - `agentSlug` = `name` frontmatter value and stem of `agents/<slug>.agent.md`,
+  - `artifactSlug` = stem of `artifacts/<slug>.artifact.schema.json`,
+  - `roleSlug` = stem of the role block inside `conf/access-control-list.conf.yaml`,
+  - `skillSlug` = stem of `skills/<slug>.skill.md` under `FRAMEWORK_SKILLS_DIR`,
+  - `instructionSlug` = stem of `instructions/<slug>.instructions.md` under `FRAMEWORK_INSTRUCTIONS_DIR`,
+  - `templateSlug` = stem of `templates/<slug>.artifact-template.md` under
+    `FRAMEWORK_TEMPLATES_DIR` — admits `/`-separated path segments in the slug itself
+    (`^[a-z0-9-]+(/[a-z0-9-]+)*$`), because templates are organized per layer/actor, not in a
+    flat directory,
+  - `nodeSlug` = a workspace node's own path segment (`conf/workspace.conf.yaml`) — may embed
+    `<name>` VARIABLE placeholders, optionally mixed with literal text.
+  The harness resolves a referenced entity by joining its canonical directory, the slug,
+  and the fixed extension — never by scanning arbitrary files.
+  The directories themselves are declared by the framework in `.env`
+  (`FRAMEWORK_AGENTS_DIR`, `FRAMEWORK_ARTIFACTS_DIR`, `FRAMEWORK_SKILLS_DIR`,
+  `FRAMEWORK_TEMPLATES_DIR`, `FRAMEWORK_WORKFLOWS_DIR`, `FRAMEWORK_INSTRUCTIONS_DIR`),
+  all relative to `FRAMEWORK_DIR`.
 - **A contract is loaded by the layer that owns the boundary it guards.** The
   `*.conf.schema.json` contracts guard the configuration boundary, so `config/` loads them —
   parsing and validation are one act there. The data contracts (the artifact base contract, the
@@ -1605,7 +1639,7 @@ dependency direction, as in the source layout: `commands → services → {store
   Frozen dataclasses throughout: public typed attributes, no getters/setters.
 - **`config`** — `ConfigLoader` plus the configuration dataclasses it constructs, homed
   together: `FrameworkLayout`, `AccessControlList`, `ModelProfiles`/`ModelProfile`,
-  `WorkspaceLayout`/`WorkspaceNode`, `WorkflowCatalog`/`Workflow`/`Step`/`Condition`,
+  `WorkspaceLayout`/`ArtifactNode`/`FolderNode`, `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`,
   `AdapterBinding`. Each `load_*` method performs parse + contract-validation + semantic rules
   - dataclass construction as ONE act; there is **no aggregate `FrameworkConfig`**: each
   service receives exactly the dataclasses it needs.
@@ -1629,8 +1663,8 @@ id as its two arguments and forwards the raw event payload to `harness.py hook -
 environment id as the second argument.
 
 Session identity is an adapter obligation for `agent`-origin sessions: the binding names the
-payload keys where the host carries its session ids (`host_session_keys`,
-`host_parent_session_keys` in `tools.yaml`); the adapter extracts them, sanitizes each to a safe
+payload keys where the host carries its session ids (`hostSessionKeys`,
+`hostParentSessionKeys` in `tools.yaml`); the adapter extracts them, sanitizes each to a safe
 slug (`[a-z0-9-]` — the id becomes a log filename), and attributes adapter-mediated agent
 invocations to their session only when that adapter has a verifiable host-observed attribution
 mechanism per [Invocation surfaces](#invocation-surfaces-one-command-system) — never from a
@@ -1641,9 +1675,9 @@ this adapter binding entirely (the bash wrapper; the CI platform's ambient run i
 .env                  # framework layout environment: where skills, agents, schemas, templates, workspace live
 conf/                 # env-agnostic framework configuration (owned by the embedding framework)
   access-control-list.conf.yaml  # framework-defined roles -> agents (from agents/) mapping; privileges are artifact-kind + action
-  workspace.conf.yaml            # workspace layout blueprint (nodes: path -> schema/template/cardinality)
-  model-profiles.conf.yaml       # canonical model catalog: capability_scores + cost_rank per model
-  workflows/                     # *.workflow.conf.yaml — steps declare actor and weighted capabilities
+  workspace.conf.yaml            # workspace layout blueprint (artifact/folder nodes: slug -> artifact/template/cardinality)
+  model-profiles.conf.yaml       # canonical model catalog: capabilities + costRank per model
+  workflows/                     # *.workflow.conf.yaml — steps declare actor, artifact, weighted capabilities, and conditions
 harness/
   adapters/
     dispatch.sh       # shared, generic dispatcher: stdin JSON -> harness hook command
@@ -1652,8 +1686,9 @@ harness/
       tools.yaml      # host tool names, write verbs, payload keys (adapter binding)
       models.yaml     # host model id bindings to canonical profiles
   contracts/          # generic harness schemas: artifact, log-entry, report, context, actions,
+                      # slugs.schema.json (every canonical *Slug definition, centralized),
                       # conf/<name>.conf.schema.json — one contract per configuration file, and
-                      # split functions/<function>.input|output.schema.json contracts
+                      # split api/<function>.input|output.schema.json contracts
   src/
     application.py    # the composition root (builds the object graph, dispatches to one command)
     commands/         # usage entry points: argparse dispatch
@@ -1671,12 +1706,12 @@ beside the `ConfigLoader` that builds it):
 | Configuration | Contract | Typed view |
 |---|---|---|
 | `.env` layout environment | required-variable set (below) | `FrameworkLayout` |
-| `conf/access-control-list.conf.yaml` | `conf/access-control-list.conf.schema.json` | `AccessControlList` |
-| `conf/model-profiles.conf.yaml` | `conf/model-profiles.conf.schema.json` | `ModelProfiles` |
-| `conf/workspace.conf.yaml` | `conf/workspace.conf.schema.json` | `WorkspaceLayout` |
-| `conf/workflows/*.workflow.conf.yaml` | `conf/workflow.conf.schema.json` | `WorkflowCatalog` / `Workflow` / `Step` |
-| `harness/adapters/<env>/tools.yaml` | `conf/adapter.conf.schema.json` | adapter binding (internal config) |
-| `harness/adapters/<env>/models.yaml` | `conf/model-bindings.conf.schema.json` | model binding (internal config) |
+| `conf/access-control-list.conf.yaml` | `conf/framework/access-control-list.conf.schema.json` | `AccessControlList` |
+| `conf/model-profiles.conf.yaml` | `conf/framework/model-profiles.conf.schema.json` | `ModelProfiles` |
+| `conf/workspace.conf.yaml` | `conf/framework/workspace.conf.schema.json` | `WorkspaceLayout` |
+| `conf/workflows/*.workflow.conf.yaml` | `conf/framework/workflow.conf.schema.json` | `WorkflowCatalog` / `Workflow` / `Step` |
+| `harness/adapters/<env>/tools.yaml` | `conf/adapters/tools.conf.schema.json` | adapter binding (internal config) |
+| `harness/adapters/<env>/models.yaml` | `conf/adapters/models.conf.schema.json` | model binding (internal config) |
 
 The framework's **layout is environment, not file configuration**: the framework declares WHERE
 its pieces live via environment variables, loaded from a `.env` file at the framework root
@@ -1686,10 +1721,12 @@ containing the `.env` file — and every other layout variable resolves relative
 
 ```bash
 FRAMEWORK_DIR=/abs/path/to/safe-agentic-framework   # the anchor: absolute; all other paths resolve relative to it
-FRAMEWORK_SKILLS_DIR=.github/skills
 FRAMEWORK_AGENTS_DIR=agents
-FRAMEWORK_SCHEMAS_DIR=schemas
+FRAMEWORK_ARTIFACTS_DIR=artifacts
+FRAMEWORK_SKILLS_DIR=.github/skills
 FRAMEWORK_TEMPLATES_DIR=templates
+FRAMEWORK_WORKFLOWS_DIR=conf/workflows
+FRAMEWORK_INSTRUCTIONS_DIR=instructions
 FRAMEWORK_WORKSPACE_DIR=../safe-agentic-portfolio
 ```
 
@@ -1706,9 +1743,10 @@ through the same loader discipline, but is never declared in `conf/`.
 Parsing and validation are one act: `ConfigLoader` parses the source and validates it against
 the contract in the same step — an unvalidated parse never escapes the config package. Loading a
 workflow configuration additionally enforces the semantic rules JSON Schema cannot express
-(non-empty steps, unique step slugs, resolvable `after` references, unique condition ids within
-a step, an acyclic step DAG, at least one positive capability weight per step); the workflow
-catalog additionally validates the advisory workflow graph (references resolve, acyclic).
+(non-empty steps, unique step slugs, resolvable `stepCondition` `step` references, unique
+condition slugs within a step, an acyclic step DAG, at least one positive capability weight per
+step); the workflow catalog additionally validates the advisory workflow graph (references
+resolve, acyclic).
 There is no aggregate configuration object: `ConfigLoader` builds each configuration dataclass
 once at `Application` initialization, and each service receives exactly the dataclasses it
 needs (interface segregation), so

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/register-session.input/v1",
+  "title": "register-session input contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sessionId"
+  ],
+  "properties": {
+    "agent": {
+      "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
+      "description": "The framework-agent identity, when applicable."
+    },
+    "sessionId": {
+      "$ref": "../context.schema.json#/definitions/sessionId",
+      "description": "The session this invocation runs in."
+    },
+    "parentSessionId": {
+      "$ref": "../context.schema.json#/definitions/parentSessionId",
+      "description": "The parent session that opened this session, if any."
+    }
+  },
+  "description": "Input contract for the register-session harness function."
+}

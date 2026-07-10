@@ -126,7 +126,7 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       class ModelProfileBinding <<dataclass>> {
         +slug : str
         +score : float
-        +cost_rank : int
+        +costRank : int
         +reason : str
       }
     }
@@ -163,7 +163,7 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       }
       class ConditionEvaluator {
         -_artifact_store : ArtifactStore
-        +evaluate_conditions(conditions: tuple[Condition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
+        +evaluate_conditions(conditions: tuple[StepCondition | StateCondition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
       }
       class ConditionCheckReport <<dataclass>> {
         +condition_checks : tuple[ConditionCheck, ...]
@@ -197,7 +197,7 @@ package "CD - Harness source classes (src/)" <<Frame>> {
         +findings : tuple[Finding, ...]
       }
       class ConditionCheck <<dataclass>> {
-        +condition : Condition
+        +condition : StepCondition | StateCondition
         +outcome : str
         +failure_message : str | None
       }
@@ -427,17 +427,25 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +score_model(model: str, capabilities: Mapping[str, int]) : float
     }
     class ModelProfile <<dataclass>> {
-      +capability_scores : Mapping[str, int]
-      +cost_rank : int
+      +capabilities : Mapping[str, int]
+      +costRank : int
     }
     class WorkspaceLayout <<dataclass>> {
-      +nodes : tuple[WorkspaceNode, ...]
+      +nodes : tuple[ArtifactNode | FolderNode, ...]
       +resolve_resource(path: Path) : str
     }
-    class WorkspaceNode <<dataclass>> {
-      +path : str
-      +schema : str
+    class ArtifactNode <<dataclass>> {
+      +slug : str
+      +description : str
       +cardinality : str
+      +artifact : str
+      +template : str
+    }
+    class FolderNode <<dataclass>> {
+      +slug : str
+      +description : str
+      +cardinality : str | None
+      +children : tuple[ArtifactNode | FolderNode, ...]
     }
     class WorkflowCatalog <<dataclass>> {
       +workflows : tuple[Workflow, ...]
@@ -457,16 +465,19 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +artifact : str
       +skills : tuple[str, ...]
       +instructions : tuple[str, ...]
-      +conditions : tuple[Condition, ...]
+      +conditions : tuple[StepCondition | StateCondition, ...]
       +capabilities : Mapping[str, int]
     }
-    class Condition <<dataclass>> {
+    class StepCondition <<dataclass>> {
       +kind : str
-      +type : str
-      +condition_id : str
-      +step_id : str | None
-      +set_selector : Mapping[str, Any] | None
-      +set_predicate : str | None
+      +slug : str
+      +step : str
+    }
+    class StateCondition <<dataclass>> {
+      +kind : str
+      +slug : str
+      +setSelector : Mapping[str, Any]
+      +setPredicate : str
     }
     class AdapterBinding <<dataclass>> {
       +tool_classes : Mapping[str, str]

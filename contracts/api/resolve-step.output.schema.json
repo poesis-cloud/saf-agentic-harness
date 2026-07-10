@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/resolve-step.output/v1",
+  "$ref": "../report.schema.json",
+  "title": "resolve-step output contract",
+  "oneOf": [
+    {
+      "required": [
+        "step"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "step-resolution",
+              "description": "Success status for resolve-step."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "step": {
+          "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/step",
+          "description": "The resolved step object from the workflow configuration."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "no-next-step"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step harness function."
+}

@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/check-step-postconditions.output/v1",
+  "$ref": "../report.schema.json",
+  "title": "check-step-postconditions output contract",
+  "oneOf": [
+    {
+      "required": [
+        "conditionChecks"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "pass",
+              "description": "Success status for check-step-postconditions."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "oneOf": [
+                  {
+                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stepCondition"
+                  },
+                  {
+                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stateCondition"
+                  }
+                ],
+                "description": "The condition that was checked."
+              },
+              "outcome": {
+                "const": "pass",
+                "description": "Whether the condition passed or failed."
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One condition outcome; failure requires a failureMessage."
+          },
+          "description": "One outcome entry per condition checked."
+        }
+      }
+    },
+    {
+      "required": [
+        "conditionChecks"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "fail"
+            }
+          }
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "oneOf": [
+                  {
+                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stepCondition"
+                  },
+                  {
+                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stateCondition"
+                  }
+                ],
+                "description": "The condition that was checked."
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ],
+                "description": "Whether the condition passed or failed."
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One condition outcome; at least one must be fail."
+          },
+          "contains": {
+            "properties": {
+              "outcome": {
+                "const": "fail"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "description": "One outcome entry per condition checked; at least one must be fail."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the check-step-postconditions harness function."
+}

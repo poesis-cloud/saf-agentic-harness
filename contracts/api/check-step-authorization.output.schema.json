@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://safe/harness/contracts/api/check-step-authorization.output/v1",
+  "$ref": "../report.schema.json",
+  "title": "check-step-authorization output contract",
+  "oneOf": [
+    {
+      "required": [
+        "authorization"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "allowed",
+              "description": "Success status for check-step-authorization."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "authorization": {
+          "$ref": "#/definitions/authorization",
+          "not": {
+            "required": [
+              "failureMessage"
+            ]
+          },
+          "description": "The authorization decision details."
+        }
+      }
+    },
+    {
+      "required": [
+        "authorization"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "denied"
+            }
+          }
+        },
+        "authorization": {
+          "$ref": "#/definitions/authorization",
+          "required": [
+            "failureMessage"
+          ]
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "definitions": {
+    "authorization": {
+      "type": "object",
+      "required": [
+        "actor",
+        "artifactPath",
+        "action",
+        "resource"
+      ],
+      "properties": {
+        "actor": {
+          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
+          "description": "The acting agent identity."
+        },
+        "artifactPath": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The target artifact path."
+        },
+        "action": {
+          "$ref": "../conf/framework/access-control-list.conf.schema.json#/definitions/action",
+          "description": "The requested action."
+        },
+        "resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The artifact schema/resource the privilege applies to."
+        },
+        "failureMessage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why authorization was denied."
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Authorization decision details."
+    }
+  },
+  "description": "Output contract for the check-step-authorization harness function."
+}
