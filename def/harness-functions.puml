@@ -67,7 +67,6 @@ else a precondition fails
   Host --> Orch : dispatch blocked, reports returned
   Orch -> Orch : per ""reports-handling"" instruction — produce the missing\nstate (via a prior step or the user), dispatch again
 end
-Host -> Sub : open the step session
 Host -> Harness : hook ""sessionStart"" (step session)
 Harness -> Harness : ""0 register-session"" — registers the step session:\nsessionId + parentSessionId (the dispatching session)
 Harness -> Harness : unresolved step-resolution correlated (exact match via parentSessionId,\nresolution-actor heuristic as fallback) — a step session:\n""6 resolve-step-instructions"" — the step's refs\n""7 resolve-step-skills"" — the step's skills

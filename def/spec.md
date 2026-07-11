@@ -81,18 +81,20 @@ and implementation parts prescribe its realization.
   its id across the session logs (see [Logging](#logging)). Logs are persisted workspace state
   (C0) — a condition may read log evidence and assert it as state (C5) — but they are not
   artifacts: agents never write logs, and no step produces one.
-- **Session** — the harness's unit of log ownership, registered by function 0 at the
-  session-started boundary under its `sessionId`, with `parentSessionId` linking a session to
-  the session that opened it (a dispatched subagent, a shell opened from a wrapped shell, a
-  chained CI job) — a parent chain of arbitrary depth, origin-agnostic. A session is not
-  host-exclusive: its `actor` names the origin — `agent` (a framework
-  agent acting inside a host session, `sessionId` host-observed via the adapter, C7-gated),
-  `human` (a person at a terminal, `sessionId` minted by a bash wrapper at shell start), or
-  `system` (a CI job, `sessionId` sourced from the CI platform's ambient run id). An
-  orchestrator session spans many workflow instances over its lifetime; a step session IS its
-  step (1 step = 1 agent = 1 session = 1 artifact). Session ids are always observed or minted
-  by the surrounding mechanism (adapter, bash wrapper, CI platform) — never self-reported by an
-  agent.
+- **Session** — the harness's unit of execution identity and log ownership: a bounded span of
+  work, opened at the session-started boundary and registered by function 0 under a `sessionId`
+  that names it for the life of its log. A session is performed by exactly one **actor** —
+  `agent` (a framework agent dispatched to act), `human` (a person working a task), or `system`
+  (an automated job) — fixed for the session's entire lifetime. An orchestrator session spans
+  many workflow instances over its lifetime; a step session IS its step (1 step = 1 agent = 1
+  session = 1 artifact). A session's `sessionId` is always minted or observed by the mechanism
+  surrounding its opening, never self-reported by the acting agent, so that every session's
+  identity is independently verifiable at the moment it opens.
+- **parentSessionId** — links a session to the session whose action opened it, forming a
+  parent chain of arbitrary depth, origin-agnostic: any actor kind may open a session for any
+  other (an orchestrator session opens a step session at dispatch; a session opens a nested
+  session; a job opens a chained job). A session without a `parentSessionId` is a root — the
+  first session of its lineage.
 - **Orchestrator** — the orchestrator agent a workflow declares to drive its instances. Its
   session receives its workflow instructions — selection and return-handling (function 1) —
   and its procedure skills (function 2); it converses, obtains assent, calls resolution, and
