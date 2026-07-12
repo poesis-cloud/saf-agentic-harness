@@ -1,24 +1,34 @@
-# GitHub Copilot CLI / VS Code environment binding (env-specific tool/payload map).
+# VS Code GitHub Copilot Chat environment binding (env-specific tool/payload map).
 # The harness core stays env-agnostic and reads this map; another host (Claude Code, Cursor, …)
-# ships its own adapters/<env>/tools.yaml. `writeTools`/`deleteTools` map a host tool name to its action;
-# the `*Keys` lists name the payload fields to probe (first hit wins).
+# ships its own adapters/<env>/tools.yaml. `writeTools`/`deleteTools` map a host tool name to its
+# action; the `*Keys` lists name the payload fields to probe (first hit wins). Payload field
+# names are the host's native snake_case hook envelope (see def/spec.md — Host hook engine).
 writeTools:
   create_file: create
   create_directory: create
   replace_string_in_file: update
-  multi_replace_string_in_file: update
+  multi_replace_string_in_file: update # replacements[].filePath — one path per replacement (fan-out; see def/spec.md I8)
   edit_notebook_file: update
-  insert_edit_into_file: update
   apply_patch: update
-deleteTools: [delete_file]
-toolKeys: [tool, tool_name, toolName]
-inputKeys: [tool_input, toolInput, arguments]
-pathKeys: [filePath, path, file]
-actorKeys: [agent, agentName, actor, subagent]
-hostSessionKeys: [sessionId, session_id, session]
-hostParentSessionKeys: [parentSessionId, parent_session_id, parentSession]
-# Subagent dispatch (runSubagent): the tool that starts a child step-session. The harness governs the
-# (target agent, model) selection at preToolUse — see ModelRouter.validate_dispatch.
+deleteTools: []
+toolKeys: [tool_name]
+inputKeys: [tool_input]
+# create_file/replace_string_in_file/multi_replace… use filePath; create_directory uses dirPath.
+pathKeys: [filePath, dirPath]
+# multi_replace_string_in_file nests its paths in an array — no flat key reaches them:
+nestedPathKeys: ["replacements[].filePath"]
+# Session identity (host-observed, never model-authored):
+# - top-level session: session_id (the chat session id) — SessionStart / PreToolUse / PostToolUse
+# - step session: agent_id (SubagentStart) with session_id as its parent
+hostSessionKeys: [session_id]
+hostParentSessionKeys: []
+hostStepSessionKeys: [agent_id]
+hostStepActorKeys: [agent_type]
+# Subagent dispatch (runSubagent): the tool that opens a step session. Step-starting (function 5)
+# gates it at PreToolUse; step-ended (function 10) evaluates it at PostToolUse.
 dispatchTools: [runSubagent]
-dispatchAgentKeys: [agentName, agent, subagent, name]
+dispatchAgentKeys: [agentName]
 dispatchModelKeys: [model]
+# Adapter-mediated agent invocation surface (functions 3–4) — see def/spec.md H4 + I4:
+mediatedCommandTools: [run_in_terminal]
+mediatedCommandKeys: [command]

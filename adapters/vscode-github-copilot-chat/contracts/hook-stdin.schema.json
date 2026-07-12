@@ -1,0 +1,184 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://safe/harness/adapters/vscode-github-copilot-chat/contracts/hook-stdin/v1",
+    "title": "vscode-github-copilot-chat hook stdin contract",
+    "description": "Seam 1 of the adapter's invocation plumbing: the host event JSON that VS Code's hook engine writes to the hook command's stdin, forwarded unchanged by dispatch.sh to the harness hook command. Envelope fields are merged under every event's own fields; the host may add fields (the contract is deliberately open). Grounded in extensions/copilot/src/extension/chat/vscode-node/chatHookService.ts (common envelope), .../platform/chat/common/chatHookService.ts and hookCommandTypes.ts (per-event inputs) in microsoft/vscode.",
+    "type": "object",
+    "required": [
+        "timestamp",
+        "hook_event_name"
+    ],
+    "properties": {
+        "timestamp": {
+            "type": "string",
+            "description": "Wall-clock time the host built the hook input (ISO 8601)."
+        },
+        "hook_event_name": {
+            "type": "string",
+            "enum": [
+                "UserPromptSubmit",
+                "SubagentStart",
+                "PreToolUse",
+                "PostToolUse",
+                "SubagentStop",
+                "Stop"
+            ],
+            "description": "The firing host event — only the events this adapter registers (H0–H7)."
+        },
+        "session_id": {
+            "type": "string",
+            "description": "The host chat session id (the CONVERSATION — not a harness agent session; see the adapter spec's session identity binding). Present whenever the host has one."
+        },
+        "transcript_path": {
+            "type": "string",
+            "description": "Filesystem path of the flushed session transcript, when one exists."
+        },
+        "cwd": {
+            "type": "string",
+            "description": "The hook command's working directory (fsPath), present only when the hook entry declares cwd."
+        }
+    },
+    "oneOf": [
+        {
+            "$ref": "#/$defs/userPromptSubmit"
+        },
+        {
+            "$ref": "#/$defs/subagentStart"
+        },
+        {
+            "$ref": "#/$defs/preToolUse"
+        },
+        {
+            "$ref": "#/$defs/postToolUse"
+        },
+        {
+            "$ref": "#/$defs/subagentStop"
+        },
+        {
+            "$ref": "#/$defs/stop"
+        }
+    ],
+    "$defs": {
+        "userPromptSubmit": {
+            "description": "H0 — the agent-scoped session-started event. The scoping agent slug arrives as a dispatch.sh argument, never in this payload.",
+            "type": "object",
+            "required": [
+                "prompt"
+            ],
+            "properties": {
+                "hook_event_name": {
+                    "const": "UserPromptSubmit"
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "The user's message. The harness never reads prompt content."
+                }
+            }
+        },
+        "subagentStart": {
+            "description": "H1 — step-started.",
+            "type": "object",
+            "required": [
+                "agent_id",
+                "agent_type"
+            ],
+            "properties": {
+                "hook_event_name": {
+                    "const": "SubagentStart"
+                },
+                "agent_id": {
+                    "type": "string",
+                    "description": "The subagent invocation id — unique per dispatch; becomes the step session id (sanitized)."
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": "The subagent name — for a framework dispatch, the framework agentSlug (the actor)."
+                }
+            }
+        },
+        "preToolUse": {
+            "description": "H2/H3/H4 — step-starting / write-starting / mediated attribution, classified by tool_name per tools.yaml.",
+            "type": "object",
+            "required": [
+                "tool_name",
+                "tool_input",
+                "tool_use_id"
+            ],
+            "properties": {
+                "hook_event_name": {
+                    "const": "PreToolUse"
+                },
+                "tool_name": {
+                    "type": "string"
+                },
+                "tool_input": {
+                    "description": "The tool call's input object, verbatim."
+                },
+                "tool_use_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "postToolUse": {
+            "description": "H5/H6 — write-ended / step-ended, classified by tool_name per tools.yaml.",
+            "type": "object",
+            "required": [
+                "tool_name",
+                "tool_input",
+                "tool_response",
+                "tool_use_id"
+            ],
+            "properties": {
+                "hook_event_name": {
+                    "const": "PostToolUse"
+                },
+                "tool_name": {
+                    "type": "string"
+                },
+                "tool_input": {
+                    "description": "The tool call's input object, verbatim."
+                },
+                "tool_response": {
+                    "type": "string",
+                    "description": "Text representation of the tool's output."
+                },
+                "tool_use_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "subagentStop": {
+            "description": "H7 — telemetry only; never enters a harness boundary.",
+            "type": "object",
+            "required": [
+                "agent_id"
+            ],
+            "properties": {
+                "hook_event_name": {
+                    "const": "SubagentStop"
+                },
+                "agent_id": {
+                    "type": "string"
+                },
+                "agent_transcript_path": {
+                    "type": "string"
+                },
+                "stop_hook_active": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "stop": {
+            "description": "H7 — telemetry only; never enters a harness boundary.",
+            "type": "object",
+            "properties": {
+                "hook_event_name": {
+                    "const": "Stop"
+                },
+                "stop_hook_active": {
+                    "type": "boolean"
+                }
+            }
+        }
+    }
+}

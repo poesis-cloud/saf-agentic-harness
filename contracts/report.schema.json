@@ -82,7 +82,7 @@
         "input-error",
         "state-error",
         "configuration-error",
-        "adapter-error",
+        "invocation-error",
         "system-error"
       ],
       "description": "The set of error statuses every harness function may return."

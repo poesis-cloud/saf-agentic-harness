@@ -9,7 +9,7 @@ skinparam classAttributeIconSize 0
 skinparam PackagePadding 12
 skinparam ClassPadding 4
 
-package "CD - Harness source classes (src/)" <<Frame>> {
+package "CD - Harness core classes (src/)" <<Frame>> {
 
   class Application {
     -_commands : Mapping[str, Command]
@@ -18,12 +18,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
 
   package "commands" {
     interface Command {
-      +execute_function(invocation: FunctionInvocation) : Report
-    }
-    class HookCommand {
-      -_normalizer : HookNormalizer
-      -_correlator : SessionCorrelator
-      -_commands : Mapping[Boundary, Command]
       +execute_function(invocation: FunctionInvocation) : Report
     }
     class RegisterSessionCommand {
@@ -59,26 +53,23 @@ package "CD - Harness source classes (src/)" <<Frame>> {
     class ResolveStepSkillsCommand {
       -_resolver : StepSkillResolver
     }
-    class CheckWorkspaceCommand {
-      -_checker : WorkspaceChecker
-    }
-    class CheckConfigurationCommand {
-      -_checker : ConfigurationChecker
-    }
     note bottom of ResolveStepCommand
       No command composes services: functions 3 and 4
       are fully independent - whoever needs both
-      (the orchestrator per its instructions, or the
-      adapter on one hook) composes them OUTSIDE
-      the harness.
+      (the orchestrator per its instructions, or
+      whatever mediates a given host's hook events)
+      composes them OUTSIDE the harness core.
     end note
     note bottom of Command
-      Commands are the JSON boundary: parse the
-      FunctionInvocation input object (session
+      ELEVEN commands - exactly one per harness function,
+      hook- and host-blind. Commands are the JSON boundary:
+      parse the FunctionInvocation input object (session
       attribution fields + function-specific fields),
       invoke the service, and return the exact concrete
       Report object that becomes command ""out"" and
-      log entry ""report"".
+      log entry ""report"". Any event->boundary->functions
+      orchestration happens entirely outside src/, never
+      inside a command.
     end note
   }
 
@@ -87,14 +78,13 @@ package "CD - Harness source classes (src/)" <<Frame>> {
     package "session_registration" {
       class SessionRegistrar {
         -_session_log_store : SessionLogStore
-        +register_session(actor: str, agent: str | None, session_id: str, parent_session_id: str | None) : SessionRegistrationReport
+        +register_session(agent: str, session_id: str, parent_session_id: str | None) : SessionRegistrationReport
       }
       class SessionRegistrationReport <<dataclass>> {
         +session : SessionRef
       }
       class SessionRef <<dataclass>> {
-        +actor : str
-        +agent : str | None
+        +agent : str
         +session_id : str
         +parent_session_id : str | None
       }
@@ -153,14 +143,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
         -_artifact_store : ArtifactStore
         +check_step_artifact(invocation: FunctionInvocation, artifact_path: Path) : ArtifactCheckReport
       }
-      class WorkspaceChecker {
-        -_artifact_store : ArtifactStore
-        +check_workspace() : WorkspaceCheckReport
-      }
-      class ConfigurationChecker {
-        -_loader : ConfigLoader
-        +check_configuration() : ConfigurationCheckReport
-      }
       class ConditionEvaluator {
         -_artifact_store : ArtifactStore
         +evaluate_conditions(conditions: tuple[StepCondition | StateCondition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
@@ -186,12 +168,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       class Revert <<dataclass>> {
         +action : str
         +from_ref : str | None
-      }
-      class WorkspaceCheckReport <<dataclass>> {
-        +workspace_checks : tuple[Finding, ...]
-      }
-      class ConfigurationCheckReport <<dataclass>> {
-        +configuration_checks : tuple[Finding, ...]
       }
       class CheckReport <<dataclass>> {
         +findings : tuple[Finding, ...]
@@ -233,49 +209,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
         +skills : tuple[str, ...]
       }
     }
-
-    package "hooks" {
-      class HookNormalizer {
-        -_binding : AdapterBinding
-        -_acl : AccessControlList
-        +normalize_event(event: dict) : Boundary
-      }
-      enum Boundary {
-        SESSION_STARTED
-        STEP_STARTING
-        STEP_STARTED
-        WRITE_STARTING
-        WRITE_ENDED
-        STEP_ENDED
-      }
-      class SessionCorrelator {
-        -_session_log_store : SessionLogStore
-        +correlate_session(session_id: str, parent_session_id: str | None, agent: str) : LogEntry | None
-      }
-    }
-
-    note bottom of SessionCorrelator
-      Hook-plane collaborator (used by HookCommand,
-      not by the resolvers): resolves a session-start
-      event to its unresolved step-resolution entry -
-      exact match via parentSessionId first,
-      resolution-actor heuristic (resolution actor ==
-      session agent) as fallback - supplying session
-      attribution fields to the context resolvers or
-      selecting the workflow context resolvers when none.
-    end note
-    note bottom of Boundary
-      Lifecycle participles avoid the step/session clash
-      (1 step = 1 session): STEP_STARTING is the dispatch
-      about to open the step - it can DENY; STEP_STARTED is
-      the step session having opened - it can only INJECT;
-      STEP_ENDED is the dispatch return - THE evaluation
-      point. SESSION_STARTED is a non-step (facilitator)
-      session starting. STEP_STARTING and STEP_ENDED occur
-      in the dispatching (facilitator) session - their
-      entries journal to its log. Host events outside these
-      boundaries are adapter telemetry - never journaled.
-    end note
   }
 
   package "stores" {
@@ -407,7 +340,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +load_model_profiles(root: Path) : ModelProfiles
       +load_workspace_layout(root: Path) : WorkspaceLayout
       +load_workflow_catalog(root: Path) : WorkflowCatalog
-      +load_adapter_binding(env: str) : AdapterBinding
     }
     class FrameworkLayout <<dataclass>> {
       +framework_dir : Path
@@ -479,12 +411,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
       +setSelector : Mapping[str, Any]
       +setPredicate : str
     }
-    class AdapterBinding <<dataclass>> {
-      +tool_classes : Mapping[str, str]
-      +model_ids : Mapping[str, str]
-      +resolve_tool_class(tool: str) : str
-      +resolve_model_id(host_model: str) : str
-    }
     note bottom of ConfigLoader
       Parse + contract-validate + semantic rules
       + dataclass construction: ONE act per source.
@@ -532,7 +458,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
   }
 
   ' --- command surface: one command per harness function (1:1) ---
-  Command <|.. HookCommand
   Command <|.. RegisterSessionCommand
   Command <|.. ResolveStepCommand
   Command <|.. ResolveStepModelCommand
@@ -544,8 +469,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
   Command <|.. ResolveWorkflowSkillsCommand
   Command <|.. ResolveStepInstructionsCommand
   Command <|.. ResolveStepSkillsCommand
-  Command <|.. CheckWorkspaceCommand
-  Command <|.. CheckConfigurationCommand
   Application ..> Command : builds + dispatches\n(composition root, at src root)
   Application ..> ConfigLoader : builds every config\ndataclass fail-fast at start
 
@@ -562,8 +485,6 @@ package "CD - Harness source classes (src/)" <<Frame>> {
   Report <|-- ConditionCheckReport
   Report <|-- AuthorizationReport
   Report <|-- ArtifactCheckReport
-  Report <|-- WorkspaceCheckReport
-  Report <|-- ConfigurationCheckReport
   Report <|-- WorkflowInstructionsReport
   Report <|-- WorkflowSkillsReport
   Report <|-- StepInstructionsReport
@@ -598,7 +519,7 @@ package "CD - Harness source classes (src/)" <<Frame>> {
     One service per harness function (1:1:1 with commands),
     grouped in subpackages by family - session_registration /
     step_resolution / model_resolution / checking /
-    context_resolution / hooks - and each result dataclass is homed in
+    context_resolution - and each result dataclass is homed in
     the subpackage of the classes returning it, exclusively.
     Dependencies are constructor-injected private attributes;
     method names are verb + subject; commands render the typed

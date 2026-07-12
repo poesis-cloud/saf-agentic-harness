@@ -1,0 +1,197 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://safe/harness/adapters/vscode-github-copilot-chat/contracts/hook-stdout/v1",
+    "title": "vscode-github-copilot-chat hook stdout contract",
+    "description": "Seam 4 of the adapter's invocation plumbing: the host decision JSON the harness hook command prints on stdout (exit 0) for VS Code's hook engine to honor. Exit 2 (stderr to model, action blocked) remains only the hard-failure fallback; every deliberate decision uses these shapes. Empty stdout on exit 0 is a valid passthrough (no decision, no context) and is NOT governed by this contract. Grounded in extensions/copilot/src/platform/chat/common/chatHookService.ts (per-event outputs) and .../extension/chat/vscode-node/chatHookService.ts (collapsing, hookEventName compatibility) in microsoft/vscode.",
+    "type": "object",
+    "properties": {
+        "continue": {
+            "type": "boolean",
+            "description": "Common host field: plain success/continue signal."
+        },
+        "stopReason": {
+            "type": "string",
+            "description": "Common host field: short-circuits remaining hooks of the same event. The adapter never sets it (single registration per event)."
+        },
+        "systemMessage": {
+            "type": "string",
+            "description": "Common host field: user-visible warning. The adapter's harness-error reporting surface on inject-only boundaries (H0, H1)."
+        }
+    },
+    "oneOf": [
+        {
+            "$ref": "#/$defs/promptSubmitDecision"
+        },
+        {
+            "$ref": "#/$defs/subagentStartDecision"
+        },
+        {
+            "$ref": "#/$defs/preToolUseDecision"
+        },
+        {
+            "$ref": "#/$defs/postToolUseDecision"
+        },
+        {
+            "$ref": "#/$defs/plainCommon"
+        }
+    ],
+    "$defs": {
+        "plainCommon": {
+            "description": "Common-fields-only output — H5/H6 valid/pass results, H0/H1 harness-error reporting (systemMessage), telemetry acknowledgments.",
+            "type": "object",
+            "properties": {
+                "continue": {
+                    "type": "boolean"
+                },
+                "systemMessage": {
+                    "type": "string"
+                }
+            },
+            "not": {
+                "anyOf": [
+                    {
+                        "required": [
+                            "hookSpecificOutput"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "decision"
+                        ]
+                    }
+                ]
+            }
+        },
+        "promptSubmitDecision": {
+            "description": "H0 out — session-started context injection. The adapter never uses UserPromptSubmit's decision:block (this boundary must not veto the user's message).",
+            "type": "object",
+            "required": [
+                "hookSpecificOutput"
+            ],
+            "properties": {
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": [
+                        "hookEventName",
+                        "additionalContext"
+                    ],
+                    "properties": {
+                        "hookEventName": {
+                            "const": "UserPromptSubmit"
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "description": "The rendered workflow context: inlined instruction contents + skill load directives, built from the WorkflowInstructionsReport/WorkflowSkillsReport per H0's output construction. Injected as plain prompt text into the current request only."
+                        }
+                    }
+                }
+            }
+        },
+        "subagentStartDecision": {
+            "description": "H1 out — step-started context injection.",
+            "type": "object",
+            "required": [
+                "hookSpecificOutput"
+            ],
+            "properties": {
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": [
+                        "hookEventName",
+                        "additionalContext"
+                    ],
+                    "properties": {
+                        "hookEventName": {
+                            "const": "SubagentStart"
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "description": "The rendered step context: inlined instruction contents + skill load directives, built from the StepInstructionsReport/StepSkillsReport per H1's output construction. Rendered into the subagent's first user message, this request only."
+                        }
+                    }
+                }
+            }
+        },
+        "preToolUseDecision": {
+            "description": "H2/H3/H4 out — permission decision (deny maps any non-pass/allowed harness outcome, including harness errors: deny-by-default) and/or updatedInput (H4's attribution stamp: the FULL rewritten tool_input, schema-validated by the host).",
+            "type": "object",
+            "required": [
+                "hookSpecificOutput"
+            ],
+            "properties": {
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": [
+                        "hookEventName"
+                    ],
+                    "anyOf": [
+                        {
+                            "required": [
+                                "permissionDecision"
+                            ]
+                        },
+                        {
+                            "required": [
+                                "updatedInput"
+                            ]
+                        }
+                    ],
+                    "properties": {
+                        "hookEventName": {
+                            "const": "PreToolUse"
+                        },
+                        "permissionDecision": {
+                            "type": "string",
+                            "enum": [
+                                "allow",
+                                "deny"
+                            ],
+                            "description": "The host also accepts 'ask'; the adapter never emits it — the harness decides, it does not defer to the user mid-boundary."
+                        },
+                        "permissionDecisionReason": {
+                            "type": "string",
+                            "description": "On deny: the serialized report content (condition checks with failure messages / authorization failureMessage / harness error detail). Relayed to the model."
+                        },
+                        "updatedInput": {
+                            "type": "object",
+                            "description": "H4 only: the full rewritten tool_input carrying the adapter-stamped --session-id. Never a patch."
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "description": "Appended to the tool result as a <PreToolUse-context> tag."
+                        }
+                    }
+                }
+            }
+        },
+        "postToolUseDecision": {
+            "description": "H5/H6 out — negative outcomes only (reverted write / failed postconditions / harness error). Positive outcomes use plainCommon.",
+            "type": "object",
+            "required": [
+                "decision",
+                "reason"
+            ],
+            "properties": {
+                "decision": {
+                    "const": "block"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "H5: artifactCheck.failureMessage + revert record, verbatim. H6: serialized conditionChecks. Fed back to the model."
+                },
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "properties": {
+                        "hookEventName": {
+                            "const": "PostToolUse"
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "description": "Appended to the tool result as a <PostToolUse-context> tag (e.g. the retry/re-resolution directive)."
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

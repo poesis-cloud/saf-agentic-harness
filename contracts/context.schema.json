@@ -36,9 +36,7 @@
         "resolve-step-skills",
         "check-step-authorization",
         "check-step-artifact",
-        "check-step-postconditions",
-        "check-workspace",
-        "check-configuration"
+        "check-step-postconditions"
       ],
       "description": "The harness function that produced this report."
     },

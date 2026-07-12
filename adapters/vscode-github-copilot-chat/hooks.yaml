@@ -1,48 +1,60 @@
-# GitHub Copilot CLI hook registration (env-specific) — the source of truth in YAML.
-# Each host lifecycle event funnels through the harness via the shared adapters/dispatch.sh. The
-# host (Copilot CLI) reads JSON at .copilot/hooks.json, so `make install-copilot-hooks` renders this
-# map to that JSON. The harness is the single source of truth; exit 2 from preToolUse/stop blocks
-# the action.
+# VS Code GitHub Copilot Chat hook registration (env-specific) — the source of truth in YAML.
+# Rendered to ONE workspace file, .github/hooks/safe-harness.json (the host collects every
+# .github/hooks/*.json). {{FRAMEWORK_DIR}} is substituted with the absolute framework root at
+# render time — the host resolves a hook command's cwd against $HOME by default, so every entry
+# MUST pin cwd. Event names are the host's PascalCase Agent-hooks vocabulary (8 events; no
+# native SessionEnd). The host has NO per-tool matcher: PreToolUse/PostToolUse fire for every
+# tool call and the harness classifies by tool_name via tools.yaml. The canonical control
+# surface is structured stdout JSON on exit 0 (permissionDecision / decision:block /
+# additionalContext / updatedInput); exit 2 is only the hard-failure fallback.
+#
+# NOT here: the session-started boundary (H0) is an AGENT-SCOPED UserPromptSubmit hook,
+# rendered into each framework orchestrator's .agent.md frontmatter with its own slug as the
+# trailing dispatch argument (top-level payloads never name the active agent — see def/spec.md
+# H0 + I1/I2). Full per-hook specs: def/spec.md.
 hooks:
-  sessionStart:
+  SubagentStart:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh sessionStart github-copilot,
+        command: harness/adapters/dispatch.sh SubagentStart vscode-github-copilot-chat,
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 60,
       },
     ]
-  userPromptSubmit:
+  PreToolUse:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh userPromptSubmit github-copilot,
+        command: harness/adapters/dispatch.sh PreToolUse vscode-github-copilot-chat,
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 60,
       },
     ]
-  preToolUse:
+  PostToolUse:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh preToolUse github-copilot,
+        command: harness/adapters/dispatch.sh PostToolUse vscode-github-copilot-chat,
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 60,
       },
     ]
-  postToolUse:
+  SubagentStop:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh postToolUse github-copilot,
+        command: harness/adapters/dispatch.sh SubagentStop vscode-github-copilot-chat,
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 10,
       },
     ]
-  stop:
+  Stop:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh stop github-copilot,
-      },
-    ]
-  sessionEnd:
-    [
-      {
-        type: command,
-        command: harness/adapters/dispatch.sh sessionEnd github-copilot,
+        command: harness/adapters/dispatch.sh Stop vscode-github-copilot-chat,
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 10,
       },
     ]

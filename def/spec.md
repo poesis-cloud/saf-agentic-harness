@@ -4,8 +4,8 @@ The harness is the deterministic execution core of an agentic framework. It owns
 
 - resolution of step, workflow, and model,
 - checking of step's conditions, authorization, and artifacts,
-- resolution of agent's instructions and skills — the context injected into sessions
-  at session and step start,
+- resolution of agent's instructions and skills — the context the host adapter injects
+  into sessions,
 - logging of all that.
 
 Agents stay limited to the irreducible work: generating content, judging within a step, and actuating host tools.
@@ -17,8 +17,7 @@ The harness is methodology-agnostic and host-agnostic: it knows nothing of SAFe,
 other methodology, and nothing of GitHub Copilot, VS Code, or any other host. It consumes generic
 workflow definitions, artifact schemas, an ACL, and a model catalog supplied by the framework
 that embeds it. Methodology-specific concepts live in the framework's skills, artifact schemas,
-and workflow configs; host-specific concepts live entirely outside this specification — this
-document is fully agnostic to how it is invoked and never needs to describe that mechanism.
+and workflow configs; host-specific concepts live in the adapter under `harness/adapters/<env>/`.
 
 This document is the canonical harness specification: **the functions section is the functional
 contract** (it changes only by explicit design decision, never by refactoring), and the design
@@ -46,8 +45,8 @@ and implementation parts prescribe its realization.
     configuration and workspace validity are enforced without an exposed function.
   - [General invariants](#general-invariants) — C0–C7: workspace state definition, assertion
   scope, agnosticism, schema binding, workspace validity, framework-agent scope.
-- [Design](#design) — trigger planes, boundary normalization, source layout, class design,
-  configuration plane, workspace Git plane, logging.
+- [Design](#design) — trigger planes, hook event normalization, source layout, class design,
+  hook adapter layout, configuration plane, workspace Git plane, logging.
 - [Development](#development) — Python conventions, SOLID, TDD, unit and functional
   testing, installation, and the validation surface.
 
@@ -84,17 +83,17 @@ and implementation parts prescribe its realization.
   artifacts: agents never write logs, and no step produces one.
 - **Session** — the harness's unit of execution identity and log ownership: a bounded span of
   work, opened at the session-started boundary and registered by function 0 under a `sessionId`
-  that names it for the life of its log. A session is performed by exactly one framework
-  **agent** — the orchestrator (driving a workflow) or a dispatched subagent (acting a step) —
-  fixed for the session's entire lifetime: the harness registers agent sessions, nothing else.
-  An orchestrator session spans
+  that names it for the life of its log. A session is performed by exactly one **actor** —
+  `agent` (a framework agent dispatched to act), `human` (a person working a task), or `system`
+  (an automated job) — fixed for the session's entire lifetime. An orchestrator session spans
   many workflow instances over its lifetime; a step session IS its step (1 step = 1 agent = 1
   session = 1 artifact). A session's `sessionId` is always minted or observed by the mechanism
   surrounding its opening, never self-reported by the acting agent, so that every session's
   identity is independently verifiable at the moment it opens.
 - **parentSessionId** — links a session to the session whose action opened it, forming a
-  parent chain of arbitrary depth: an orchestrator session opens a step session at dispatch, or
-  a session opens a nested session. A session without a `parentSessionId` is a root — the
+  parent chain of arbitrary depth, origin-agnostic: any actor kind may open a session for any
+  other (an orchestrator session opens a step session at dispatch; a session opens a nested
+  session; a job opens a chained job). A session without a `parentSessionId` is a root — the
   first session of its lineage.
 - **Orchestrator** — the orchestrator agent a workflow declares to drive its instances. Its
   session receives its workflow instructions — selection and return-handling (function 1) —
@@ -151,16 +150,18 @@ point; its input is the function's JSON `in` object:
 Every session-bound function's `in` carries the session attribution fields directly:
 `sessionId` and nullable `parentSessionId`. Function-specific fields live
 beside them in the same object (for example `workflowSlug` for function 3 or `artifactPath`
-for functions 8–9). Whatever surrounds each invocation — a hook mechanism — supplies
-the session fields; a raw agent-authored value is not trusted. Function 0 is the bootstrap
-exception: its `in` always carries the framework agent name as a required `agent` slug,
-because no registration exists yet and the session record is the only place to attach that
-identity — the harness registers agent sessions: harnessing agents is what this function, and
-the harness itself, is for.
-Every function is session-bound: there is no session-less invocation.
+for functions 8–9). The invocation surface supplies the session fields (hook adapter, a
+trusted adapter-mediated surface with verifiable session attribution, a bash wrapper for a
+human terminal session, or the CI platform's ambient run id for a system session); a raw
+agent-authored value is not trusted. Function 0 is the bootstrap exception: it may also carry
+the framework agent name when the surrounding mechanism is registering a framework-agent
+session, because no registration exists yet and the session record is the place to attach that
+identity. Every function is session-bound
+— a human or system session serves any function like an agent session does, and journals the
+same way.
 
 Every `out` object is a concrete **Report** object: the exact object returned by the service,
-rendered by the command, and persisted byte-identically as the
+rendered by the command, forwarded by the hook adapter, and persisted byte-identically as the
 log entry's `report`. Reports share the `context` object (`function`, `sessionId`, nullable
 `parentSessionId`, nullable `workflowInstanceId` — the exact invocation context the log entry
 persists) and the `outcome` object (`status`, plus the `error` detail — required on error
@@ -180,8 +181,8 @@ them. Shared contracts live beside them:
 | 0 | [`register-session`](#0-register-session) | Which framework-agent session just opened, under which parent session — the registration every later entry's session ids trace back to? | session-started / step-started — every framework-agent session, always first |
 | 1 | [`resolve-workflow-instructions`](#1-resolve-workflow-instructions) | Which workflow-context guidance does the orchestrator's session load? | session-started |
 | 2 | [`resolve-workflow-skills`](#2-resolve-workflow-skills) | Which skills does the orchestrator's session load? | session-started |
-| 3 | [`resolve-step`](#3-resolve-step) | What is the next eligible step of this workflow instance, with its full step resolution — or is there no next step to resolve? | mediated agent invocation — on assent, and after each step's outcome journals |
-| 4 | [`resolve-step-model`](#4-resolve-step-model) | Which model profile serves this step's dispatch? | mediated agent invocation — between resolution and dispatch |
+| 3 | [`resolve-step`](#3-resolve-step) | What is the next eligible step of this workflow instance, with its full step resolution — or is there no next step to resolve? | adapter-mediated agent invocation — on assent, and after each step's outcome journals |
+| 4 | [`resolve-step-model`](#4-resolve-step-model) | Which model profile serves this step's dispatch? | adapter-mediated agent invocation — between resolution and dispatch |
 | 5 | [`check-step-preconditions`](#5-check-step-preconditions) | May this step start? | step-starting |
 | 6 | [`resolve-step-instructions`](#6-resolve-step-instructions) | Which behavioral guidance does this step's session load? | step-started |
 | 7 | [`resolve-step-skills`](#7-resolve-step-skills) | Which skills does this step's session load? | step-started |
@@ -189,21 +190,21 @@ them. Shared contracts live beside them:
 | 9 | [`check-step-artifact`](#9-check-step-artifact) | Is the step's written artifact schema-valid? | write-ended |
 | 10 | [`check-step-postconditions`](#10-check-step-postconditions) | Did this step deliver? | step-ended |
 
-The `When` values are the harness's canonical **boundaries** — abstract lifecycle trigger
-points — or the non-hook invocation surface: host event names never appear in the
-functional contract (C4); how host events normalize to boundaries is entirely outside this
-specification's concern, per [Boundary Normalization](#boundary-normalization).
+The `When` values are the harness's canonical **boundaries** (realized by the `Boundary` enum
+in the adapter — the component's hook plane) or the non-hook invocation surface: host event names never appear in the
+functional contract (C4) — the mapping from host events to boundaries is the adapter's job,
+per [Boundary Normalization](#boundary-normalization).
 
 Function 0 is **session-scoped**: triggered at every session start — orchestrator and step
 sessions alike — strictly before any other function of that session; it registers the
 session's identity and creates its log. Functions 1–2 **resolve the
 orchestrator's workflow context** at its session start — selection and return-handling
-instructions, procedure skills — which get injected at session open. Functions 3–4 are
+instructions, procedure skills — which the adapter injects. Functions 3–4 are
 **resolution-scoped**: pure functions over
 the instance view of the logs plus validated configuration; they read no artifacts. Functions
 5–10 are **step-scoped**, in step lifecycle order — 1 step = 1 agent = 1 session = 1 artifact:
-5 gates the dispatch, 6–7 resolve the step's declared context at its session start (injected
-there too), 8–9 guard
+5 gates the dispatch, 6–7 resolve the step's declared context at its session start (the
+adapter injects it), 8–9 guard
 every write as it lands, 10 evaluates delivery against the state the step left. There is no
 globally-scoped check function: configuration and workspace validity are internal enforcement
 (see [Internal validation](#internal-validation--not-functions)).
@@ -221,24 +222,23 @@ function at that session's level. It registers the session's identity — the
 `sessionId` and, for a dispatched (subagent) session, its `parentSessionId` — and creates the
 session's log file with this registration as its first entry: the entry every later entry's
 session ids trace back to. The harness stays agnostic about how the session id was sourced;
-the surrounding mechanism is responsible for observing or minting it before invocation. The
-caller always attaches the session's framework-agent identity as a required `agent` slug — the
-harness registers agent sessions: it resolves, checks, and records for the framework's agents.
+the surrounding mechanism is responsible for observing or minting it before invocation. When
+the registered session corresponds to a framework agent, the caller may also attach that
+framework-agent identity as `agent`.
 
 No agent ever reports its own session identity: the id is always observed or minted by the
-surrounding mechanism, never accepted as a raw
+surrounding mechanism (adapter, bash wrapper, CI platform), never accepted as a raw
 agent-authored argument.
 
 **Interface**
 
 - **In** — the session ids: `sessionId` (this session) and `parentSessionId` (the session that
-  opened this one — nullable: a dispatching agent session, or `null` for a root session).
-  `agent` is **required**: the framework-agent identity — the harness
-  registers agent sessions, so every invocation names one.
+  opened this one — nullable, any origin: a dispatching agent session, a wrapped parent shell,
+  a chaining CI job). `agent` is optional session metadata and is present when the registered
+  session corresponds to a framework agent.
 - **Out** — `SessionRegistrationReport`: the `session` object.
-- **Caller usage** — never called by an agent's own action; called by whatever surrounds the
-  session's opening (a hook mechanism). Later
-  mediated agent invocations of the same
+- **Caller usage** — never called by an agent's own action; called by the adapter, the bash
+  wrapper, or the CI step wrapper. Later adapter-mediated agent invocations of the same
   session are attributed to it per the
   session-attribution rule (see [Invocation surfaces](#invocation-surfaces-one-command-system)
   and [Logging](#logging)).
@@ -268,17 +268,16 @@ Contract schemas — [harness/contracts/api/register-session.input.schema.json](
 - The surrounding mechanism has observed or minted a `sessionId` and, when applicable, a
   `parentSessionId`, and normalized any host-sourced ids to a safe slug — the id becomes a log
   filename (see [Logging](#logging)).
-- `agent` resolves to a framework agent identity (C7) — a caller with no genuine
-  framework-agent identity to supply simply names no real agent, so the session passes
-  through untouched and unregistered: the harness registers agent sessions, nothing else.
-  This holds without an
+- When `agent` is present, it resolves to a framework agent identity (C7) — foreign,
+  non-framework-agent sessions pass through untouched and unregistered. This holds without an
   explicit access-control-list lookup at this function: for a root session (no parent) the
-  caller's own scoping already guarantees it (an agent-scoped trigger fires only for a genuine
+  caller's own scoping already guarantees it (an agent-scoped hook fires only for a genuine
   framework orchestrator); for a step session (parent present) it is a consequence of the
   step-resolution correlation this function also validates (function 3 only ever resolves
   configured, ACL-validated workflow actors, so a non-framework `agent` simply finds no
   correlation to complete).
-- Trigger — the session-started boundary for hook-opened sessions, before
+- Trigger — the session-started boundary (hook plane) for adapter-opened sessions; the first
+  harness command of a wrapped shell; the first harness command of a CI job — before
   functions 1–2 (orchestrator session) or 6–7 (step session) run at the
   same boundary, where applicable.
 
@@ -294,21 +293,21 @@ Contract schemas — [harness/contracts/api/register-session.input.schema.json](
 1. Registration precedes everything: no function logs at a session's level before this one —
    physically enforced, since function 0 creates the very file the others append to.
 2. Session ids are observed or minted by the surrounding mechanism — host event payload and
-  normalization — never minted
+  adapter normalization, the bash wrapper, or the CI platform's ambient run id — never minted
   by the harness, never self-reported by an agent.
 3. The parent chain is unbounded: each registration records one parent, so any nesting depth
    of subagent dispatches reconstructs by walking registrations parent-by-parent — the
-   envelope never caps the hierarchy at two levels. Any dispatched subagent may record a
-   parent, at any nesting depth.
+   envelope never caps the hierarchy at two levels. Any origin may record a parent (a
+   dispatched subagent, a shell opened from a wrapped shell, a chained CI job).
 4. Registration is idempotent per session: re-delivery of the same session-start signal (host
-   resume, duplicate hook) appends no second
+   resume, duplicate hook, a wrapped shell re-invoking the wrapper) appends no second
    registration for an already-registered `sessionId`.
 
 ### 1. resolve-workflow-instructions
 
 Which workflow-context guidance does the orchestrator's session load? Deterministic
 resolution, at the session-started boundary, of the orchestrator's workflow instructions —
-injected into the session at open: one named instruction per orchestrator
+the adapter injects what this function resolves: one named instruction per orchestrator
 duty, so every selection and every harness return meets an instructed reaction, never an
 improvised one:
 
@@ -330,7 +329,7 @@ improvised one:
 - **In** — `sessionId` + nullable `parentSessionId`. The orchestrator is resolved from
   the registered session; the instruction set is keyed by that orchestrator.
 - **Out** — `WorkflowInstructionsReport`: the instruction refs.
-- **Caller usage** — the refs get rendered into the host's session context at open; the
+- **Caller usage** — the adapter renders the refs into the host's session context; the
   orchestrator starts its conversation already knowing its workflows and how to handle every
   harness return.
 
@@ -398,7 +397,7 @@ and one procedure skill per workflow it facilitates.
 - **In** — `sessionId` + nullable `parentSessionId`. The orchestrator is resolved from
   the registered session.
 - **Out** — `WorkflowSkillsReport`: the skill ids to load.
-- **Caller usage** — the skills get loaded into the session at open; the orchestrator's toolbox
+- **Caller usage** — the adapter loads the skills into the session; the orchestrator's toolbox
   is its orchestrator role's toolbox, by construction.
 
 Example:
@@ -527,7 +526,7 @@ Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harn
   acyclic, every step routes.
 - The user assented to the workflow (per the selection instruction). Instance continuation or
   opening is deduced (In, above) — no id is ever given.
-- Trigger — mediated agent invocation, each time the orchestrator asks "what's
+- Trigger — adapter-mediated agent invocation, each time the orchestrator asks "what's
   next?" on a driven workflow: after starting it on user assent, and after each step's
   outcome journals — including after a failed outcome, where the same call re-resolves the
   failed step. The invocation is session-attributed (see [Logging](#logging)).
@@ -585,10 +584,9 @@ Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harn
 ### 4. resolve-step-model
 
 The model resolution function: which model profile serves this step's dispatch. A
-**standalone, mediated agent invocation between resolution and dispatch** — never embedded in
+**standalone, adapter-mediated agent invocation between resolution and dispatch** — never embedded in
 function 3: the two functions are fully independent, and whoever needs both composes them
-outside the harness (the orchestrator per its instructions, or whatever mediates the invocation
-surface, on one hook).
+outside the harness (the orchestrator per its instructions, or the adapter on one hook).
 Resolved from two static configuration layers, deterministically, with no artifact reads and
 no per-instance estimation; the harness deduces WHICH step from its own logs — the agent
 asks, never describes.
@@ -602,8 +600,8 @@ asks, never describes.
   its weighted `capabilities` from the workflow configuration: an agent never supplies
   weights (self-reporting).
 - **Out** — `ModelProfileReport`: the canonical model **profile**
-  `{slug, score, costRank, reason}` — a catalog profile, not a host model id: a host-specific
-  binding maps it to the host-specific id at dispatch. It always returns a profile
+  `{slug, score, costRank, reason}` — a catalog profile, not a host model id: the adapter's
+  `models.yaml` maps it to the host-specific id at dispatch. It always returns a profile
   (invariant 4).
 - **Caller usage** — the orchestrator calls it between function 3's resolution and the
   dispatch (per its `step-resolution-handling` instruction) and relays the profile into the
@@ -637,7 +635,7 @@ Contract schemas — [harness/contracts/api/resolve-step-model.input.schema.json
 - The model catalog and the step's capability map are loaded and validated (fail-fast at load).
 - An in-flight step exists in the invoking session: function 3 resolved it and its outcome has
   not journaled yet.
-- Trigger — mediated agent invocation, between resolution and dispatch. The
+- Trigger — adapter-mediated agent invocation, between resolution and dispatch. The
   invocation is session-attributed (see [Logging](#logging)).
 
 **Postconditions**
@@ -777,8 +775,8 @@ Contract schemas — [harness/contracts/api/check-step-preconditions.input.schem
 ### 6. resolve-step-instructions
 
 Which behavioral guidance does this step's session load? Deterministic resolution of the
-step's authored context at the step-started boundary — injected into the session at open:
-1 step = 1 agent = 1 session = 1 artifact — the
+step's authored context at the step-started boundary — the adapter injects what this function
+resolves: 1 step = 1 agent = 1 session = 1 artifact — the
 step's authored constraints
 reach the agent with no discretion of its own.
 
@@ -788,7 +786,7 @@ reach the agent with no discretion of its own.
   resolved from those ids by the hook plane (the unresolved-`step-resolution`-entry correlation
   is normalization's job, not the resolver's).
 - **Out** — `StepInstructionsReport`: the step's declared instruction refs.
-- **Caller usage** — the refs get rendered into the host's session context at open; the agent
+- **Caller usage** — the adapter renders the refs into the host's session context; the agent
   starts its turn already carrying its constraints.
 
 Example:
@@ -857,7 +855,7 @@ Which skills does this step's session load? The same correlation and determinism
 - **In** — `sessionId` + nullable `parentSessionId`. The step is resolved from those
   ids by the hook plane, as in function 6.
 - **Out** — `StepSkillsReport`: the skill ids to load.
-- **Caller usage** — the skills get loaded into the session at open; the agent's toolbox is its
+- **Caller usage** — the adapter loads the skills into the session; the agent's toolbox is its
   step's toolbox, by construction.
 
 Example:
@@ -924,13 +922,13 @@ clean against `HEAD` — the commit gate's precondition (C6).
 **Interface**
 
 - **In** — `sessionId` + nullable `parentSessionId` + the **artifact path**
-  (`artifactPath`) + the write `action` (`create`, `read`, `update`, `delete`), derived from
-  the host write tool. The actor is derived from the registered session, never
+  (`artifactPath`) + the write `action` (`create`, `read`, `update`, `delete`), derived by the
+  adapter from the host write tool. The actor is derived from the registered session, never
   supplied by the agent; the resource — the artifact's schema slug — is derived from the path
   (invariant 2).
 - **Out** — `AuthorizationReport`: allow, or deny with an `authorization.failureMessage`
   naming the missing privilege.
-- **Caller usage** — the live verdict is enforced at the write boundary (a denied tool call never
+- **Caller usage** — the hook adapter enforces the live verdict (a denied tool call never
   executes); the orchestrator then routes the change through a privileged author and re-runs.
 
 Example:
@@ -967,7 +965,7 @@ Contract schemas — [harness/contracts/api/check-step-authorization.input.schem
 **Preconditions**
 
 - The ACL, workspace layout, and the framework's artifact schemas are loaded (path → resource
-  resolution needs them), and the host write tool has been mapped to a write `action`.
+  resolution needs them), and the adapter has mapped the host write tool to a write `action`.
 - Trigger — the write-starting boundary, once per pending write.
 
 **Postconditions**
@@ -1153,9 +1151,10 @@ the semantic rules JSON Schema cannot express (non-empty steps, unique step slug
 positive capability weight per step, an acyclic advisory workflow graph), the
 cross-configuration coherence rules (workflow actors exist in the ACL, capability tags belong
 to the model catalog's vocabulary, step `artifact` slugs resolve to artifact schemas,
-instruction/skill refs resolve to files in the framework layout), and the layout environment
-(every required variable present and pointing to an existing directory).
-`Application` builds every configuration dataclass at
+instruction/skill refs resolve to files in the framework layout), the layout environment
+(every required variable present and pointing to an existing directory), and the adapter
+bindings (host tool names, write verbs, model id bindings mapping to canonical profiles, the
+adapter's own I/O contracts). `Application` builds every configuration dataclass at
 instantiation, so **every invocation of any function fails fast — with the full reports, as
 domain exceptions at the trigger plane — before any function runs** on an invalid
 configuration. There is no separate check to invoke and therefore nothing that can diverge
@@ -1209,8 +1208,7 @@ pass or fail is based only on persisted workspace state.
 
 The harness is generic: it is not hard-coded to any methodology, host environment, or artifact
 taxonomy. Methodology-specific semantics come from the embedding framework's workflow configs,
-artifact schemas, skills, and templates. Host-specific event mapping is entirely someone else's
-concern, outside the harness's own boundary. The
+artifact schemas, skills, and templates. Host-specific event mapping comes from the adapter. The
 harness only interprets the generic primitives it is given: workflow graphs, conditions,
 artifact schemas, ACL grants, and the model catalog.
 
@@ -1274,55 +1272,93 @@ any other host agent or session pass through untouched and unlogged.
 Every harness function is exposed as a harness command: the Python executable function entry
 point. It accepts one input object (session attribution fields + function-specific fields) and
 returns the function's Report as `out`. Every invocation is session-bound — there is no
-session-less surface, and every session is an `agent`-origin session: the harness registers,
-and journals for, agents — nothing else. The command system is entered through two invocation
-surfaces:
+session-less surface. The command system is entered through three invocation surfaces,
+one per session origin:
 
-- **Hook invocation** — a host event triggers a harness command. Whatever normalizes the host
-  event builds the session attribution fields from the event payload and its own private
-  bookkeeping — never the harness's stores or config; this surface triggers functions 0–2 and
-  5–10 at their natural boundaries.
-- **Mediated agent invocation** — an agent asks through a trusted surface into a harness
-  command, within an already-registered session. This surface is available only where that
-  surface can attach host-observed session attribution outside model-authored arguments. It
-  may serve functions 3–4. A host that cannot prove such attribution MUST NOT expose this
-  surface for session-bound functions.
+- **Hook invocation** — host event → adapter → harness command, for `agent`-origin sessions.
+  The adapter builds the session attribution fields from the host event payload and its own
+  private bookkeeping — never the harness's stores or config; this surface triggers functions
+  0–2 and 5–10 at their natural boundaries.
+- **Adapter-mediated agent invocation** — agent asks through a trusted adapter surface →
+  harness command, within an already-registered `agent`-origin session. This surface is
+  available only for adapters that can attach host-observed session attribution outside
+  model-authored arguments. It may serve functions 3–4. Hosts that cannot prove such
+  attribution MUST NOT expose this surface for session-bound functions.
+- **Direct session invocation** — a human terminal session (`sessionId` minted by a bash
+  wrapper at shell start) or a CI system session (`sessionId` sourced from the platform's
+  ambient run id) → harness command. The wrapper (bash or CI step) calls `register-session`
+  first, then any function under that session's id — any function may in principle run under
+  a human or system session. (The global configuration/workspace checks are NOT served here:
+  they are internal, not functions — see
+  [Internal validation](#internal-validation--not-functions).)
 
 **Session attribution.** Every journaling invocation carries the `sessionId` of the session it
 runs in, and the id always comes from the surrounding mechanism — never self-reported by an
-agent: hook-triggered functions read it from their own event payload; mediated agent
-invocations are attributed by whatever mediates them, but only where that mechanism has a
-verifiable host-observed attribution channel. There is no invocation without a session, and no
-journaling or step-scoped function refuses a correctly-attributed session.
+agent: hook-triggered functions read it from their own event payload (`agent` origin);
+adapter-mediated agent invocations are attributed by the adapter, but only where the adapter has
+a verifiable host-observed attribution mechanism (`agent` origin); a bash wrapper mints it once
+per shell (`human` origin); a CI platform exposes it as an ambient run id (`system` origin).
+There is no invocation without a session, and no journaling or step-scoped function refuses a
+correctly-attributed session — the earlier "session-less" plane is gone: it is replaced by the
+`human` and `system` session origins, both of which journal exactly like `agent` origins.
 
-**Mediated attribution rule.** A trusted mediated-invocation surface is valid only when it can
-populate `sessionId` and `parentSessionId` from a host-observed source that the model
-did not author. Acceptable mechanisms include a per-session process environment or a
-host-native command/tool surface that passes session identity outside the tool arguments
-visible to the agent. A tool-boundary stamp that merely rewrites a model-authored command
-argument is not sufficient. If a host lacks such a mechanism, functions 3–4 are not exposed
-as mediated commands for that host; whatever specifies that host's binding must state that
-limitation.
+**Adapter-mediated attribution rule.** A trusted adapter surface is valid only when the adapter
+can populate `sessionId` and `parentSessionId` from a host-observed source that the model
+did not author. Acceptable mechanisms include a per-session process environment owned by the
+host adapter or a host-native command/tool surface that passes session identity to the adapter
+outside the tool arguments visible to the agent. A tool-boundary stamp that merely rewrites a
+model-authored command argument is not sufficient. If a host lacks such a mechanism, functions
+3–4 are not exposed as adapter-mediated commands for that host; the adapter-specific spec must
+state that limitation. This rule is specific to `agent`-origin sessions: `human` and `system`
+origins have their own sourcing mechanisms (the bash wrapper, the CI platform's ambient run
+id), neither of which is an agent self-report either.
 
-There is no hook logic inside the harness core: the **harness core** (`src/` + the function
-commands) is hook- and host-blind by package graph — it exposes exactly one command per
-function and nothing else, no hook command — so agents invoke the
-same eleven pure commands directly. Whatever normalizes host events into boundaries and
-session attribution, and however many hosts it serves, is entirely outside this
-specification's concern: the harness core's only obligation is to expose its eleven commands
-under their JSON contracts and trust nothing but what those contracts carry — this document
-never needs to reference how, or by what, a given host is bound.
+There is no hook logic outside the harness component — and none inside the harness core. The
+**adapter plane** (`harness/adapters/`) mediates all host hook events, so the host never gets a
+second source of truth: a generic, host-agnostic **adapter** (`adapters/shared/`) is
+parameterized by each host's **binding** (declarative YAML + the host's stdin/stdout contracts +
+a thin envelope-parse/field-mapping edge — never policy: a second host adds binding data, not
+logic). The **harness core** (`src/` + the function commands) is hook- and host-blind by package
+graph: it exposes exactly one command per function and nothing else — no hook command — so
+agents, the bash wrapper, and CI invoke the same eleven pure commands directly.
+
+**The adapter depends on exactly one thing: the command API.** Basic layering — an
+adapter adapts a host to a system's public surface, never reaches into the system's internals.
+Here that surface is the eleven function commands; the adapter has NO dependency on
+`services`, `stores`, or `config` (no `AccessControlList`, no `SessionLogStore`, no
+`WorkflowCatalog`, not even its own binding through `ConfigLoader`). Two consequences:
+
+- **Session identification stays the adapter's job, using only its own tools.** Which raw
+  host fields name a session is host-specific — squarely adapter work — but deriving or
+  tracking a session id uses only host-observed event data (e.g. the event's own
+  `timestamp`, already in the stdin envelope) and the adapter's own private bookkeeping (a
+  small record it owns, mapping a raw host id to the session id it is currently tracking) —
+  never the harness's session log.
+- **Framework-agent gating (C7) needs no `AccessControlList` dependency anywhere the adapter
+  reaches.** It already holds for free: structurally for an agent-scoped registration
+  (only a real framework orchestrator can ever trigger it), and via the existing
+  step-resolution / in-flight-step correlation for a dispatched one (only a configured,
+  ACL-validated workflow actor is ever resolved there in the first place — see function 0's
+  and functions 5/10's own preconditions). The adapter mechanically invokes the boundary's
+  command(s) (classified from its own binding data, `tools.yaml`) and forwards the raw host
+  fields it observed; the invoked service decides internally whether the event is in scope
+  and returns a generic "not applicable" outcome when it is not — which the adapter's
+  renderer maps to "pass through" the same way for every function, with no ACL or log
+  knowledge of its own. The one place `AccessControlList` genuinely belongs is
+  `check-step-authorization` (function 8) — a distinct question (privilege/grant checking on
+  a write), not framework-agent membership.
+
+Throughout this spec, “hook plane” names the adapter.
 
 ### Boundary Normalization
 
-Host events are normalized to harness boundaries before any policy is applied, by whatever
-mechanism embeds the harness for a given host. This specification names the boundaries only
-and requires nothing further of that mechanism beyond correct session attribution (above).
-Dispatch tools carry the **step boundary** — the subagent session IS the step,
+Host events are normalized to harness boundaries before any policy is applied. The core harness
+spec names boundaries only; adapter-specific specs bind host event names and host tool classes to
+those boundaries. Dispatch tools carry the **step boundary** — the subagent session IS the step,
 so step pre- and postconditions apply before and after it — while write tools carry the **write
 boundary** (authorization and schema validity, never step conditions).
 
-| Boundary | Structural evidence | Functions |
+| Boundary | Adapter evidence | Functions |
 | --- | --- | --- |
 | session-started | Session-open event with no correlated unresolved `step-resolution` entry | 0 (registration — always first) + 1, 2 |
 | step-starting | Dispatch about to open a step session | 5 (preconditions — THE enforcement point) |
@@ -1331,13 +1367,13 @@ boundary** (authorization and schema validity, never step conditions).
 | write-ended | Write tool has landed a staged write on an artifact path | 9 (schema validity — the commit gate) |
 | step-ended | Dispatch returned after the step session ended | 10 (postconditions — THE evaluation point) |
 
-This keeps the harness env-agnostic: normalizing host-specific event names and tool payloads,
-and deciding which tools are dispatches and which are writes, is entirely someone else's job.
+This keeps the harness env-agnostic: only the adapter maps host-specific event names and tool
+payloads, and only the adapter binding decides which tools are dispatches and which are writes.
 The step-starting and step-ended boundaries occur in the dispatching (orchestrator) session —
 their entries journal to its log; the step session's own log carries its registration (0), its
 context resolutions (6–7), and its write-boundary entries (8–9).
-Observational host events that do not enter one of these boundaries are outside this
-specification's concern, and they are not written to the harness journal.
+Observational host events that do not enter one of these boundaries are adapter telemetry, not
+harness functions, and they are not written to the harness journal.
 
 The boundary names are lifecycle participles precisely to dissolve the step/session clash the
 1 step = 1 session invariant creates: **step-starting** (the dispatch about to open the step —
@@ -1424,6 +1460,14 @@ Four placement rules settle the boundary questions:
   boundary, so `stores/` loads them (`artifact_store/` the artifact schemas, `session_log_store/`
   the log-entry contract) — that is where valid-by-construction (C6) is enforced. Services never
   touch a raw schema: they receive typed configuration views and valid-by-construction entities.
+- **Adapter configuration goes through `config/` like everything else.** The split between
+  framework-supplied configuration (`conf/`, declared by the embedding application) and
+  harness-internal configuration (`harness/adapters/<env>/`, resolved structurally from the
+  harness tree) is a difference of *provenance*, not *mechanism*. One loader discipline parses
+  and contract-validates every configuration file; the config plane keeps the two provenances
+  distinct in its API (`ConfigLoader.load_layout/load_acl/…` for `conf/` and `.env`,
+  `ConfigLoader.load_adapter_binding(env)` for adapters) so
+  neither leaks into the other.
 - **Shared mechanics live in `utils/`.** `config/` and `stores/` both parse files and
   validate instances against JSON Schema contracts, so the mechanical primitives are one shared
   package: the `.env` loader, the safe YAML loader, the JSON / JSONL readers, and the schema
@@ -1432,17 +1476,18 @@ Four placement rules settle the boundary questions:
   strictly domain-free — it knows no artifact, workflow, or ACL, depends on nothing internal,
   and returns plain data; each caller layer turns raw reports into its own typed views or
   entities. Anything with domain meaning belongs to its owning layer, never to `utils/`.
-- **Host-aware code never enters `src/`.** Event classification, session identification,
-  boundary orchestration, and decision rendering are entirely outside this specification's
-  concern — whatever embeds the harness for a given host owns that code, and depends on
-  exactly one thing in the core: the eleven function commands, never `services`, `stores`, or
-  `config`. `src/` is host-blind structurally: nothing in it needs to know that such a thing
-  exists, let alone how it is built.
+- **Host-aware code never enters `src/`, and the adapter never reaches past the command
+  API.** The hook plane — event classification, session identification, boundary
+  orchestration, decision rendering — lives in the adapter's shared code
+  (`harness/adapters/shared/`, see [Hook adapter layout](#hook-adapter-layout)), which depends
+  on exactly one thing in the core: `commands` — never `services`, `stores`, or `config`, and
+  never the reverse. `src/` is host-blind structurally; the adapter is
+  harness-internals-blind structurally — each knows only the other's public seam.
 
 ### Classes
 
 The class diagram [`harness-src-classes.puml`](harness-src-classes.puml) is the
-prescriptive class model of `src/` — **the harness core only**: **1 folder =
+prescriptive class model of `src/` **and the adapter plane** (`adapters/shared/`): **1 folder =
 1 module = 1 package** in the diagram. Classes
 expose their public interface — what other classes call — plus one **private, constructor-
 injected attribute per dependency**, typed after the collaborator class (`-_session_log_store :
@@ -1454,8 +1499,11 @@ where the contract
 lives. External dependencies are drawn: **cel-python** (CEL compilation/evaluation, used by
 `ConditionEvaluator`), **jsonschema** (contract validation, used by `SchemaValidator`), and
 **PyYAML** (safe loading, used by `YamlLoader`) — the harness's only third-party imports. One
-dependency direction, as in the source layout: `commands → services →
-{stores, config}`, with `utils` beneath `stores` and `config`.
+dependency direction, as in the source layout: `adapters/shared → commands → services →
+{stores, config}`, with `utils` beneath `stores` and `config`. The adapter's OWN edge
+stops at `commands` — it never reaches `services`, `stores`, or `config` directly (no
+`AccessControlList`, no `SessionLogStore`, no `ConfigLoader`): basic layering, an adapter
+depends only on the system's public API.
 
 ![Harness source classes diagram](harness-src-classes.png)
 
@@ -1468,10 +1516,9 @@ dependency direction, as in the source layout: `commands → services →
   service(s) as private attributes: parse the function's `in` object, invoke, render the typed
   result to the `out` object. No command composes services: functions 3 and 4 are fully
   independent, and whoever needs both composes them outside the harness core (the
-  orchestrator per its instructions, or whatever mediates a given host's hook events). Commands
-  are hook-
-  and host-blind: any event→boundary→functions orchestration happens entirely outside `src/`,
-  never inside a command.
+  orchestrator per its instructions, or the adapter on one hook). Commands are hook-
+  and host-blind: the event→boundary→functions orchestration is the adapter's (below),
+  never a command's.
 - **`services`** — all harness logic, one service per function, grouped in **subpackages
   by family**, and each result dataclass homed in the subpackage of the classes returning it —
   **exclusively with them**:
@@ -1489,10 +1536,34 @@ dependency direction, as in the source layout: `commands → services →
     sweep is not a checker service: it is store capability (`ArtifactStore.scan_raw_paths` +
     `validate_artifact`), commandless by design (see
     [Internal validation](#internal-validation--not-functions)).
+- **`adapters/shared` — the adapter plane's shared code, OUTSIDE `src/`** — the hook entry
+  point and the only host-aware code in the component, shared by every adapter, depending on
+  EXACTLY ONE thing: the command API (`commands`, and the `Report` types it returns). No
+  `services`, no `stores`, no `config`:
+  - `HookBinding` — the adapter's OWN configuration (host tool names, write verbs, model id
+    bindings), loaded by the adapter's own tools — never through `ConfigLoader`;
+  - `HookClassifier` — host event + tool name → canonical `Boundary`, using only `HookBinding`;
+  - `SessionTracker` — the adapter's OWN small private record (not the harness log): written
+    at registration (H0/H1) to remember which minted session id is current for a raw host id,
+    read by every later hook to resolve it back;
+  - `Adapter` — the orchestrator: classifies the event (`HookClassifier`), builds each
+    command's session fields from host-observed data plus `SessionTracker`, then composes the
+    function commands per boundary — registration always first, one invocation per artifact
+    path (fan-out), abort-on-failure — no ACL or log access, no domain policy of its own;
+  - `HookRenderer` — maps the returned reports to the host decision format, governed by the
+    adapter's own stdout contract (structured JSON per event; exit 2 only as hard-failure
+    fallback); a report's generic "not applicable" outcome (C7 gate or correlation, decided
+    inside the invoked command) renders uniformly as pass-through.
+
+  Dependency direction: `adapters/shared → commands` — the harness application's public API,
+  and nothing else; never `services`, `stores`, or `config`, never the reverse. Per-host
+  binding folders (`adapters/<env>/`) contribute data, the two host I/O contracts, and at most
+  a thin contract-governed envelope-parse/field-mapping edge — never policy.
 
   **Report identity rule:** every service returns a concrete `Report` subtype; every command
-  returns that same report object as its `out`; and the log entry stores that exact object
-  under `report`. `outcome` and `context` live on the `Report` base (homed in
+  returns that same report object as its `out`; every hook returns or forwards that same
+  report object in the host format; and the log entry stores that exact object under
+  `report`. `outcome` and `context` live on the `Report` base (homed in
   `stores/session_log_store/`, alongside `LogEntry`), while each subtype adds its
   function-owned specific property. The log is therefore not a second projection of the
   result — it is the persisted report itself, wrapped only by the entry's own `timestamp`.
@@ -1529,8 +1600,8 @@ dependency direction, as in the source layout: `commands → services →
   Frozen dataclasses throughout: public typed attributes, no getters/setters.
 - **`config`** — `ConfigLoader` plus the configuration dataclasses it constructs, homed
   together: `FrameworkLayout`, `AccessControlList`, `ModelProfiles`/`ModelProfile`,
-  `WorkspaceLayout`/`ArtifactNode`/`FolderNode`, `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`.
-  Each `load_*` method performs parse + contract-validation + semantic rules
+  `WorkspaceLayout`/`ArtifactNode`/`FolderNode`, `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`,
+  `AdapterBinding`. Each `load_*` method performs parse + contract-validation + semantic rules
   - dataclass construction as ONE act; there is **no aggregate `FrameworkConfig`**: each
   service receives exactly the dataclasses it needs.
 - **`utils`** — the domain-free mechanics, in two layers. LOADERS — one per format:
@@ -1540,6 +1611,61 @@ dependency direction, as in the source layout: `commands → services →
   `append_entry` — a store, not a reader, because it persists too). Plain data
   in, plain
   data out.
+
+### Hook adapter layout
+
+The adapter plane has three parts, all under `harness/adapters/`: the shared dispatch shim,
+the shared **adapter code** (all host-aware code, depending on nothing but the command
+API — see [Classes](#classes)), and one binding folder per host (registration + tool binding
+data, the host I/O contracts, and at most a thin contract-governed edge). See
+`harness/adapters/README.md` for the full adapter contract.
+
+`dispatch.sh` is intentionally thin and env-agnostic: it takes the event name, the environment
+id, and an optional scoping agent slug as arguments and forwards the raw event payload to the
+adapter's hook entry — `adapters/shared hook --event <name> --env <env> [--agent <slug>]` —
+exiting with the adapter's result. Each adapter's `hooks.yaml` supplies its own
+environment id as the second argument.
+
+Session identity is an adapter obligation for `agent`-origin sessions: the binding names the
+payload keys where the host carries its session ids (`hostSessionKeys`,
+`hostParentSessionKeys` in `tools.yaml`); the adapter extracts them, sanitizes each to a safe
+slug (`[a-z0-9-]` — the id becomes a log filename), and attributes adapter-mediated agent
+invocations to their session only when that adapter has a verifiable host-observed attribution
+mechanism per [Invocation surfaces](#invocation-surfaces-one-command-system) — never from a
+model-authored argument. `human`- and `system`-origin sessions source their `sessionId` outside
+this adapter binding entirely (the bash wrapper; the CI platform's ambient run id).
+
+```text
+.env                  # framework layout environment: where skills, agents, schemas, templates, workspace live
+conf/                 # env-agnostic framework configuration (owned by the embedding framework)
+  access-control-list.conf.yaml  # framework-defined roles -> agents (from agents/) mapping; privileges are artifact-kind + action
+  workspace.conf.yaml            # workspace layout blueprint (artifact/folder nodes: slug -> artifact/template/cardinality)
+  model-profiles.conf.yaml       # canonical model catalog: capabilities + costRank per model
+  workflows/                     # *.workflow.conf.yaml — steps declare actor, artifact, weighted capabilities, and conditions
+harness/
+  adapters/
+    dispatch.sh       # shared, generic dispatcher: stdin JSON -> the adapter's hook entry
+    shared/           # shared, host-agnostic adapter code — the component's ONLY host-aware code:
+                      # Adapter (orchestration: sequencing, per-path fan-out, abort),
+                      # HookClassifier (+ Boundary), SessionTracker, HookRenderer
+    vscode-github-copilot-chat/
+      hooks.yaml      # YAML source rendered to .github/hooks/safe-harness.json (+ agent-scoped
+                      # UserPromptSubmit blocks in each orchestrator's .agent.md frontmatter)
+      tools.yaml      # host tool names, write verbs, payload keys (adapter binding)
+      models.yaml     # host model id bindings to canonical profiles
+      contracts/      # hook-stdin.schema.json / hook-stdout.schema.json — the host I/O seams
+  contracts/          # generic harness schemas: artifact, log-entry, report, context, actions,
+                      # slugs.schema.json (every canonical *Slug definition, centralized),
+                      # conf/<name>.conf.schema.json — one contract per configuration file, and
+                      # split api/<function>.input|output.schema.json contracts
+  src/
+    application.py    # the composition root (builds the object graph, dispatches to one command)
+    commands/         # usage entry points: argparse dispatch
+    services/         # domain logic in family subpackages: session_registration/ step_resolution/ model_resolution/ checking/ context_resolution/ (each with its result dataclasses)
+    stores/           # data access in family subpackages: artifact_store/ (ArtifactStore, Artifact, Finding) + session_log_store/ (SessionLogStore, Log, LogEntry, StepRef, Report base, WorkflowInstanceView)
+    config/           # ConfigLoader + the configuration dataclasses (from conf/, .env, adapters)
+    utils/            # domain-free mechanics: .env/YAML/JSON(L) loading, JSON Schema validation
+```
 
 ### Configuration plane
 
@@ -1553,6 +1679,8 @@ beside the `ConfigLoader` that builds it):
 | `conf/model-profiles.conf.yaml` | `conf/framework/model-profiles.conf.schema.json` | `ModelProfiles` |
 | `conf/workspace.conf.yaml` | `conf/framework/workspace.conf.schema.json` | `WorkspaceLayout` |
 | `conf/workflows/*.workflow.conf.yaml` | `conf/framework/workflow.conf.schema.json` | `WorkflowCatalog` / `Workflow` / `Step` |
+| `harness/adapters/<env>/tools.yaml` | `conf/adapters/tools.conf.schema.json` | adapter binding (internal config) |
+| `harness/adapters/<env>/models.yaml` | `conf/adapters/models.conf.schema.json` | model binding (internal config) |
 
 The framework's **layout is environment, not file configuration**: the framework declares WHERE
 its pieces live via environment variables, loaded from a `.env` file at the framework root
@@ -1578,8 +1706,9 @@ WHAT the framework declares (grants, catalogs, workflows) stays in `conf/` files
 schemas.
 
 Two planes, never conflated: the **framework** is the application embedding the harness; the
-**workspace** is the data plane the harness checks. The harness's own contracts are
-harness-owned and resolved structurally from the harness code, never declared in `conf/`.
+**workspace** is the data plane the harness checks. The harness's own contracts and adapters are
+harness-owned and resolved structurally from the harness code — internal configuration goes
+through the same loader discipline, but is never declared in `conf/`.
 
 Parsing and validation are one act: `ConfigLoader` parses the source and validates it against
 the contract in the same step — an unvalidated parse never escapes the config package. Loading a
@@ -1676,7 +1805,7 @@ and owns it in its own I/O contract, inside its report — under ONE shared fiel
 `registered`; 1–2, 4, and 6–7 `resolved`; 3 `step-resolution`/`no-next-step`;
 5 and 10 `pass`/`fail`; 8 `allowed`/`denied`; 9 `valid`/`reverted`; all functions may also
 return `input-error`, `state-error`,
-`configuration-error`, `invocation-error`, or `system-error`. Error outcomes are ordinary outcomes
+`configuration-error`, `adapter-error`, or `system-error`. Error outcomes are ordinary outcomes
 in the same report envelope; they carry the `error` detail object — required on error statuses,
 forbidden on success statuses — rather than using a
 separate error-report type. One field name for uniform handling, function-owned values — no
@@ -1722,8 +1851,8 @@ session logs.
   [The harness functions](#the-harness-functions)) is a hardcoded, static check: for a given
   step, its function invocations MUST appear in that legal order — it validates the `timestamp`-ordered
   sequence, it does not replace it.
-- **Sanitization (a caller obligation)** — `sessionId` becomes a log filename: whatever
-  surrounds an agent session's opening
+- **Sanitization (adapter obligation)** — `sessionId` becomes a log filename regardless of its
+  origin: the adapter (`agent`), the bash wrapper (`human`), or the CI step wrapper (`system`)
   MUST normalize it to a safe slug (`[a-z0-9-]`) before it reaches the harness — a raw id is a
   path-traversal vector.
 
@@ -1770,8 +1899,8 @@ workflow definitions plus current artifacts.
 - **S**ingle responsibility — one reason to change per class; the re-implementation target is a
   1:1 function → service → command alignment (each service realizes exactly one harness
   function).
-- **O**pen/closed — behavior extends through configuration (workflows, catalog, ACL, model
-  catalog), never by modifying the harness core.
+- **O**pen/closed — behavior extends through configuration (workflows, catalog, ACL, adapter
+  bindings), never by modifying the adapter.
 - **L**iskov substitution — every typed view and entity honors its base contract (`Artifact`
   subtypes are substitutable wherever an artifact is read).
 - **I**nterface segregation — small, intent-named service surfaces (`resolve`, `check`,

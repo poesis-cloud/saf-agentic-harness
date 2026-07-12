@@ -21,12 +21,13 @@
         "session": {
           "type": "object",
           "required": [
-            "sessionId"
+            "sessionId",
+            "agent"
           ],
           "properties": {
             "agent": {
               "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
-              "description": "The framework-agent identity, when applicable."
+              "description": "The framework-agent identity. The harness registers agent sessions — this is always present."
             },
             "sessionId": {
               "$ref": "../context.schema.json#/definitions/sessionId",

@@ -225,46 +225,6 @@
       },
       "unevaluatedProperties": false,
       "description": "Log entry for a check-step-postconditions report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
-        },
-        "report": {
-          "$ref": "api/check-workspace.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-workspace report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
-        },
-        "report": {
-          "$ref": "api/check-configuration.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-configuration report."
     }
   ]
 }

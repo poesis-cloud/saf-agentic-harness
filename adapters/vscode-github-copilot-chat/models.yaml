@@ -1,4 +1,4 @@
-# GitHub Copilot CLI / VS Code environment binding — canonical model slug -> host model id map.
+# VS Code GitHub Copilot Chat environment binding — canonical model slug -> host model id map.
 # The harness core and conf/model-profiles.conf.yaml stay host-agnostic; this file is the ONLY
 # place that names the exact string this host expects as the `runSubagent` `model` argument.
 # Another host (Claude Code, Cursor, …) ships its own adapters/<env>/models.yaml with the same

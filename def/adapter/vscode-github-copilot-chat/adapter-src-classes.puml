@@ -1,0 +1,106 @@
+@startuml adapter-src-classes
+
+' ============================================================
+' VISUAL THEME
+' ============================================================
+skinparam shadowing false
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam PackagePadding 12
+skinparam ClassPadding 4
+
+package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
+
+  package "harness core (external, see ../../core/harness-src-classes.puml)" as harness_core #eeeeee {
+    interface Command <<external>> {
+      +execute_function(invocation: FunctionInvocation) : Report
+    }
+    abstract class Report <<external>> {
+      +context : Context
+      +outcome : Outcome
+    }
+  }
+
+  package "vscode-github-copilot-chat (the adapter - outside src/, depends ONLY on the harness core's commands)" as adapter {
+    class HookBinding <<dataclass>> {
+      +tool_classes : Mapping[str, str]
+      +model_ids : Mapping[str, str]
+      +resolve_tool_class(tool: str) : str
+      +resolve_model_id(host_model: str) : str
+    }
+    class HookClassifier {
+      -_binding : HookBinding
+      +classify_event(event: dict) : Boundary
+    }
+    enum Boundary {
+      SESSION_STARTED
+      STEP_STARTING
+      STEP_STARTED
+      WRITE_STARTING
+      WRITE_ENDED
+      STEP_ENDED
+    }
+    class SessionTracker {
+      +remember_current(raw_host_id: str, session_id: str) : None
+      +resolve_current(raw_host_id: str) : str | None
+    }
+    class Adapter {
+      -_binding : HookBinding
+      -_classifier : HookClassifier
+      -_tracker : SessionTracker
+      -_renderer : HookRenderer
+      -_commands : Mapping[Boundary, tuple[Command, ...]]
+      +handle_hook_event(event: dict) : str
+    }
+    class HookRenderer {
+      -_binding : HookBinding
+      +render_decision(boundary: Boundary, reports: tuple[Report, ...]) : str
+    }
+
+    note bottom of Adapter
+      This adapter's only host-aware code, depending
+      EXCLUSIVELY on ""Command"" - the harness core's public
+      API. No ""services"", no ""stores"", no ""config"": basic
+      layering, an adapter depends on a system's public
+      surface, never its internals. Session identification
+      uses only host-observed event data (""HookBinding"" is
+      this adapter's OWN configuration, loaded by its own
+      tools - never the harness's ""ConfigLoader"") plus
+      ""SessionTracker""'s own private bookkeeping. Framework-
+      agent gating (C7) and step-resolution correlation are
+      NOT decided here: they are validated inside the invoked
+      commands themselves (the harness's ""SessionRegistrar""
+      and checking services already hold what they need for
+      their own reasons) - this class only relays whatever
+      outcome comes back, generically, to the host decision.
+      There is only ONE adapter today; if a second host is
+      ever added, whatever proves genuinely shared factors out
+      then - not speculatively now.
+    end note
+    note bottom of SessionTracker
+      This adapter's OWN small persistent record - NOT the
+      harness's ""SessionLogStore"". Written when a session is
+      registered (H0/H1) to remember which session id is
+      current for a raw host id; read by every later hook
+      (H2/H3/H5/H6) to resolve it back. Plain file I/O, no
+      harness dependency.
+    end note
+    note bottom of Boundary
+      Lifecycle participles avoid the step/session clash
+      (1 step = 1 session): STEP_STARTING is the dispatch
+      about to open the step - it can DENY; STEP_STARTED is
+      the step session having opened - it can only INJECT;
+      STEP_ENDED is the dispatch return - THE evaluation
+      point. SESSION_STARTED is a non-step (orchestrator)
+      session starting. STEP_STARTING and STEP_ENDED occur
+      in the dispatching (orchestrator) session - their
+      entries journal to its log. Host events outside these
+      boundaries are adapter telemetry - never journaled.
+    end note
+  }
+
+  ' --- the ONLY allowed edge into the harness core ---
+  adapter ..> harness_core : the ONLY allowed edge -\nthe harness core's public API
+}
+
+@enduml
