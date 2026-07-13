@@ -30,8 +30,9 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
 ## Summary
 
 - [Host hook engine — verified facts](#host-hook-engine--verified-facts) — including the
-  [required VS Code settings](#required-vs-code-settings) and the
-  [context-injection semantics](#context-injection-semantics)
+  [required VS Code settings](#required-vs-code-settings), the
+  [context-injection semantics](#context-injection-semantics), and
+  [hooks at a glance](#hooks-at-a-glance) — one synthetic In/Out JSON pair per hook
 - [Boundary binding](#boundary-binding) — host event → harness boundary → functions
 - [Agent-session semantics](#agent-session-semantics) — 1 agent session = 1 execution until
   return; turns, steering, workflow end-to-end coherence
@@ -44,7 +45,7 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
   - [H4 `PreToolUse` — harness-command class](#h4-pretooluse--harness-command-class--mediated-attribution) — mediated attribution (3–4)
   - [H5 `PostToolUse` — write class](#h5-posttooluse--write-class--write-ended) — write-ended (9)
   - [H6 `PostToolUse` — dispatch class](#h6-posttooluse--dispatch-class--step-ended) — step-ended (10)
-  - [H7 `SubagentStop` / `Stop`](#h7-subagentstop--stop--telemetry) — telemetry
+  - [H7 `SubagentStop` / `Stop`](#h7-subagentstop--stop--session-ended-best-effort-closure) — session-ended, best-effort closure (11)
 - [Invocation plumbing and contract layering](#invocation-plumbing-and-contract-layering) —
   the host → dispatch → harness → host chain, which contract governs each seam, and the
   dispatch-as-CLI verdict
@@ -173,13 +174,165 @@ A `hookEventName` in the output that mismatches the running hook type causes the
 stripped (one-way compatibility: a `Stop` output is accepted under `SubagentStop`, a
 `SessionStart` output under `SubagentStart`).
 
+### Hooks at a glance
+
+A synthetic, one-look summary of all 8 registered hooks — what each means, the host event
+contract it receives (**In**), and this adapter's output contract back to the host (**Out**)
+— in the same envelope style as the [`UserPromptSubmit` example above](#context-injection-semantics).
+Each is the trimmed essence of its own full specification under [The hooks](#the-hooks)
+below — consult H0–H7 there for registration, mechanics, preconditions, postconditions, and
+invariants.
+
+**H0 `UserPromptSubmit` (agent-scoped) — session-started.** Opens one orchestrator agent
+session per chat request and injects its workflow context (functions 0–2).
+
+**In** (stdin) — the scoping agent slug arrives as a dispatch argument, never in this payload:
+
+```json
+{ "hook_event_name": "UserPromptSubmit", "session_id": "chat-session-guid", "timestamp": "2026-07-11T14:32:07.000Z" }
+```
+
+**Out** (stdout, exit 0):
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "additionalContext": "<rendered workflow context>" } }
+```
+
+**H1 `SubagentStart` — step-started.** Registers the step session and injects its declared
+instructions and skills (functions 0, 6, 7).
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "SubagentStart", "session_id": "chat-session-guid", "agent_id": "subagent-invocation-id", "agent_type": "qa-engineer" }
+```
+
+**Out** (stdout, exit 0):
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "SubagentStart", "additionalContext": "<rendered step context>" } }
+```
+
+**H2 `PreToolUse` — dispatch class — step-starting.** THE enforcement point for step
+preconditions (function 5) before a `runSubagent` call executes.
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "runSubagent", "tool_input": { "agentName": "qa-engineer", "model": "…", "prompt": "…" } }
+```
+
+**Out** (stdout, exit 0) — allow:
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow" } }
+```
+
+**Out** — deny:
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "check-step-preconditions fail: [report_exists] fail — no artifact matches 'review-report'" } }
+```
+
+**H3 `PreToolUse` — write class — write-starting.** Live authorization of the write's
+artifact path (function 8) before the write executes.
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "create_file", "tool_input": { "filePath": "/…/portfolio/epics/epic-payments.md", "content": "…" } }
+```
+
+**Out** (stdout, exit 0) — deny:
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "check-step-authorization denied: missing privilege: UPDATE epic (portfolio/epics/epic-payments.md)" } }
+```
+
+**H4 `PreToolUse` — harness-command class — mediated attribution.** Stamps the host-observed
+session id onto a model-authored harness-CLI invocation (functions 3–4) — accepted under the
+core's **narrow tool-boundary-stamp exception** (I4): fixed framework-authored shape, denies
+model-authored attribution outright, backstopped by the harness's own registered-session
+check, and named an explicit interim mechanism, not a permanent design.
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "run_in_terminal", "tool_input": { "command": "harness/harness.py resolve-step --workflow verification" } }
+```
+
+**Out** (stdout, exit 0):
+
+```json
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": { "command": "harness/harness.py resolve-step --workflow verification --session-id chat-session-guid-t3" } } }
+```
+
+**H5 `PostToolUse` — write class — write-ended.** The commit gate (function 9) — validates
+the just-landed staged write, commits or reverts it.
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "PostToolUse", "session_id": "chat-session-guid", "tool_name": "create_file", "tool_input": { "filePath": "/…/portfolio/payments/features/feature-refunds.md" }, "tool_response": "Created file …" }
+```
+
+**Out** (stdout, exit 0) — valid:
+
+```json
+{ "continue": true }
+```
+
+**Out** — reverted:
+
+```json
+{ "decision": "block", "reason": "check-step-artifact reverted …: frontmatter.status: 'shipped' is not one of the enum values", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its schema and retry." } }
+```
+
+**H6 `PostToolUse` — dispatch class — step-ended.** THE evaluation point (function 10) — the
+dispatch returned; checks whether the step delivered.
+
+**In** (stdin):
+
+```json
+{ "hook_event_name": "PostToolUse", "session_id": "chat-session-guid", "tool_name": "runSubagent", "tool_input": { "agentName": "qa-engineer" }, "tool_response": "…the subagent's final report…" }
+```
+
+**Out** (stdout, exit 0) — pass:
+
+```json
+{ "continue": true }
+```
+
+**Out** — fail:
+
+```json
+{ "decision": "block", "reason": "check-step-postconditions fail: [report_exists] fail — no artifact matches 'review-report'", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed step; do not surface step details to the user." } }
+```
+
+**H7 `SubagentStop` / `Stop` — session-ended, best-effort closure.** Closes the ending
+session's log (function 11) — best-effort, never surfaced to the host.
+
+**In** (stdin) — `SubagentStop`:
+
+```json
+{ "hook_event_name": "SubagentStop", "session_id": "chat-session-guid", "agent_id": "subagent-invocation-id" }
+```
+
+**In** — `Stop`:
+
+```json
+{ "hook_event_name": "Stop", "session_id": "chat-session-guid" }
+```
+
+**Out** (stdout, exit 0) — always empty: `end-session`'s outcome is never surfaced.
+
 ---
 
 ## Boundary binding
 
 The harness's canonical boundaries ([`../../core/spec.md`](../../core/spec.md) — Boundary
 Normalization) bind to
-this host as follows. Physical registrations: **3 mandatory + 2 telemetry** events in the
+this host as follows. Physical registrations: **5 events** in the
 workspace hooks file, plus **one agent-scoped `UserPromptSubmit` entry per framework
 orchestrator** (H0, in its `.agent.md`); `PreToolUse`/`PostToolUse` each carry several
 **logical hooks** discriminated by `tool_name`
@@ -194,7 +347,7 @@ through `tools.yaml` (the host has no matcher — see facts above).
 | H4 | `PreToolUse` | harness command via `run_in_terminal` | mediated attribution | (3, 4 — see H4) |
 | H5 | `PostToolUse` | write | write-ended | 9 |
 | H6 | `PostToolUse` | dispatch | step-ended | 10 |
-| H7 | `SubagentStop`, `Stop` | — | none | telemetry only |
+| H7 | `SubagentStop`, `Stop` | — | session-ended | 11 (best-effort closure) |
 
 Not registered: `SessionStart` (fires once per whole conversation and never names the active
 agent — useless for C7; H0 supersedes it), `PreCompact` (no boundary), `SessionEnd` /
@@ -207,7 +360,7 @@ matches no declared class is passed through: exit 0, empty stdout, no journal en
 session-started from step-started by log correlation (unresolved `step-resolution` entry).
 Here the host discriminates for us: a subagent session never fires the top-level events — it
 fires `SubagentStart` — and H0 fires only while the scoping orchestrator agent is active. The
-step-resolution correlation (validated inside register-session itself, see [Session identity
+step-resolution correlation (validated inside start-session itself, see [Session identity
 binding](#session-identity-binding)) remains necessary to resolve **which step** a step
 session serves — but not to classify the boundary (see I1).
 
@@ -259,28 +412,61 @@ over its lifetime" describes the conversation, not the agent session — see I2.
 
 ## Session identity binding
 
-All ids are host-observed or adapter-minted from host-observed data — never model-authored
-(harness invariant: session ids are observed or minted by the surrounding mechanism).
-Sanitization: lowercase; any character outside `[a-z0-9-]` maps to `-` (the id becomes a log
-filename).
+**This is this adapter's one irreducible job.** Every other responsibility here — boundary
+binding, hook mechanics, rendering — exists only to serve one resolution: identify, from VS
+Code's own host-specific event data, which agent session a given hook firing or mediated call
+belongs to. The harness core neither performs this resolution nor needs to know anything
+about the host-specific data behind it (C4) — it only ever receives the already-resolved
+`sessionId` / `parentSessionId`. All ids are host-observed or adapter-minted from
+host-observed data — never model-authored (harness invariant: session ids are observed or
+minted by the surrounding mechanism). Sanitization: lowercase; any character outside
+`[a-z0-9-]` maps to `-` (the id becomes a log filename).
 
 | Harness field | Orchestrator agent session (turn) | Step (subagent) session |
 |---|---|---|
-| `sessionId` | **derived per turn**: `<sanitized session_id>-t<sanitized event timestamp>` — computed purely from the stdin envelope's own `timestamp` field, zero reads of any kind (re-delivery of the same request naturally repeats the same timestamp, which register-session's own idempotency already absorbs) | sanitized `agent_id` (the subagent **invocation** id — unique per dispatch, so 1 step = 1 session holds) |
+| `sessionId` | **derived per turn**: `<sanitized session_id>-t<sanitized event timestamp>` — computed purely from the stdin envelope's own `timestamp` field, zero reads of any kind (re-delivery of the same request naturally repeats the same timestamp, which start-session's own idempotency already absorbs) | sanitized `agent_id` (the subagent **invocation** id — unique per dispatch, so 1 step = 1 session holds) |
 | `parentSessionId` | `null` (a user prompt opens it — a root) | the dispatching orchestrator's **current agent-session id** (resolved below) |
 | actor agent | the **scoping agent** of the fired agent-scoped H0 hook — host-guaranteed, since an agent-scoped hook fires only while that agent is active (never payload-derived: no top-level payload names the agent) | `agent_type` (the subagent name → framework `agentSlug`) |
 
-**Host-session → current-agent-session resolution.** Every other hook's envelope carries a
-`session_id`; the adapter resolves it to the acting agent session using its OWN private
-record (`SessionTracker`) — never the harness log, which the adapter has no access to
-at all: **if a step session was tracked under `sanitized(session_id)`** (a subagent's own
-loop — its envelope id is its invocation id), that session; **else the session most recently
-tracked for `sanitized(session_id)`** (the conversation's current orchestrator turn — written
-by H0 when it derived the turn's session id). Deterministic: a conversation processes one
-request at a time, so exactly one agent session is current, and the adapter's own record
-(updated at every registration) always reflects it. Which id a subagent's tool-call hooks
-actually carry in `session_id` is listed for verification (I13) — both branches of this rule
-resolve correctly either way. H1–H6 all use this resolution.
+**Host-session → current-agent-session resolution.** Every hook's envelope carries a
+`session_id` — confirmed **shared across the whole conversation, including nested subagent
+dispatches** (verified against `microsoft/vscode`'s `ExecutionSubagentTool`: a subagent's own
+`Conversation` is constructed with its PARENT's `sessionId`, never its own `agent_id` — see
+I13). Because the raw id repeats, the adapter cannot resolve it with a flat "remember one
+value" pointer — `SessionTracker` keeps a **stack per `sanitized(session_id)`**, never the
+harness log (which the adapter has no access to at all):
+
+- **H0** resets the stack for this `session_id` fresh — a new turn discards whatever a prior
+  turn left, and pushes the orchestrator's new turn session as its base.
+- **H1** pushes the new step session on top when a dispatch opens — the previous top (the
+  dispatching orchestrator's turn session) becomes the new step's `parentSessionId` before
+  the push.
+- **H7** (the step-closing case) pops the step session back off, restoring the dispatching
+  session as current — see Session closure just below. Without this pop, the
+  orchestrator's NEXT mediated call (H4) after a step closes would misattribute to the
+  already-ended step session instead of its own.
+- **H2/H3/H4/H5/H6** only ever read the top via `resolve_current` — never push or pop.
+
+Deterministic: a conversation processes one request at a time, and only one step is in flight
+per orchestrator session (function 3, invariant 9), so the stack never holds more than one
+entry beyond its base and resolution is unambiguous at every point in the sequence.
+
+**Session closure.** H7 (`SubagentStop`/`Stop`) resolves the ending session the same way, then
+calls the harness's own `end-session` (function 11) with it (see H7, below) — a real,
+journaled harness invocation now, not adapter-only bookkeeping. `SubagentStop` additionally
+**pops** `SessionTracker`'s stack for this `session_id`, restoring the dispatching
+orchestrator session as current (above); `Stop` does not pop — the conversation's stack for
+that `session_id` is simply done, reset fresh by the next `UserPromptSubmit` (H0). From the
+closing entry on, C8 makes the harness core itself refuse any further invocation against that
+`sessionId`, regardless of what `SessionTracker` believes is "current" — closure is the
+core's own fact, computed from the session's own log, never duplicated in this adapter's
+private record. **If resolution
+finds no current session** for a `session_id` — never registered — no harness function is
+invoked at all: the same pass-through (exit 0, empty output) already used elsewhere in this
+binding for a foreign or unregistered session. H4 additionally **denies** rather than passing
+through (see H4, below): its tool call IS the harness command about to
+execute, so letting it run un-rewritten would invoke a harness function with no attributable
+session at all.
 
 ---
 
@@ -458,8 +644,12 @@ Registers the step session (function 0, with parent) and injects the step's decl
    `{ "in": { "agent": "<agent_type>", "sessionId": "<sanitized agent_id>", "parentSessionId": "<current agent session of session_id>" } }`
    (parent per the host-session → current-agent-session resolution — the dispatching
    orchestrator's turn session, not the raw conversation id, from the adapter's own
-   `SessionTracker`).
-   C7 gate needs no ACL lookup: register-session correlates this session to the parent's
+   `SessionTracker`). After resolving the parent, the adapter **pushes** this new step
+   session (`sanitized(agent_id)`) as current for this `session_id` — see
+   [Session identity binding](#session-identity-binding) — so any write hooks (H3/H5) firing
+   during the step resolve to it, not to the dispatching orchestrator session; H7 pops it
+   back on step close.
+   C7 gate needs no ACL lookup: start-session correlates this session to the parent's
    latest unresolved `step-resolution` entry for `agent_type` — only a configured,
    ACL-validated workflow actor is ever named there, so a non-framework `agent_type` simply
    finds no correlation and the function reports not-applicable; nothing is registered or
@@ -468,7 +658,7 @@ Registers the step session (function 0, with parent) and injects the step's decl
    `{ "in": { "sessionId": "<step>", "parentSessionId": "<parent>" } }`.
    Step correlation — matching this session to the parent's latest unresolved
    `step-resolution` entry whose actor equals `agent_type` — is validated INSIDE
-   register-session itself (it already holds the session log); the adapter never reads the
+   start-session itself (it already holds the session log); the adapter never reads the
    parent's log to pre-check this.
 3. Function 7 `resolve-step-skills` — same In.
 
@@ -499,7 +689,7 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
 
 **Preconditions**
 
-- Function 0's, 6's, and 7's own preconditions; notably register-session itself validates
+- Function 0's, 6's, and 7's own preconditions; notably start-session itself validates
   that an unresolved `step-resolution` entry correlating to this session exists in the
   parent session's log — the adapter has no log access of its own to pre-check this.
 - A `SubagentStart` for a framework agent with **no** correlatable unresolved
@@ -720,14 +910,20 @@ The mediated agent invocation surface for functions 3 (`resolve-step`) and 4
 as H2/H3; classified when `tool_name = run_in_terminal` **and** the command string invokes the
 harness command entry point.
 
-> ⚠ **Spec-blocked.** The harness's mediated attribution rule
-> ([`../../core/spec.md`](../../core/spec.md), Invocation surfaces) accepts a per-session process environment or an
-> out-of-band identity channel, and explicitly rules a tool-boundary rewrite of a
-> model-authored command argument **not sufficient**. This host offers exactly one
-> attribution mechanism: `PreToolUse` `updatedInput` rewriting. Strictly applied, functions
-> 3–4 must not be exposed on this host — which contradicts the SD's orchestrator loop. See
-> **I4**; the mechanics below are specified under the proviso that the harness spec accepts
-> hook-mediated stamping (or they stay dormant).
+> **Accepted under the core's narrow tool-boundary-stamp exception**
+> ([`../../core/spec.md`](../../core/spec.md), Invocation surfaces) — a tool-boundary rewrite
+> of a model-authored argument is insufficient by the core's general rule, but this binding
+> qualifies under the exception because all four of its conditions hold: (1) the stamped
+> shape is fixed and framework-authored — the orchestrator's own instructions dictate the
+> exact `harness.py <function> --workflow …` invocation verbatim, never open-ended agent
+> phrasing; (2) any invocation already carrying `--session-id`/`--parent-session-id` is
+> denied outright (Mechanics rule 2, below), never merely overwritten; (3) the
+> [mediated-invocation backstop](../../core/spec.md#invocation-surfaces-one-command-system)
+> is in force — functions 3–4 themselves reject an unresolvable or unregistered id
+> regardless of what this hook stamped; (4) this remains an **explicit, interim**
+> mechanism — see **I4** — pending a host-native surface that passes attribution outside
+> model-visible arguments, which no host of this class (hook-mediated tool interception, no
+> custom-tool session channel) is currently known to offer.
 
 **In** (stdin)
 
@@ -742,14 +938,18 @@ harness command entry point.
 }
 ```
 
-**Mechanics (stamping, under the proviso)**
+**Mechanics**
 
 1. Classify: the command string matches the harness invocation pattern
    (`harness.py <function> …`); otherwise fall through to the terminal guard (I9) or pass
    through.
 2. **Deny** any invocation whose command already carries session-attribution arguments
    (`--session-id`, `--parent-session-id`): model-authored attribution is never accepted.
-3. Rewrite via `updatedInput`: inject `--session-id <current agent session of session_id>`
+3. Resolve `SessionTracker.resolve_current(sanitized(session_id))`. **Deny** if it returns
+   `None` — never registered — there is no session to attribute this call to. (A resolved but
+   already-closed session is not caught here — the adapter has no log access to know that; the
+   harness core itself refuses it via C8 when the call actually runs — see Invariant 4.)
+4. Rewrite via `updatedInput`: inject `--session-id <the resolved current session>`
    (host-observed, adapter-resolved) into the command. The executed invocation's attribution
    is then fully adapter-controlled — the model can neither choose nor forge it.
 
@@ -775,9 +975,13 @@ full rewritten `tool_input`, not a patch.)
 1. No harness command with model-authored session attribution ever executes (rule 2 above
    denies it).
 2. The stamped id is resolved from the envelope `session_id` — the same host-observed value
-   H0's registration derives from; never from any model-authored argument.
+   H0's opening derives from; never from any model-authored argument.
 3. Functions 3–4 journal to the stamped session per the harness logging rules; the hook
    itself journals nothing (it is attribution plumbing, not a boundary function).
+4. A never-registered session is never stamped: rule 3 (above, Mechanics) denies it before
+   rule 4 would rewrite anything. A stamped-but-already-closed session is instead refused by
+   the harness core itself (C8) when functions 3–4 actually run — this hook has no log access
+   to pre-check that; it only guards against a session it has never seen at all.
 
 ### H5 `PostToolUse` — write class — write-ended
 
@@ -951,14 +1155,15 @@ block + error detail.
 2. The hook never converts a `fail` into a user-facing verdict: the block reason addresses
    the orchestrator (re-resolution), per function 3, invariant 7.
 
-### H7 `SubagentStop` / `Stop` — telemetry
+### H7 `SubagentStop` / `Stop` — session-ended, best-effort closure
 
-Observational only — no harness boundary, no function, no journal entry ("observational host
-events … are adapter telemetry, not harness functions"). Registered for operational
-visibility (adapter stderr diagnostics); always exit 0, empty stdout, never `decision: block`
-(a `SubagentStop`/`Stop` block would force the agent to continue — a real host capability the
-harness deliberately does not use: step outcome is H6's, and retry is re-resolution through
-the orchestrator, never a forced extra turn).
+The session-ended boundary (function 11, `end-session`): resolves the ending session and
+closes its log with a final, journaled entry — best-effort, since not every host termination
+fires this hook (a crash, a force-quit host never does). No host-visible effect either way:
+also registered for operational visibility (adapter stderr diagnostics); always exit 0, empty
+stdout, never `decision: block` (a `SubagentStop`/`Stop` block would force the agent to
+continue — a real host capability the harness deliberately does not use: step outcome is
+H6's, and retry is re-resolution through the orchestrator, never a forced extra turn).
 
 **Registration**
 
@@ -988,7 +1193,53 @@ the orchestrator, never a forced extra turn).
 **In** — `SubagentStop`: envelope + `agent_id`, `agent_transcript_path`, `stop_hook_active`;
 `Stop`: envelope + `stop_hook_active`.
 
-**Out** — none (exit 0, empty stdout).
+**Harness invocation** — function 11 `end-session`, once the ending session resolves:
+
+1. `SubagentStop` — the ending session is `sanitized(agent_id)` directly: the step session
+   that just ended is exactly this event's own id, no resolution needed. The adapter then
+   calls `SessionTracker.pop_current(sanitized(session_id))`, restoring the dispatching
+   orchestrator session as current for this `session_id` (see
+   [Session identity binding](#session-identity-binding)) — without this, the orchestrator's
+   next mediated call (H4) would misattribute to the now-closed step session.
+2. `Stop` — resolve the ending orchestrator session via
+   `SessionTracker.resolve_current(sanitized(session_id))` first, then close THAT id — never
+   the raw `session_id` itself (the conversation may still open later agent sessions; only
+   the one that just ended closes). No pop here: the conversation's stack for this
+   `session_id` is simply done, reset fresh by the next `UserPromptSubmit` (H0).
+
+```json
+{ "in": { "sessionId": "chat-session-guid-t3" } }
+```
+
+If resolution finds no current session (never registered), no harness function is invoked —
+pass-through, as elsewhere in this binding.
+
+**Out** (stdout, exit 0) — none: `end-session`'s outcome is never surfaced to the host,
+success or error alike; this hook has no host-visible effect either way.
+
+**Preconditions** — function 11's own: the surrounding mechanism (this hook) has observed the
+session ending.
+
+**Postconditions**
+
+- The session's log carries the closing entry as its last line, when it was open — a real
+  journal write, unlike H7's previous purely-observational framing: one harness function now
+  genuinely runs here.
+- From this entry on, C8 makes the harness core refuse any further invocation against this
+  `sessionId` — a defense that survives even if this adapter's own `SessionTracker` later
+  mis-resolves or goes stale, because it is enforced by the core reading its own log, not by
+  anything this adapter tracks.
+
+**Invariants**
+
+1. Best-effort, not guaranteed: a session whose end this hook never observes (host crash,
+   force-quit) simply never closes — not an error state anywhere else in this contract
+   (function 11, invariant 3).
+2. Idempotent: closing an already-closed or never-opened session produces the same `closed`
+   outcome and no additional entry — a duplicate `Stop`/`SubagentStop` firing (host
+   re-delivery) changes nothing (function 11, invariant 2).
+3. This hook still journals nothing of its OWN — the journal entry belongs to function 11,
+   attributed to the closed session's own log, exactly like every other function's entries.
 
 ---
 
@@ -1039,7 +1290,7 @@ VS Code hook engine (permissionDecision / decision:block / additionalContext / u
   `HookRenderer` — see [`adapter-src-classes.puml`](adapter-src-classes.puml)),
   parameterized by its own binding data (its own YAML, loaded
   with its own tools — never the harness's `ConfigLoader`). The invoked surface is the
-  **harness core**: eleven function commands (`harness.py`, one per function, hook/host-blind),
+  **harness core**: twelve function commands (`harness.py`, one per function, hook/host-blind),
   their per-function API contracts, and the log-entry contract — nothing adapter-specific
   may leak into them (C4). Basic layering: this adapter depends on the command API and
   nothing else — no `services`, `stores`, or `config` — so framework-agent gating (C7) and
@@ -1053,7 +1304,7 @@ VS Code hook engine (permissionDecision / decision:block / additionalContext / u
 level (`harness/`); within the component the split is explicit and structural, and basic
 layering applies between them: an adapter depends on a system's public API, never its
 internals. The **harness core** (`src/` + `harness.py`) exposes exactly one command per
-function — eleven commands, hook/host-blind by package graph, the surface agents
+function — twelve commands, hook/host-blind by package graph, the surface agents
 (`resolve-step`, `resolve-step-model`) invoke DIRECTLY, with
 no adapter detour. This **adapter** (`harness/adapters/vscode-github-copilot-chat/`) owns
 everything host-aware for this host: classification + session-tracking + rendering code,
@@ -1122,15 +1373,20 @@ revision):* I5's rendering surface, I11's adapter layout, and I14's
 design are now integrated here and in [`adapter-src-classes.puml`](adapter-src-classes.puml); the remaining findings
 still await the next harness-core-spec revision.
 
-- **I1 — The SD's session-open hook events are wrong for this host.**
-  `harness-functions.puml` shows `hook "sessionStart"` for BOTH the orchestrator session and
-  the step session. On this host a subagent session never fires `SessionStart` — it fires
-  `SubagentStart` — and top-level `SessionStart` fires once per whole conversation without
-  naming the active agent, so the orchestrator boundary binds to agent-scoped
-  `UserPromptSubmit` instead (H0). Boundary classification (session-started vs step-started)
-  is therefore **structural** — distinct host events — not correlation-derived. The
+- **I1 — RESOLVED at the diagram level: the SD now shows this host's real hooks.**
+  [`harness.sd.puml`](../../harness.sd.puml) now carries a distinct **Adapter** participant,
+  separate from the host-agnostic **Harness** core, and labels every Host→Adapter crossing
+  with this host's actual event: `UserPromptSubmit` (agent-scoped, session-started) for the
+  orchestrator, `SubagentStart` for the step, `PreToolUse` classified by dispatch/write/
+  harness-command class, `PostToolUse` classified by write/dispatch class, and
+  `SubagentStop`/`Stop` — matching H0–H7 exactly; no `SessionStart` mention remains. The
+  residual gap is in the CORE SPEC's own prose (not the diagram): on this host a subagent
+  session never fires `SessionStart` — it fires `SubagentStart` — and top-level `SessionStart` fires once per
+  whole conversation without naming the active agent, so the orchestrator boundary binds to
+  agent-scoped `UserPromptSubmit` instead (H0). Boundary classification (session-started vs
+  step-started) is therefore **structural** — distinct host events — not correlation-derived. The
   step-resolution correlation remains needed to resolve *which step*, now validated INSIDE
-  register-session itself (see I15) rather than by an adapter-side correlator; but the
+  start-session itself (see I15) rather than by an adapter-side correlator; but the
   spec's framing ("Session-open event with/without a correlated
   unresolved step-resolution entry" as the classifier) and its actor-heuristic *fallback*
   should be demoted to hosts that genuinely lack distinct events. Bonus: the host hands the
@@ -1161,16 +1417,21 @@ still await the next harness-core-spec revision.
   instructions/skills machinery is engaged), which the spec's "the adapter renders the refs
   into the host's session context" already implies but should make normative, including the
   skills-as-load-directives rule (inlining SKILL.md bodies defeats lazy loading).
-- **I4 — The mediated attribution rule forbids the only mechanism this host has.**
+- **I4 — RESOLVED: the core now names an explicit, narrow exception for this class of host.**
   Functions 3–4 require host-observed session attribution "outside the tool arguments visible
-  to the agent"; the spec explicitly rules a tool-boundary rewrite of a model-authored
-  argument insufficient. This host's only mechanism is exactly that — `PreToolUse`
-  `updatedInput` (H4). Strictly applied, 3–4 are not exposable here, and the SD's entire
-  orchestrator loop (resolve → model → dispatch) is unrealizable on this host. Either the
-  rule should be refined (hook-mediated stamping here is stronger than a mere rewrite: the
-  hook can *deny* any invocation carrying model-authored attribution and inject the
-  host-observed `session_id`, making executed attribution fully adapter-controlled), or the
-  spec must offer a hookable realization of the orchestrator loop for hosts of this class.
+  to the agent"; a tool-boundary rewrite of a model-authored argument is insufficient by the
+  core's general rule. This host's only mechanism is exactly that — `PreToolUse`
+  `updatedInput` (H4) — and a dedicated-tool alternative was investigated and set aside: MCP
+  is host-agnostic and carries no standard, model-inaccessible "which chat session called
+  this" field a server could trust over the model's own arguments, and no VS Code extension
+  API surfacing one was found. Rather than leave this an unresolved contradiction against a
+  mechanism that likely doesn't exist for hosts of this shape, the core's mediated attribution
+  rule now states a **narrow tool-boundary-stamp exception** (fixed framework-authored
+  invocation shape, deny-on-model-authored-attribution, the mediated-invocation backstop, and
+  explicit interim-not-permanent status) that H4 satisfies point-for-point — see H4, below,
+  and [`../../core/spec.md`](../../core/spec.md), Invocation surfaces. The real fix — a
+  host-native surface that passes attribution outside model-visible arguments — remains
+  tracked, not scheduled.
 - **I5 — The exit-2-centric dispatch contract is too narrow.** `adapters/README.md` and
   `dispatch.sh` frame the harness decision as "exit 2 = deny/fail". On this host exit 2 is a
   crude blocking error (raw stderr to the model); the canonical control surface is
@@ -1227,10 +1488,19 @@ still await the next harness-core-spec revision.
 - **I13 — Open host verifications + shim gap.** (a) Whether a **steering** message submitted
   mid-execution fires `UserPromptSubmit` on the native panel path: unverified — H0's rule is
   correct under both outcomes (see [Agent-session semantics](#agent-session-semantics)), so
-  this only affects whether some firings open engagement sessions that never act. (b) Which
-  id a **subagent's own tool-call hooks** carry in `session_id` (conversation id vs
-  subagent invocation id): unverified — the host-session → current-agent-session resolution
-  handles both. (c) `dispatch.sh` (shared, not edited here) declares a 2-argument contract;
+  this only affects whether some firings open engagement sessions that never act. (b)
+  **RESOLVED** — verified directly against `microsoft/vscode`'s `ExecutionSubagentTool`
+  (`extensions/copilot/src/extension/tools/node/executionSubagentTool.ts`): a subagent's own
+  `Conversation` is constructed as `new Conversation(parentSessionId, …)` — the **parent's**
+  `sessionId`, never the subagent's own `subAgentInvocationId` — so a subagent's own
+  tool-call hooks carry the **same shared `session_id`** as its dispatching session, never a
+  distinct one; `agent_id`/`subAgentInvocationId` is a separate, fresh id used only for
+  `SubagentStart`/`SubagentStop`'s own fields and trajectory linking. This confirms this
+  binding's `tools.yaml` assumption was correct, and rules out the "distinct id per subagent"
+  branch the resolution rule used to hedge for — see the corrected
+  [Session identity binding](#session-identity-binding) below (`SessionTracker` is now a
+  stack, not a flat pointer, precisely because `session_id` repeats across nesting). (c)
+  `dispatch.sh` (shared, not edited here) declares a 2-argument contract;
   H0 requires forwarding a third optional argument (the scoping agent slug) to the adapter's
   hook entry. (d) Hooks are a preview feature — the setting names (`chat.useHooks`,
   `chat.hookFilesLocations`) and event set may drift; the harness's fail-fast adapter-binding
@@ -1243,7 +1513,7 @@ still await the next harness-core-spec revision.
   function commands (host contamination) nor in shell. Adopted resolution, now integrated in
   the harness core spec and this adapter's own class diagram: the harness core drops the
   `hook` command — `harness.py`
-  is **eleven pure function commands**, the direct surface for agents, humans, and CI — and
+  is **twelve pure function commands**, the direct surface agents invoke — and
   this adapter's OWN code (there is no shared-adapter package: with a single host today, all
   of it lives directly under `harness/adapters/vscode-github-copilot-chat/`) owns
   event classification (`HookClassifier` + `Boundary`), session identification

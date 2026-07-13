@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://safe/harness/contracts/context/v1",
   "title": "Harness context contract",
-  "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session registration. Session origin is recorded by register-session and recovered through sessionId when needed.",
+  "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session start. Session origin is recorded by start-session and recovered through sessionId when needed.",
   "definitions": {
     "sessionId": {
       "type": "string",
       "minLength": 1,
-      "description": "The session identifier observed or minted by the surrounding mechanism (adapter, bash wrapper, or CI platform)."
+      "description": "The session identifier observed or minted by the surrounding mechanism."
     },
     "parentSessionId": {
       "type": [
@@ -26,7 +26,7 @@
     "function": {
       "type": "string",
       "enum": [
-        "register-session",
+        "start-session",
         "resolve-workflow-instructions",
         "resolve-workflow-skills",
         "resolve-step",
@@ -36,7 +36,8 @@
         "resolve-step-skills",
         "check-step-authorization",
         "check-step-artifact",
-        "check-step-postconditions"
+        "check-step-postconditions",
+        "end-session"
       ],
       "description": "The harness function that produced this report."
     },

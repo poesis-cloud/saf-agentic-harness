@@ -39,9 +39,11 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       WRITE_STARTING
       WRITE_ENDED
       STEP_ENDED
+      SESSION_ENDED
     }
     class SessionTracker {
-      +remember_current(raw_host_id: str, session_id: str) : None
+      +push_current(raw_host_id: str, session_id: str) : None
+      +pop_current(raw_host_id: str) : None
       +resolve_current(raw_host_id: str) : str | None
     }
     class Adapter {
@@ -67,10 +69,11 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       this adapter's OWN configuration, loaded by its own
       tools - never the harness's ""ConfigLoader"") plus
       ""SessionTracker""'s own private bookkeeping. Framework-
-      agent gating (C7) and step-resolution correlation are
-      NOT decided here: they are validated inside the invoked
-      commands themselves (the harness's ""SessionRegistrar""
-      and checking services already hold what they need for
+      agent gating (C7), step-resolution correlation, and
+      session-closure enforcement (C8) are NOT decided here:
+      they are validated inside the invoked commands
+      themselves (the harness's ""SessionLifecycle"" and
+      checking services already hold what they need for
       their own reasons) - this class only relays whatever
       outcome comes back, generically, to the host decision.
       There is only ONE adapter today; if a second host is
@@ -79,11 +82,17 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
     end note
     note bottom of SessionTracker
       This adapter's OWN small persistent record - NOT the
-      harness's ""SessionLogStore"". Written when a session is
-      registered (H0/H1) to remember which session id is
-      current for a raw host id; read by every later hook
-      (H2/H3/H5/H6) to resolve it back. Plain file I/O, no
-      harness dependency.
+      harness's ""SessionLogStore"". A STACK per raw host id
+      (verified: a subagent's own ""session_id"" is the SAME
+      shared id as its dispatching session's, never its own
+      ""agent_id"" - see I13): H0 resets it fresh per turn,
+      H1 PUSHes the new step session as current, H7 POPs it
+      back to the dispatching session on step close. Every
+      other hook (H2/H3/H4/H5/H6) only reads the top via
+      ""resolve_current"". Tracks "current" only - whether a
+      session has since CLOSED is the harness core's own
+      fact (C8, function 11), never duplicated here. Plain
+      file I/O, no harness dependency.
     end note
     note bottom of Boundary
       Lifecycle participles avoid the step/session clash
@@ -92,7 +101,10 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       the step session having opened - it can only INJECT;
       STEP_ENDED is the dispatch return - THE evaluation
       point. SESSION_STARTED is a non-step (orchestrator)
-      session starting. STEP_STARTING and STEP_ENDED occur
+      session starting. SESSION_ENDED (H7) invokes function
+      11 for real now - best-effort, whichever session
+      ""SessionTracker"" resolves as current for the firing.
+      STEP_STARTING and STEP_ENDED occur
       in the dispatching (orchestrator) session - their
       entries journal to its log. Host events outside these
       boundaries are adapter telemetry - never journaled.

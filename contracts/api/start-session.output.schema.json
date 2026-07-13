@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/register-session.output/v1",
+  "$id": "gsmarc://safe/harness/contracts/api/start-session.output/v1",
   "$ref": "../report.schema.json",
-  "title": "register-session output contract",
+  "title": "start-session output contract",
   "oneOf": [
     {
       "required": [
@@ -12,8 +12,8 @@
         "outcome": {
           "properties": {
             "status": {
-              "const": "registered",
-              "description": "Success status for register-session."
+              "const": "started",
+              "description": "Success status for start-session."
             }
           },
           "description": "The function outcome."
@@ -27,19 +27,19 @@
           "properties": {
             "agent": {
               "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
-              "description": "The framework-agent identity. The harness registers agent sessions — this is always present."
+              "description": "The framework-agent identity. The harness opens agent sessions — this is always present."
             },
             "sessionId": {
               "$ref": "../context.schema.json#/definitions/sessionId",
-              "description": "The registered session id."
+              "description": "The opened session id."
             },
             "parentSessionId": {
               "$ref": "../context.schema.json#/definitions/parentSessionId",
-              "description": "The registered parent session id, if any."
+              "description": "The opened session's parent session id, if any."
             }
           },
           "unevaluatedProperties": false,
-          "description": "The registered session metadata."
+          "description": "The opened session metadata."
         }
       }
     },
@@ -61,5 +61,5 @@
     }
   ],
   "unevaluatedProperties": false,
-  "description": "Output contract for the register-session harness function."
+  "description": "Output contract for the start-session harness function."
 }

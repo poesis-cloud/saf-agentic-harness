@@ -29,6 +29,10 @@ hostStepActorKeys: [agent_type]
 dispatchTools: [runSubagent]
 dispatchAgentKeys: [agentName]
 dispatchModelKeys: [model]
-# Adapter-mediated agent invocation surface (functions 3–4) — see def/spec.md H4 + I4:
+# Adapter-mediated agent invocation surface (functions 3–4) — accepted under the core's narrow
+# tool-boundary-stamp exception (def/spec.md Invocation surfaces + def/adapter/.../spec.md H4/I4):
+# fixed framework-authored shape, deny-on-model-authored-attribution, harness-side backstop,
+# explicit interim status. Investigated and set aside: a dedicated custom/MCP tool would not
+# actually be stronger — no host-native channel passes trustworthy session identity to it either.
 mediatedCommandTools: [run_in_terminal]
 mediatedCommandKeys: [command]

@@ -1,0 +1,39 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://safe/harness/contracts/api/end-session.output/v1",
+    "$ref": "../report.schema.json",
+    "title": "end-session output contract",
+    "oneOf": [
+        {
+            "properties": {
+                "outcome": {
+                    "properties": {
+                        "status": {
+                            "const": "ended",
+                            "description": "Success status for end-session — idempotent: also returned when the session was already ended."
+                        }
+                    },
+                    "description": "The function outcome."
+                }
+            }
+        },
+        {
+            "properties": {
+                "outcome": {
+                    "properties": {
+                        "status": {
+                            "$ref": "../report.schema.json#/definitions/errorStatus",
+                            "description": "Error status."
+                        }
+                    },
+                    "required": [
+                        "error"
+                    ],
+                    "description": "The function outcome on error."
+                }
+            }
+        }
+    ],
+    "unevaluatedProperties": false,
+    "description": "Output contract for the end-session harness function."
+}

@@ -28,10 +28,10 @@ and implementation parts prescribe its realization.
 
 - [Terminology](#terminology) — the shared nouns: framework, workspace, artifact, log,
   session, orchestrator, workflow, workflow instance, step.
-- [The harness functions](#the-harness-functions) — the functional contract: eleven functions,
+- [The harness functions](#the-harness-functions) — the functional contract: twelve functions,
   numbered and ordered as they sequence in the diagram, each specified by its interface (with
   JSON I/O contract), pre/postconditions, and invariants.
-  - Session (0): [`register-session`](#0-register-session)
+  - Session (0, 11): [`start-session`](#0-start-session) · [`end-session`](#11-end-session)
   - Workflow context (1–2): [`resolve-workflow-instructions`](#1-resolve-workflow-instructions) ·
     [`resolve-workflow-skills`](#2-resolve-workflow-skills)
   - Resolution (3–4): [`resolve-step`](#3-resolve-step) ·
@@ -44,8 +44,9 @@ and implementation parts prescribe its realization.
     [`check-step-postconditions`](#10-check-step-postconditions)
   - [Internal validation — not functions](#internal-validation--not-functions) — how
     configuration and workspace validity are enforced without an exposed function.
-  - [General invariants](#general-invariants) — C0–C7: workspace state definition, assertion
-  scope, agnosticism, schema binding, workspace validity, framework-agent scope.
+  - [General invariants](#general-invariants) — C0–C8: workspace state definition, assertion
+  scope, agnosticism, schema binding, workspace validity, framework-agent scope, session
+  ending.
 - [Design](#design) — trigger planes, boundary normalization, source layout, class design,
   configuration plane, workspace Git plane, logging.
 - [Development](#development) — Python conventions, SOLID, TDD, unit and functional
@@ -75,7 +76,7 @@ and implementation parts prescribe its realization.
   workflow's deliverables are simply the union of its steps' artifacts (in this framework:
   epics, features, stories, …).
 - **Log** — the harness's record: the append-only JSONL file of one session
-  (`<workspace>/logs/<sessionId>.log.jsonl`), created by function 0's registration entry —
+  (`<workspace>/logs/<sessionId>.log.jsonl`), created by function 0 (`start-session`)'s entry —
   its first line. Every completed function invocation appends exactly one entry to the log of
   the session it ran in, and the log-entry contract schema-binds every entry. A workflow instance
   owns no file: its history is its *instance view* — the ordered union of the entries carrying
@@ -83,8 +84,10 @@ and implementation parts prescribe its realization.
   (C0) — a condition may read log evidence and assert it as state (C5) — but they are not
   artifacts: agents never write logs, and no step produces one.
 - **Session** — the harness's unit of execution identity and log ownership: a bounded span of
-  work, opened at the session-started boundary and registered by function 0 under a `sessionId`
-  that names it for the life of its log. A session is performed by exactly one framework
+  work, opened at the session-started boundary and registered by function 0 (`start-session`)
+  under a `sessionId` that names it for the life of its log — and, best-effort, closed by
+  function 11 (`end-session`) with a final entry when the surrounding mechanism can observe
+  that end (C8). A session is performed by exactly one framework
   **agent** — the orchestrator (driving a workflow) or a dispatched subagent (acting a step) —
   fixed for the session's entire lifetime: the harness registers agent sessions, nothing else.
   An orchestrator session spans
@@ -120,7 +123,7 @@ and implementation parts prescribe its realization.
 
 ## The harness functions
 
-This is the functional contract: everything the harness exposes is exactly one of these eleven
+This is the functional contract: everything the harness exposes is exactly one of these twelve
 functions, every log entry names the function that produced it, and every harness command is
 an entry point into one of them. (Configuration and workspace validity are enforced too — but
 internally, not as functions: see
@@ -154,8 +157,8 @@ beside them in the same object (for example `workflowSlug` for function 3 or `ar
 for functions 8–9). Whatever surrounds each invocation — a hook mechanism — supplies
 the session fields; a raw agent-authored value is not trusted. Function 0 is the bootstrap
 exception: its `in` always carries the framework agent name as a required `agent` slug,
-because no registration exists yet and the session record is the only place to attach that
-identity — the harness registers agent sessions: harnessing agents is what this function, and
+because no opening exists yet and the session record is the only place to attach that
+identity — the harness opens agent sessions: harnessing agents is what this function, and
 the harness itself, is for.
 Every function is session-bound: there is no session-less invocation.
 
@@ -177,7 +180,7 @@ them. Shared contracts live beside them:
 
 | # | Function | What it answers | When |
 |---|---|---|---|
-| 0 | [`register-session`](#0-register-session) | Which framework-agent session just opened, under which parent session — the registration every later entry's session ids trace back to? | session-started / step-started — every framework-agent session, always first |
+| 0 | [`start-session`](#0-start-session) | Which framework-agent session just opened, under which parent session — the registration every later entry's session ids trace back to? | session-started / step-started — every framework-agent session, always first |
 | 1 | [`resolve-workflow-instructions`](#1-resolve-workflow-instructions) | Which workflow-context guidance does the orchestrator's session load? | session-started |
 | 2 | [`resolve-workflow-skills`](#2-resolve-workflow-skills) | Which skills does the orchestrator's session load? | session-started |
 | 3 | [`resolve-step`](#3-resolve-step) | What is the next eligible step of this workflow instance, with its full step resolution — or is there no next step to resolve? | mediated agent invocation — on assent, and after each step's outcome journals |
@@ -188,6 +191,7 @@ them. Shared contracts live beside them:
 | 8 | [`check-step-authorization`](#8-check-step-authorization) | Is this write a granted privilege of the acting agent? | write-starting |
 | 9 | [`check-step-artifact`](#9-check-step-artifact) | Is the step's written artifact schema-valid? | write-ended |
 | 10 | [`check-step-postconditions`](#10-check-step-postconditions) | Did this step deliver? | step-ended |
+| 11 | [`end-session`](#11-end-session) | Which session just ended, closing its log with a final entry? | session-ended / step-ended — best-effort, whenever the surrounding mechanism can observe it |
 
 The `When` values are the harness's canonical **boundaries** — abstract lifecycle trigger
 points — or the non-hook invocation surface: host event names never appear in the
@@ -195,7 +199,7 @@ functional contract (C4); how host events normalize to boundaries is entirely ou
 specification's concern, per [Boundary Normalization](#boundary-normalization).
 
 Function 0 is **session-scoped**: triggered at every session start — orchestrator and step
-sessions alike — strictly before any other function of that session; it registers the
+sessions alike — strictly before any other function of that session; it opens the
 session's identity and creates its log. Functions 1–2 **resolve the
 orchestrator's workflow context** at its session start — selection and return-handling
 instructions, procedure skills — which get injected at session open. Functions 3–4 are
@@ -204,26 +208,31 @@ the instance view of the logs plus validated configuration; they read no artifac
 5–10 are **step-scoped**, in step lifecycle order — 1 step = 1 agent = 1 session = 1 artifact:
 5 gates the dispatch, 6–7 resolve the step's declared context at its session start (injected
 there too), 8–9 guard
-every write as it lands, 10 evaluates delivery against the state the step left. There is no
-globally-scoped check function: configuration and workspace validity are internal enforcement
-(see [Internal validation](#internal-validation--not-functions)).
+every write as it lands, 10 evaluates delivery against the state the step left. Function 11 is
+**session-scoped at the opposite end**: best-effort, triggered whenever the surrounding
+mechanism can observe a session ending — orchestrator and step sessions alike — appending the
+session's closing log entry (C8); a session whose end is never observed simply never gets one,
+which is not an error state.
 
-The sequence diagram [`harness-functions.puml`](harness-functions.puml) shows all
-eleven functions in play across one workflow instance — framework user, orchestrator agent,
-step subagents, host, and harness.
+The sequence diagram [`harness.sd.puml`](../harness.sd.puml) shows all
+twelve functions in play across one workflow instance — framework user, orchestrator agent,
+step subagents, host, adapter, and harness core. It lives one level up (`def/`), not under
+`def/core/`, because it depicts one concrete host binding's hooks (as a distinct Adapter
+participant, separate from the host-agnostic Harness core) realizing the boundaries — see
+[`../adapter/vscode-github-copilot-chat/spec.md`](../adapter/vscode-github-copilot-chat/spec.md).
 
-![Harness functions sequence diagram](harness-functions.png)
+![Harness functions sequence diagram](../harness.sd.png)
 
-### 0. register-session
+### 0. start-session
 
 The session seed: the first function of every session, triggered strictly before any other
-function at that session's level. It registers the session's identity — the
+function at that session's level. It starts the session's identity — the
 `sessionId` and, for a dispatched (subagent) session, its `parentSessionId` — and creates the
-session's log file with this registration as its first entry: the entry every later entry's
+session's log file with this start as its first entry: the entry every later entry's
 session ids trace back to. The harness stays agnostic about how the session id was sourced;
 the surrounding mechanism is responsible for observing or minting it before invocation. The
 caller always attaches the session's framework-agent identity as a required `agent` slug — the
-harness registers agent sessions: it resolves, checks, and records for the framework's agents.
+harness starts agent sessions: it resolves, checks, and records for the framework's agents.
 
 No agent ever reports its own session identity: the id is always observed or minted by the
 surrounding mechanism, never accepted as a raw
@@ -234,10 +243,10 @@ agent-authored argument.
 - **In** — the session ids: `sessionId` (this session) and `parentSessionId` (the session that
   opened this one — nullable: a dispatching agent session, or `null` for a root session).
   `agent` is **required**: the framework-agent identity — the harness
-  registers agent sessions, so every invocation names one.
-- **Out** — `SessionRegistrationReport`: the `session` object.
+  starts agent sessions, so every invocation names one.
+- **Out** — `SessionStartReport`: the `session` object.
 - **Caller usage** — never called by an agent's own action; called by whatever surrounds the
-  session's opening (a hook mechanism). Later
+  session's start (a hook mechanism). Later
   mediated agent invocations of the same
   session are attributed to it per the
   session-attribution rule (see [Invocation surfaces](#invocation-surfaces-one-command-system)
@@ -250,18 +259,18 @@ Example:
   "in": { "agent": "qa-engineer", "sessionId": "01j9xqr7t3", "parentSessionId": "01j9xq0f2m" },
   "out": {
     "context": {
-      "function": "register-session",
+      "function": "start-session",
       "sessionId": "01j9xqr7t3",
       "parentSessionId": "01j9xq0f2m",
       "workflowInstanceId": null
     },
-    "outcome": { "status": "registered" },
+    "outcome": { "status": "started" },
     "session": { "agent": "qa-engineer", "sessionId": "01j9xqr7t3", "parentSessionId": "01j9xq0f2m" }
   }
 }
 ```
 
-Contract schemas — [harness/contracts/api/register-session.input.schema.json](harness/contracts/api/register-session.input.schema.json) and [harness/contracts/api/register-session.output.schema.json](harness/contracts/api/register-session.output.schema.json).
+Contract schemas — [harness/contracts/api/start-session.input.schema.json](harness/contracts/api/start-session.input.schema.json) and [harness/contracts/api/start-session.output.schema.json](harness/contracts/api/start-session.output.schema.json).
 
 **Preconditions**
 
@@ -270,7 +279,7 @@ Contract schemas — [harness/contracts/api/register-session.input.schema.json](
   filename (see [Logging](#logging)).
 - `agent` resolves to a framework agent identity (C7) — a caller with no genuine
   framework-agent identity to supply simply names no real agent, so the session passes
-  through untouched and unregistered: the harness registers agent sessions, nothing else.
+  through untouched and unstarted: the harness starts agent sessions, nothing else.
   This holds without an
   explicit access-control-list lookup at this function: for a root session (no parent) the
   caller's own scoping already guarantees it (an agent-scoped trigger fires only for a genuine
@@ -284,23 +293,23 @@ Contract schemas — [harness/contracts/api/register-session.input.schema.json](
 
 **Postconditions**
 
-- The session log `<workspace>/logs/<sessionId>.log.jsonl` exists; the registration entry
+- The session log `<workspace>/logs/<sessionId>.log.jsonl` exists; the start entry
   is its first line.
-- The registration is the session-scope seed: every subsequent entry of this session carries
-  the registered `sessionId` (and `parentSessionId` where present) in its envelope.
+- The start is the session-scope seed: every subsequent entry of this session carries
+  the started `sessionId` (and `parentSessionId` where present) in its envelope.
 
 **Invariants**
 
-1. Registration precedes everything: no function logs at a session's level before this one —
+1. Starting precedes everything: no function logs at a session's level before this one —
    physically enforced, since function 0 creates the very file the others append to.
 2. Session ids are observed or minted by the surrounding mechanism — host event payload and
   normalization — never minted
   by the harness, never self-reported by an agent.
-3. The parent chain is unbounded: each registration records one parent, so any nesting depth
-   of subagent dispatches reconstructs by walking registrations parent-by-parent — the
+3. The parent chain is unbounded: each start records one parent, so any nesting depth
+   of subagent dispatches reconstructs by walking starts parent-by-parent — the
    envelope never caps the hierarchy at two levels. Any dispatched subagent may record a
    parent, at any nesting depth.
-4. Registration is idempotent per session: re-delivery of the same session-start signal (host
+4. Starting is idempotent per session: re-delivery of the same session-start signal (host
    resume, duplicate hook) appends no second
    registration for an already-registered `sessionId`.
 
@@ -527,6 +536,8 @@ Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harn
   acyclic, every step routes.
 - The user assented to the workflow (per the selection instruction). Instance continuation or
   opening is deduced (In, above) — no id is ever given.
+- The attributed `sessionId` resolves to a currently open, registered session — the
+  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system)).
 - Trigger — mediated agent invocation, each time the orchestrator asks "what's
   next?" on a driven workflow: after starting it on user assent, and after each step's
   outcome journals — including after a failed outcome, where the same call re-resolves the
@@ -637,6 +648,8 @@ Contract schemas — [harness/contracts/api/resolve-step-model.input.schema.json
 - The model catalog and the step's capability map are loaded and validated (fail-fast at load).
 - An in-flight step exists in the invoking session: function 3 resolved it and its outcome has
   not journaled yet.
+- The attributed `sessionId` resolves to a currently open, registered session — the
+  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system)).
 - Trigger — mediated agent invocation, between resolution and dispatch. The
   invocation is session-attributed (see [Logging](#logging)).
 
@@ -1139,6 +1152,80 @@ Contract schemas — [harness/contracts/api/check-step-postconditions.input.sche
    This journaled outcome is exactly what function 3's cursor reads — a step whose latest
    outcome passes counts as executed.
 
+### 11. end-session
+
+The session's counterpart to function 0: closes a session's log with a final entry when the
+surrounding mechanism can observe that session ending. **Best-effort, not mandatory** — a
+session whose end the surrounding mechanism cannot observe (a crash, a force-quit host) simply
+never receives this entry; that is not an error state, merely one without this function's
+extra protection (C8). Where it does run, it gives the harness core itself an authoritative,
+host-agnostic answer to "is this session still open" — computed from the session's own log,
+the same persisted state every other function already reads — rather than leaving that fact
+to any one host adapter's private bookkeeping.
+
+**Interface**
+
+- **In** — `sessionId`: the session being ended. Nothing else — no `parentSessionId`, no
+  `agent`: both are already on record from this session's own start entry, and this
+  function's only job is to close the log that entry started.
+- **Out** — `SessionEndReport`.
+- **Caller usage** — never called by an agent's own action; called by whatever surrounds the
+  session's ending, whenever it can observe that ending (a hook mechanism). Idempotent: ending
+  an already-ended or never-started session is a no-op, not an error — a duplicate ending
+  signal (host re-delivery) changes nothing.
+
+Example:
+
+```json
+{
+  "in": { "sessionId": "01j9xqr7t3" },
+  "out": {
+    "context": {
+      "function": "end-session",
+      "sessionId": "01j9xqr7t3",
+      "parentSessionId": "01j9xq0f2m",
+      "workflowInstanceId": null
+    },
+    "outcome": { "status": "ended" }
+  }
+}
+```
+
+Contract schemas — [harness/contracts/api/end-session.input.schema.json](harness/contracts/api/end-session.input.schema.json) and [harness/contracts/api/end-session.output.schema.json](harness/contracts/api/end-session.output.schema.json).
+
+**Preconditions**
+
+- The surrounding mechanism has observed that the session ended — never inferred by the
+  harness itself, which has no notion of a session's execution independent of its log.
+- Trigger — the session-ended boundary, whenever the surrounding mechanism can observe it;
+  best-effort, not guaranteed to fire for every session (above).
+
+**Postconditions**
+
+- The session's log carries an ending entry as its last line, when the session was open.
+- Ending is idempotent: an already-ended or never-started `sessionId` produces the same
+  `ended` outcome and no additional entry.
+- **C8 takes effect from this entry on**: every session-bound function's precondition
+  includes checking that its target session's log carries no ending entry; a call against an
+  ended session is refused, regardless of what any adapter's own bookkeeping believes is
+  "current" (see [General invariants](#general-invariants)).
+
+**Invariants**
+
+1. Ending is the mirror of starting (function 0, invariant 1): where starting precedes
+   everything, ending follows everything — no further entry is ever appended to an ended
+   session's log (enforced by C8 at every other function, not by this one).
+2. Idempotent per session: re-delivery of the same session-end signal, or an ending call
+   against a session already ended, appends no second ending entry and is never an error.
+3. Best-effort by design: this function's absence from a session's log is not a fault
+   condition anywhere else in this contract — no other function's precondition requires an
+   ending entry to exist, only that one does not exist for OTHER, later invocations to be
+   refused.
+4. Ending asserts nothing about the session's workflow instance: a workflow instance's
+   openness is computed structurally from its own steps' journaled outcomes (function 3,
+   invariant 1), entirely independent of whether the session that resolved it has since
+   ended.
+
 ### Internal validation — not functions
 
 Configuration validity and workspace validity are harness concerns — but not harness
@@ -1265,6 +1352,17 @@ The harness governs the framework's agents, not the host. A hook event is proces
 its agent resolves to a framework agent (a normalized identity the ACL declares); events from
 any other host agent or session pass through untouched and unlogged.
 
+#### C8 - Session ending
+
+A session whose log carries an ending entry (function 11) accepts no further invocation:
+every session-bound function's precondition includes checking that its target session's log
+carries no such entry, and refuses the call if it does. This holds regardless of what any
+adapter's own bookkeeping believes is "current" — the check reads the target session's own
+log, the harness's own persisted state (C0), never an adapter-side record. Ending is
+best-effort (function 11, invariant 3): a session that never receives an ending entry is
+simply never refused on that basis — this invariant only ever narrows what is accepted, never
+requires ending to have happened.
+
 ---
 
 ## Design
@@ -1274,7 +1372,7 @@ any other host agent or session pass through untouched and unlogged.
 Every harness function is exposed as a harness command: the Python executable function entry
 point. It accepts one input object (session attribution fields + function-specific fields) and
 returns the function's Report as `out`. Every invocation is session-bound — there is no
-session-less surface, and every session is an `agent`-origin session: the harness registers,
+session-less surface, and every session is an `agent`-origin session: the harness opens,
 and journals for, agents — nothing else. The command system is entered through two invocation
 surfaces:
 
@@ -1283,7 +1381,7 @@ surfaces:
   bookkeeping — never the harness's stores or config; this surface triggers functions 0–2 and
   5–10 at their natural boundaries.
 - **Mediated agent invocation** — an agent asks through a trusted surface into a harness
-  command, within an already-registered session. This surface is available only where that
+  command, within an already-opened session. This surface is available only where that
   surface can attach host-observed session attribution outside model-authored arguments. It
   may serve functions 3–4. A host that cannot prove such attribution MUST NOT expose this
   surface for session-bound functions.
@@ -1304,32 +1402,68 @@ argument is not sufficient. If a host lacks such a mechanism, functions 3–4 ar
 as mediated commands for that host; whatever specifies that host's binding must state that
 limitation.
 
+**Narrow tool-boundary-stamp exception.** A host binding MAY still expose functions 3–4
+through a tool-boundary stamp — otherwise insufficient per the rule above — ONLY when ALL of
+the following hold, each stated explicitly in that host's binding:
+
+1. The stamped invocation's shape is **fully framework-authored and structurally
+   recognized** (a fixed command pattern the framework's own instructions dictate verbatim),
+   never a loosely-matched heuristic over open-ended agent phrasing.
+2. Any invocation already carrying model-authored attribution is **denied outright**, never
+   merely overwritten.
+3. The [mediated-invocation backstop](#invocation-surfaces-one-command-system) below is in
+   force, so an unresolvable or unregistered id fails closed at the harness itself regardless
+   of the stamp's own reliability.
+4. The binding names this an **explicit, interim exception** — not a permanent design — and
+   tracks the structural fix that would remove the need for it (a host-native surface that
+   passes attribution outside model-visible arguments, per the rule above, once one exists
+   for that host).
+
+Without all four, the rule above applies without exception: the host MUST NOT expose
+functions 3–4 as mediated commands.
+
+**Mediated-invocation backstop.** Independent of whatever attribution mechanism a host
+binding uses — sufficient, exception-qualified, or neither — every mediated invocation's
+`sessionId` is validated
+against the harness's own session registry before functions 3–4 proceed: an id that does not
+resolve to a currently open, registered session (C7/C8) is rejected outright, never silently
+trusted and never defaulted to some other session. This is a backstop, not a substitute for
+the rule above: it bounds the damage of a weaker-than-required host mechanism (a
+misattributed or model-guessed id fails closed at the harness itself, visibly, rather than
+silently corrupting a foreign session's log) but does not by itself make that mechanism
+sufficient — a host binding relying on the exception above still MUST state it explicitly.
+
 There is no hook logic inside the harness core: the **harness core** (`src/` + the function
 commands) is hook- and host-blind by package graph — it exposes exactly one command per
 function and nothing else, no hook command — so agents invoke the
-same eleven pure commands directly. Whatever normalizes host events into boundaries and
+same twelve pure commands directly. Whatever normalizes host events into boundaries and
 session attribution, and however many hosts it serves, is entirely outside this
-specification's concern: the harness core's only obligation is to expose its eleven commands
+specification's concern: the harness core's only obligation is to expose its twelve commands
 under their JSON contracts and trust nothing but what those contracts carry — this document
 never needs to reference how, or by what, a given host is bound.
 
 ### Boundary Normalization
 
 Host events are normalized to harness boundaries before any policy is applied, by whatever
-mechanism embeds the harness for a given host. This specification names the boundaries only
-and requires nothing further of that mechanism beyond correct session attribution (above).
-Dispatch tools carry the **step boundary** — the subagent session IS the step,
-so step pre- and postconditions apply before and after it — while write tools carry the **write
-boundary** (authorization and schema validity, never step conditions).
+mechanism embeds the harness for a given host. Concretely, that mechanism's one irreducible
+job is session identification: using whatever host-specific signals it alone has access to,
+decide which agent session a given host event or mediated call belongs to. The harness core
+never performs this resolution and never sees the host-specific data behind it — only the
+resolved `sessionId` / `parentSessionId` it carries (C4). This specification names the
+boundaries only and requires nothing further of that mechanism beyond correct session
+attribution (above). Dispatch tools carry the **step boundary** — the subagent session IS the
+step, so step pre- and postconditions apply before and after it — while write tools carry the
+**write boundary** (authorization and schema validity, never step conditions).
 
 | Boundary | Structural evidence | Functions |
 | --- | --- | --- |
-| session-started | Session-open event with no correlated unresolved `step-resolution` entry | 0 (registration — always first) + 1, 2 |
+| session-started | Session-open event with no correlated unresolved `step-resolution` entry | 0 (opening — always first) + 1, 2 |
 | step-starting | Dispatch about to open a step session | 5 (preconditions — THE enforcement point) |
-| step-started | Session-open event correlated to an unresolved `step-resolution` entry | 0 (registration — always first) + 6, 7 |
+| step-started | Session-open event correlated to an unresolved `step-resolution` entry | 0 (opening — always first) + 6, 7 |
 | write-starting | Write tool about to mutate an artifact path | 8 (authorization + staging baseline — can deny) |
 | write-ended | Write tool has landed a staged write on an artifact path | 9 (schema validity — the commit gate) |
 | step-ended | Dispatch returned after the step session ended | 10 (postconditions — THE evaluation point) |
+| session-ended | Session-end event, whenever the surrounding mechanism can observe it | 11 (closing — best-effort, C8) |
 
 This keeps the harness env-agnostic: normalizing host-specific event names and tool payloads,
 and deciding which tools are dispatches and which are writes, is entirely someone else's job.
@@ -1362,7 +1496,7 @@ src/
   application.py      # the composition root: builds the object graph (config dataclasses fail-fast) and dispatches argv to one command
   commands/           # usage entry points (≈ web controllers): parse input, invoke the service(s), render the result — no domain logic
   services/           # the logical domain services commands use: all harness logic lives here
-    session_registration/ # SessionRegistrar + its result: SessionRegistration (function 0)
+    session_lifecycle/ # SessionLifecycle + its results: SessionStartReport (0), SessionEndReport (11)
     step_resolution/  # StepResolver + its result: StepResolution
     model_resolution/ # StepModelResolver + its result: ModelProfileReport
     checking/         # the checkers + ConditionEvaluator + their result reports and ConditionCheck
@@ -1435,7 +1569,7 @@ Four placement rules settle the boundary questions:
 - **Host-aware code never enters `src/`.** Event classification, session identification,
   boundary orchestration, and decision rendering are entirely outside this specification's
   concern — whatever embeds the harness for a given host owns that code, and depends on
-  exactly one thing in the core: the eleven function commands, never `services`, `stores`, or
+  exactly one thing in the core: the twelve function commands, never `services`, `stores`, or
   `config`. `src/` is host-blind structurally: nothing in it needs to know that such a thing
   exists, let alone how it is built.
 
@@ -1464,7 +1598,7 @@ dependency direction, as in the source layout: `commands → services →
   `ConfigLoader` (fail-fast) and wires the object graph, then dispatches `argv` to one command
   (`dispatch_command`).
 - **`commands`** — `Command` is the single interface (`execute_function`), realized by
-  **eleven commands — exactly one per harness function** — each holding its
+  **twelve commands — exactly one per harness function** — each holding its
   service(s) as private attributes: parse the function's `in` object, invoke, render the typed
   result to the `out` object. No command composes services: functions 3 and 4 are fully
   independent, and whoever needs both composes them outside the harness core (the
@@ -1475,7 +1609,8 @@ dependency direction, as in the source layout: `commands → services →
 - **`services`** — all harness logic, one service per function, grouped in **subpackages
   by family**, and each result dataclass homed in the subpackage of the classes returning it —
   **exclusively with them**:
-  - `session_registration/` — `SessionRegistrar` (0 → `SessionRegistration`);
+  - `session_lifecycle/` — `SessionLifecycle` (0 → `SessionStartReport`; 11 →
+    `SessionEndReport`);
   - `context_resolution/` — the four context resolvers (1–2, 6–7) with their report classes:
     `WorkflowInstructionsReport`, `WorkflowSkillsReport`, `StepInstructionsReport`, and
     `StepSkillsReport`;
@@ -1639,11 +1774,13 @@ agent-authored plane — artifacts — and nothing else.
 One append-only JSONL file per session:
 `<workspace>/logs/<sessionId>.log.jsonl`
 
-**1 session = 1 writer = 1 log file.** `register-session` (function 0) creates the file —
-its registration entry is the first line — so nothing logs at a session's level before
-registration, and no two writers ever contend for one file: appends are single-writer by
-construction (no locking), and a log stops growing when its session ends, so growth partitions
-by session lifecycle and no rotation policy is needed.
+**1 session = 1 writer = 1 log file.** `start-session` (function 0) creates the file —
+its opening entry is the first line — so nothing logs at a session's level before
+opening, and no two writers ever contend for one file: appends are single-writer by
+construction (no locking). `end-session` (function 11) appends the ending entry as the
+last line when the surrounding mechanism can observe the session ending (C8) — but a log may
+also simply stop growing without one, best-effort not being a guarantee; either way growth
+partitions by session lifecycle and no rotation policy is needed.
 
 **The entry contract.** Every entry is the record of exactly one completed function
 invocation — 1 invocation = 1 entry: entries are never shared between functions and never
@@ -1673,8 +1810,9 @@ Contract schema — [harness/contracts/log-entry.schema.json](harness/contracts/
 **The status rule.** The only status is the function's outcome, and each function defines
 and owns it in its own I/O contract, inside its report — under ONE shared field name,
 `outcome`, so every report carries one, even where a single value is possible: 0
-`registered`; 1–2, 4, and 6–7 `resolved`; 3 `step-resolution`/`no-next-step`;
-5 and 10 `pass`/`fail`; 8 `allowed`/`denied`; 9 `valid`/`reverted`; all functions may also
+`started`; 1–2, 4, and 6–7 `resolved`; 3 `step-resolution`/`no-next-step`;
+5 and 10 `pass`/`fail`; 8 `allowed`/`denied`; 9 `valid`/`reverted`; 11 `ended`; all functions
+may also
 return `input-error`, `state-error`,
 `configuration-error`, `invocation-error`, or `system-error`. Error outcomes are ordinary outcomes
 in the same report envelope; they carry the `error` detail object — required on error statuses,
@@ -1795,7 +1933,7 @@ by fakes and tmp-dir workspaces, never by monkey-patching internals.
 
 ### Functional testing (proposal)
 
-`harness/tests/functional/` — one test module per harness FUNCTION (eleven), exercising the real
+`harness/tests/functional/` — one test module per harness FUNCTION (twelve), exercising the real
 command entry point over a fixture framework configuration and a fixture workspace:
 
 - each test asserts the full Interface (In → Out), the Postconditions (exact log entries

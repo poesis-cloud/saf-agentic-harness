@@ -20,8 +20,11 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     interface Command {
       +execute_function(invocation: FunctionInvocation) : Report
     }
-    class RegisterSessionCommand {
-      -_registrar : SessionRegistrar
+    class StartSessionCommand {
+      -_lifecycle : SessionLifecycle
+    }
+    class EndSessionCommand {
+      -_lifecycle : SessionLifecycle
     }
     class ResolveStepCommand {
       -_step_resolver : StepResolver
@@ -61,7 +64,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       composes them OUTSIDE the harness core.
     end note
     note bottom of Command
-      ELEVEN commands - exactly one per harness function,
+      TWELVE commands - exactly one per harness function,
       hook- and host-blind. Commands are the JSON boundary:
       parse the FunctionInvocation input object (session
       attribution fields + function-specific fields),
@@ -75,19 +78,30 @@ package "CD - Harness core classes (src/)" <<Frame>> {
 
   package "services" {
 
-    package "session_registration" {
-      class SessionRegistrar {
+    package "session_lifecycle" {
+      class SessionLifecycle {
         -_session_log_store : SessionLogStore
-        +register_session(agent: str, session_id: str, parent_session_id: str | None) : SessionRegistrationReport
+        +start_session(agent: str, session_id: str, parent_session_id: str | None) : SessionStartReport
+        +end_session(session_id: str) : SessionEndReport
       }
-      class SessionRegistrationReport <<dataclass>> {
+      class SessionStartReport <<dataclass>> {
         +session : SessionRef
+      }
+      class SessionEndReport <<dataclass>> {
       }
       class SessionRef <<dataclass>> {
         +agent : str
         +session_id : str
         +parent_session_id : str | None
       }
+      note bottom of SessionLifecycle
+        ""start_session"" (function 0) and ""end_session""
+        (function 11) are the session's two boundary
+        writes to its own log - starting (always first)
+        and ending (best-effort, C8). ""end_session""
+        is idempotent: ending an already-ended or
+        never-started id is a no-op, not an error.
+      end note
     }
 
     package "step_resolution" {
@@ -289,7 +303,6 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       }
       class Context <<dataclass>> {
         +function : str
-        +actor : str
         +session_id : str
         +parent_session_id : str | None
         +workflow_instance_id : str | None
@@ -316,9 +329,10 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       Outcome o-- Error
       note bottom of SessionLogStore
         Owns the log side: 1 session = 1 writer = 1 file,
-        created by function 0's registration entry (the
-        file's first line); ""load_workflow_instance_view""
-        assembles the cross-log ""WorkflowInstanceView"" -
+        created by function 0's start entry (the
+        file's first line) and, best-effort, closed by
+        function 11's entry (the file's last line, C8);
+        ""load_workflow_instance_view"" assembles the cross-log ""WorkflowInstanceView"" -
         discovery scan + ts ordering under the single-driver
         invariant (see Logging). Report is the abstract base
         every service result extends (the subtypes live with
@@ -458,7 +472,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   }
 
   ' --- command surface: one command per harness function (1:1) ---
-  Command <|.. RegisterSessionCommand
+  Command <|.. StartSessionCommand
+  Command <|.. EndSessionCommand
   Command <|.. ResolveStepCommand
   Command <|.. ResolveStepModelCommand
   Command <|.. CheckStepPreconditionsCommand
@@ -478,7 +493,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   YamlLoader ..> PyYamlLib : safe_load
 
   ' --- result <-> report correlation: every service result IS a Report subtype ---
-  Report <|-- SessionRegistrationReport
+  Report <|-- SessionStartReport
+  Report <|-- SessionEndReport
   Report <|-- StepResolutionReport
   Report <|-- ModelProfileReport
   Report <|-- CheckReport
@@ -490,7 +506,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   Report <|-- StepInstructionsReport
   Report <|-- StepSkillsReport
   CheckReport "findings" o-- Finding : every check finding is\nthe Finding homed in\nstores/artifact_store
-  SessionRegistrationReport o-- SessionRef
+  SessionStartReport o-- SessionRef
   ConditionCheckReport o-- ConditionCheck
   AuthorizationReport o-- Authorization
   ArtifactCheckReport o-- ArtifactCheck

@@ -15,9 +15,12 @@ only an orientation pointer. Each host binding has its own specification under
 
 ## Layout
 
-- `def/core/` — the harness-core specification (`spec.md`) and its diagrams:
-  `harness-functions.puml` (the sequence diagram) and `harness-src-classes.puml` (the class
-  diagram) — `src/` only, host-blind.
+- `def/` — `harness.sd.puml`, the sequence diagram spanning one workflow instance across
+  framework user, orchestrator agent, step subagents, host, and harness. It sits above
+  `core/` and `adapter/` because it depicts host-mediated steps (hooks, dispatch) alongside
+  the host-agnostic ones, so it is not core-only.
+- `def/core/` — the harness-core specification (`spec.md`) and its class diagram
+  (`harness-src-classes.puml`) — `src/` only, host-blind.
 - `def/adapter/<host>/` — one specification + class diagram per host binding (e.g.
   `vscode-github-copilot-chat/`).
 - `adapters/` — host-specific bindings (e.g. `vscode-github-copilot-chat/`).

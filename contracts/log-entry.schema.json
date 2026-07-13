@@ -19,12 +19,12 @@
           "description": "Wall-clock time the log entry was appended."
         },
         "report": {
-          "$ref": "api/register-session.output.schema.json",
+          "$ref": "api/start-session.output.schema.json",
           "description": "The function report persisted by this entry."
         }
       },
       "unevaluatedProperties": false,
-      "description": "Log entry for a register-session report."
+      "description": "Log entry for a start-session report."
     },
     {
       "type": "object",
@@ -225,6 +225,26 @@
       },
       "unevaluatedProperties": false,
       "description": "Log entry for a check-step-postconditions report."
+    },
+    {
+      "type": "object",
+      "required": [
+        "timestamp",
+        "report"
+      ],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Wall-clock time the log entry was appended."
+        },
+        "report": {
+          "$ref": "api/end-session.output.schema.json",
+          "description": "The function report persisted by this entry."
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Log entry for an end-session report."
     }
   ]
 }
