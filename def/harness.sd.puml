@@ -181,11 +181,12 @@ note right of Orch
   re-resolution on negative reports (invariant 7).
 end note
 
-== Conversation close ==
+== Turn close (""Stop"" fires at the end of EVERY request's loop — verified) ==
 Host -> Adapter : hook ""Stop""
 Adapter -> Adapter : resolve the ending orchestrator session\nvia ""SessionTracker"" — never the raw conversation id\n(a never-registered session is a silent pass-through)
 Adapter -> Harness : ""11 end-session""(sessionId)
 Harness --> Adapter : { outcome: ended }\n(never surfaced to the host; no function runs\nfor a session whose end is never observed)
+Adapter -> Adapter : ""SessionTracker"" clears this conversation's stack —\na later firing under a non-framework agent\nresolves to None: C7 pass-through, never a stale session
 
 note right of Harness
   Configuration and workspace validity are

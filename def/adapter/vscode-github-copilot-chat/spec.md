@@ -37,6 +37,8 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
 - [Agent-session semantics](#agent-session-semantics) — 1 agent session = 1 execution until
   return; turns, steering, workflow end-to-end coherence
 - [Session identity binding](#session-identity-binding)
+- [Session correlation scenarios](#session-correlation-scenarios) — every case a hook firing's
+  session attribution can land in, and why
 - [The hooks](#the-hooks) — one specification per hook:
   - [H0 agent-scoped `UserPromptSubmit`](#h0-agent-scoped-userpromptsubmit--session-started) — session-started (0, 1, 2)
   - [H1 `SubagentStart`](#h1-subagentstart--step-started) — step-started (0, 6, 7)
@@ -407,8 +409,9 @@ bounded exceptions the harness already absorbs:
 Engagement/selection turns before assent are agent sessions that drive no instance — they
 journal their registration and context resolutions, nothing else.
 
-⚠ The harness spec's own sentence "an orchestrator session spans many workflow instances
-over its lifetime" describes the conversation, not the agent session — see I2.
+The harness spec's Session definition now carries this exactly: a session serves at most one
+workflow instance, and an instance's view spans sessions — never the converse (see I2,
+resolved).
 
 ## Session identity binding
 
@@ -430,9 +433,18 @@ minted by the surrounding mechanism). Sanitization: lowercase; any character out
 
 **Host-session → current-agent-session resolution.** Every hook's envelope carries a
 `session_id` — confirmed **shared across the whole conversation, including nested subagent
-dispatches** (verified against `microsoft/vscode`'s `ExecutionSubagentTool`: a subagent's own
-`Conversation` is constructed with its PARENT's `sessionId`, never its own `agent_id` — see
-I13). Because the raw id repeats, the adapter cannot resolve it with a flat "remember one
+dispatches**, on BOTH subagent paths (verified against `microsoft/vscode`: the built-in
+subagent tools construct their loop's `Conversation` with the PARENT's `sessionId`
+(`executionSubagentTool.ts` / `searchSubagentTool.ts`), and the full `runSubagent` chat
+pipeline resolves `actualSessionId = history ?? request.sessionId ?? uuid` where a subagent
+request's `request.sessionId` IS the parent conversation's id
+(`chatParticipantRequestHandler.ts`; `defaultIntentRequestHandler.ts` uses that same field
+as the "link back to the parent session"). The genuinely per-agent-execution id
+(`subAgentInvocationId`) is never a hook `session_id` — it serves trajectory/log-file
+linking only, surfacing in hooks solely as `SubagentStart`/`SubagentStop`'s `agent_id` — see
+I13). The host docs' "agent session" wording notwithstanding, the envelope `session_id` is
+the conversation. Because the raw id repeats, the adapter cannot resolve it with a flat
+"remember one
 value" pointer — `SessionTracker` keeps a **stack per `sanitized(session_id)`**, never the
 harness log (which the adapter has no access to at all):
 
@@ -444,8 +456,16 @@ harness log (which the adapter has no access to at all):
 - **H7** (the step-closing case) pops the step session back off, restoring the dispatching
   session as current — see Session closure just below. Without this pop, the
   orchestrator's NEXT mediated call (H4) after a step closes would misattribute to the
-  already-ended step session instead of its own.
+  already-ended step session instead of its own. H7's `Stop` case instead **clears** the
+  whole stack for this `session_id` — the turn is over, and forgetting immediately is what
+  makes a LATER firing from a non-framework agent in the same conversation resolve to
+  `None` (the correct C7 pass-through) instead of a stale session.
 - **H2/H3/H4/H5/H6** only ever read the top via `resolve_current` — never push or pop.
+  **Everything not pushed as a step belongs to the current top**: the orchestrator's own
+  tool calls — including any non-framework subagent it spawns (H1 registers and pushes
+  nothing for those) — are the orchestrator acting, and resolve to its session. That is
+  attribution semantics, not a leak: a dispatch is the dispatcher's action unless the
+  framework carved it into its own step session.
 
 Deterministic: a conversation processes one request at a time, and only one step is in flight
 per orchestrator session (function 3, invariant 9), so the stack never holds more than one
@@ -455,18 +475,47 @@ entry beyond its base and resolution is unambiguous at every point in the sequen
 calls the harness's own `end-session` (function 11) with it (see H7, below) — a real,
 journaled harness invocation now, not adapter-only bookkeeping. `SubagentStop` additionally
 **pops** `SessionTracker`'s stack for this `session_id`, restoring the dispatching
-orchestrator session as current (above); `Stop` does not pop — the conversation's stack for
-that `session_id` is simply done, reset fresh by the next `UserPromptSubmit` (H0). From the
-closing entry on, C8 makes the harness core itself refuse any further invocation against that
-`sessionId`, regardless of what `SessionTracker` believes is "current" — closure is the
-core's own fact, computed from the session's own log, never duplicated in this adapter's
-private record. **If resolution
+orchestrator session as current (above); `Stop` **clears** the stack for this `session_id`
+outright — the turn is done, and an emptied tracker is what guarantees that a later hook
+firing in the same conversation while a NON-framework agent is active (no H0 fires for it,
+so nothing re-registers) resolves to `None` and passes through per C7, rather than
+resolving a stale framework session. Two independent defenses therefore cover the
+post-turn window: the cleared tracker (adapter-side, immediate) and C8 (core-side — the
+closing entry makes the core itself refuse any invocation against that `sessionId`,
+regardless of what `SessionTracker` believes). The honest residual is the closure's own
+best-effort nature (function 11, invariant 3): if the `Stop` hook itself never ran (host
+crash, timeout — hooks fail open on this host, see I6), neither defense engaged, and a
+stale resolution stays possible until the conversation's next H0 resets the stack. **If
+resolution
 finds no current session** for a `session_id` — never registered — no harness function is
 invoked at all: the same pass-through (exit 0, empty output) already used elsewhere in this
 binding for a foreign or unregistered session. H4 additionally **denies** rather than passing
 through (see H4, below): its tool call IS the harness command about to
 execute, so letting it run un-rewritten would invoke a harness function with no attributable
 session at all.
+
+## Session correlation scenarios
+
+Every case a hook firing's resolved `sessionId` can land in, and why it is correct — or, in
+one bounded case, not. "Registered" means `SessionTracker` holds an entry for this raw
+`session_id`; "current" means the top of that entry's stack.
+
+| # | Scenario | Resolution | Why |
+|---|---|---|---|
+| 1 | Two different conversations (concurrent chats/tabs) | Each resolves only its own | `SessionTracker` is keyed by the host's own `session_id` — distinct, host-assigned, unforgeable per conversation (see [Session identity binding](#session-identity-binding)) |
+| 2 | Same conversation, step nested under its dispatching turn | Step session while open, dispatching turn once it closes | H1 pushes, H7's `SubagentStop` pops — the stack IS the nesting |
+| 3 | Same conversation, later turn, previous turn's `Stop` ran normally | New turn's session | H0 resets the stack fresh on every firing, independent of whether `Stop` ran |
+| 4 | Same conversation, `Stop` never ran (crash/timeout), NEXT activity is a framework agent | New turn's session — self-heals | `UserPromptSubmit` fires before any tool call in the turn (host-ordered); H0 resets the stack unconditionally, so the stale entry cannot survive to be read |
+| 5 | Same conversation, `Stop` never ran, NEXT activity is a non-framework agent (no H0 fires for it) | **Stale session — the bounded residual gap** | Nothing resets a stack that only H0 clears/resets; C7's "unregistered → pass through" does not fire because the entry IS registered, just stale. Closes only at this conversation's next framework H0 |
+| 6 | Scenario 4/5, but the dead turn left an open workflow instance | Latest-open-instance deduction continues it (function 3, invariant 8) | Same handoff mechanism as any legal mid-instance return — no special case |
+| 7 | Scenario 4/5, but the dead turn left a step resolved with no outcome | Re-resolution resolves that step again | "Retry is re-resolution" (function 3, invariant 7); invariant 9's one-in-flight-step rule is scoped per session, so the dead session's dangling resolution never blocks the new one |
+| 8 | A hook fires for a `session_id` never seen before (foreign agent, or framework agent before its first H0) | Pass-through, exit 0, empty output; H4 denies instead | C7 — correct, not a gap: nothing was ever registered to misattribute to |
+
+Rows 1–4 and 6–8 are closed by construction. Row 5 is the only standing exposure, and it
+requires two independent failures at once (the host never firing `Stop`, AND the very next
+actor in that same conversation being a non-framework agent) — see [Session
+closure](#session-identity-binding) for the double defense (adapter clear + core C8) that
+narrows everything else.
 
 ---
 
@@ -1204,8 +1253,11 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
 2. `Stop` — resolve the ending orchestrator session via
    `SessionTracker.resolve_current(sanitized(session_id))` first, then close THAT id — never
    the raw `session_id` itself (the conversation may still open later agent sessions; only
-   the one that just ended closes). No pop here: the conversation's stack for this
-   `session_id` is simply done, reset fresh by the next `UserPromptSubmit` (H0).
+   the one that just ended closes). The adapter then **clears** the stack for this
+   `session_id`: the turn is over, and an emptied tracker makes any later firing in this
+   conversation under a non-framework agent (which fires no H0) resolve to `None` — the
+   correct C7 pass-through — instead of a stale framework session. The next framework
+   `UserPromptSubmit` (H0) starts the stack fresh anyway.
 
 ```json
 { "in": { "sessionId": "chat-session-guid-t3" } }
@@ -1392,20 +1444,21 @@ still await the next harness-core-spec revision.
   should be demoted to hosts that genuinely lack distinct events. Bonus: the host hands the
   step session the actor (`agent_type`) directly — the spec's correlation presumes the actor
   must be derived.
-- **I2 — The spec's session nouns conflate the conversation with the agent session.** This
+- **I2 — RESOLVED: the spec's session nouns no longer conflate the conversation with the
+  agent session.** This
   adapter binds sessions per the framework definition: **1 agent session = 1 execution of 1
   agent until it returns** (to the user / to the orchestrator); the next prompt opens a new
   agent session. On this host the turn IS that unit, and H0's per-request firing point maps
-  it 1:1. But the harness spec's terminology says "an orchestrator session spans many
-  workflow instances over its lifetime" and fixes the actor "for the session's entire
-  lifetime" — lifetime language that describes the **conversation** (the host `session_id`),
-  not the agent session. Under per-turn sessions: an orchestrator agent session drives AT
-  MOST ONE workflow instance (workflow end = return to the user closes the session), and a
+  it 1:1. The harness spec previously said "an orchestrator session spans many
+  workflow instances over its lifetime" — lifetime language that described the
+  **conversation** (the host `session_id`), not the agent session. The spec's Session
+  definition and invariant 9 now state the corrected cardinality: an orchestrator session
+  drives AT
+  MOST ONE workflow instance (one workflow end = one return to the user ends the session), a
   half-finished instance legitimately continues under a LATER agent session (function 3's
-  latest-open-instance deduction + the single-driver invariant already carry this). The spec
-  should adopt the agent-session definition and rephrase orchestrator-session lifetime
-  accordingly; the log identity change (many small per-turn logs instead of one per
-  conversation) is already the spec's stated preference for sync partitioning.
+  latest-open-instance deduction + the single-driver invariant already carry this), and no
+  session's log ever carries entries of two instances — the instance view spans sessions,
+  never the converse.
 - **I3 — Session-started context injection is request-scoped on this host.** Functions 1–2's
   postcondition "the session context contains …" holds per request: `additionalContext`
   renders into the current request's prompt only and does not persist (verified — see
@@ -1489,13 +1542,23 @@ still await the next harness-core-spec revision.
   mid-execution fires `UserPromptSubmit` on the native panel path: unverified — H0's rule is
   correct under both outcomes (see [Agent-session semantics](#agent-session-semantics)), so
   this only affects whether some firings open engagement sessions that never act. (b)
-  **RESOLVED** — verified directly against `microsoft/vscode`'s `ExecutionSubagentTool`
-  (`extensions/copilot/src/extension/tools/node/executionSubagentTool.ts`): a subagent's own
-  `Conversation` is constructed as `new Conversation(parentSessionId, …)` — the **parent's**
-  `sessionId`, never the subagent's own `subAgentInvocationId` — so a subagent's own
+  **RESOLVED** — verified directly against `microsoft/vscode` on BOTH subagent paths: the
+  built-in subagent tools
+  (`extensions/copilot/src/extension/tools/node/executionSubagentTool.ts`,
+  `searchSubagentTool.ts`) construct the subagent's own
+  `Conversation` as `new Conversation(parentSessionId, …)` — the **parent's**
+  `sessionId`, never the subagent's own `subAgentInvocationId` — and the full `runSubagent`
+  chat pipeline does the same: `chatParticipantRequestHandler.ts` resolves
+  `actualSessionId = historySessionId ?? request.sessionId ?? generateUuid()`, where a
+  subagent request's `request.sessionId` IS the parent conversation's id
+  (`defaultIntentRequestHandler.ts` uses that very field as the "link back to the parent
+  session" and reserves `subAgentInvocationId` for trajectory/log-file linking only). So a
+  subagent's own
   tool-call hooks carry the **same shared `session_id`** as its dispatching session, never a
-  distinct one; `agent_id`/`subAgentInvocationId` is a separate, fresh id used only for
-  `SubagentStart`/`SubagentStop`'s own fields and trajectory linking. This confirms this
+  distinct one; `agent_id`/`subAgentInvocationId` surfaces in hooks solely as
+  `SubagentStart`/`SubagentStop`'s own fields. The host docs' pervasive "agent session"
+  wording does NOT mean a per-agent-execution session — the envelope `session_id` is the
+  conversation, full stop. This confirms this
   binding's `tools.yaml` assumption was correct, and rules out the "distinct id per subagent"
   branch the resolution rule used to hedge for — see the corrected
   [Session identity binding](#session-identity-binding) below (`SessionTracker` is now a

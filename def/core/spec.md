@@ -90,9 +90,15 @@ and implementation parts prescribe its realization.
   that end (C8). A session is performed by exactly one framework
   **agent** — the orchestrator (driving a workflow) or a dispatched subagent (acting a step) —
   fixed for the session's entire lifetime: the harness registers agent sessions, nothing else.
-  An orchestrator session spans
-  many workflow instances over its lifetime; a step session IS its step (1 step = 1 agent = 1
-  session = 1 artifact). A session's `sessionId` is always minted or observed by the mechanism
+  A session serves **at most one workflow instance**: an orchestrator session drives at most
+  one (one workflow end = one return to the user, which ends the session; engagement and
+  selection sessions before assent drive none), and a step session IS its step (1 step = 1
+  agent = 1 session = 1 artifact). The converse does not hold — a half-finished instance
+  legitimately continues under a LATER orchestrator session (mid-instance returns; function
+  3's latest-open-instance deduction and the single-driver invariant carry the handoff) — so
+  an instance's view spans sessions, never a session spanning instances: no session's log
+  ever carries entries of two workflow instances.
+  A session's `sessionId` is always minted or observed by the mechanism
   surrounding its opening, never self-reported by the acting agent, so that every session's
   identity is independently verifiable at the moment it opens.
 - **parentSessionId** — links a session to the session whose action opened it, forming a
@@ -586,8 +592,10 @@ Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harn
    simply stop being the latest — abandonment is not a state, and no register closes
    anything. Agents never pass or mint instance ids — the id surfaces read-only in the
    report's `context`.
-9. **One open workflow instance and one in-flight step per orchestrator session**: an orchestrator
-   session drives at most one open workflow instance at a time, and between a step's resolution
+9. **One workflow instance and one in-flight step per orchestrator session**: an orchestrator
+   session drives at most one workflow instance over its whole lifetime (one workflow end =
+   one return to the user, which ends the session — see the Session definition), and between
+   a step's resolution
    and its journaled outcome it resolves no other step. Running concurrent instances — whether
    of the same workflow or different workflows — is a deliberate non-goal for now. The log still
    carries `workflowInstanceId`, so a later concurrent model can be added without changing the

@@ -44,6 +44,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
     class SessionTracker {
       +push_current(raw_host_id: str, session_id: str) : None
       +pop_current(raw_host_id: str) : None
+      +clear_current(raw_host_id: str) : None
       +resolve_current(raw_host_id: str) : str | None
     }
     class Adapter {
@@ -87,7 +88,10 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       shared id as its dispatching session's, never its own
       ""agent_id"" - see I13): H0 resets it fresh per turn,
       H1 PUSHes the new step session as current, H7 POPs it
-      back to the dispatching session on step close. Every
+      back to the dispatching session on SubagentStop and
+      CLEARs the whole stack on Stop (a later firing under
+      a non-framework agent then resolves to None - C7
+      pass-through, never a stale session). Every
       other hook (H2/H3/H4/H5/H6) only reads the top via
       ""resolve_current"". Tracks "current" only - whether a
       session has since CLOSED is the harness core's own
