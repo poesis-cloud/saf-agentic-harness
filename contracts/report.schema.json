@@ -10,7 +10,7 @@
   ],
   "properties": {
     "context": {
-      "$ref": "context.schema.json",
+      "$ref": "gsmarc://saf/contracts/context/v1",
       "description": "Replay and correlation context identifying the function, session, and workflow instance."
     },
     "outcome": {
@@ -53,7 +53,7 @@
       "if": {
         "properties": {
           "status": {
-            "$ref": "#/definitions/errorStatus"
+            "$ref": "#/$defs/errorStatus"
           }
         },
         "required": [
@@ -75,7 +75,7 @@
       "description": "The function outcome: a status plus, on error statuses, an error detail object."
     }
   },
-  "definitions": {
+  "$defs": {
     "errorStatus": {
       "type": "string",
       "enum": [

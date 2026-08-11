@@ -1,17 +1,8 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "gsmarc://saf/contracts/api/end-session.input/v1",
+    "$ref": "gsmarc://saf/contracts/inquiry/v1",
     "title": "end-session input contract",
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-        "sessionId"
-    ],
-    "properties": {
-        "sessionId": {
-            "$ref": "../context.schema.json#/definitions/sessionId",
-            "description": "The session being ended."
-        }
-    },
-    "description": "Input contract for the end-session harness function."
+    "unevaluatedProperties": false,
+    "description": "Input contract for the end-session harness function: the shared input envelope, unextended. `parentSessionId` is accepted but unused — the parent chain was recorded by this session's own start entry."
 }

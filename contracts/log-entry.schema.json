@@ -2,249 +2,59 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/log-entry/v1",
   "title": "Harness log entry contract",
-  "description": "One append-only log entry for one completed harness function invocation. The persisted log entry integrates the function report with its wall-clock write time; the report contains its session context and function-specific payload.",
+  "description": "One append-only log entry for one completed harness function invocation. The persisted log entry integrates the function report with its wall-clock write time; the report contains its session context and function-specific payload. The envelope (timestamp + report) is declared once; the report's oneOf selects exactly one concrete report contract — each output contract pins context.function to its own const, so the branches are mutually exclusive by discriminator.",
   "type": "object",
-  "unevaluatedProperties": false,
-  "oneOf": [
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
-        },
-        "report": {
-          "$ref": "api/start-session.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a start-session report."
+  "required": [
+    "timestamp",
+    "report"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall-clock time the log entry was appended."
     },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+    "report": {
+      "oneOf": [
+        {
+          "$ref": "gsmarc://saf/contracts/api/start-session.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-workflow-instructions.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-workflow-instructions report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-workflow-instructions.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-workflow-skills.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-workflow-skills report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-workflow-skills.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-step.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-step report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-step-model.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-step-model report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-model.output/v1"
         },
-        "report": {
-          "$ref": "api/check-step-preconditions.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-step-preconditions report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-preconditions.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-step-instructions.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-step-instructions report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-instructions.output/v1"
         },
-        "report": {
-          "$ref": "api/resolve-step-skills.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a resolve-step-skills report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-skills.output/v1"
         },
-        "report": {
-          "$ref": "api/check-step-authorization.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-step-authorization report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-authorization.output/v1"
         },
-        "report": {
-          "$ref": "api/check-step-artifact.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-step-artifact report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-artifact.output/v1"
         },
-        "report": {
-          "$ref": "api/check-step-postconditions.output.schema.json",
-          "description": "The function report persisted by this entry."
-        }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for a check-step-postconditions report."
-    },
-    {
-      "type": "object",
-      "required": [
-        "timestamp",
-        "report"
-      ],
-      "properties": {
-        "timestamp": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Wall-clock time the log entry was appended."
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-postconditions.output/v1"
         },
-        "report": {
-          "$ref": "api/end-session.output.schema.json",
-          "description": "The function report persisted by this entry."
+        {
+          "$ref": "gsmarc://saf/contracts/api/end-session.output/v1"
         }
-      },
-      "unevaluatedProperties": false,
-      "description": "Log entry for an end-session report."
+      ],
+      "description": "The function report persisted by this entry — exactly one of the twelve function output contracts, selected by its context.function discriminator."
     }
-  ]
+  },
+  "unevaluatedProperties": false
 }

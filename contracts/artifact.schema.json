@@ -8,9 +8,16 @@
   "required": [
     "slug"
   ],
+  "$defs": {
+    "artifactPath": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Workspace-relative path of an artifact — the shared definition every contract naming an artifact path references."
+    }
+  },
   "properties": {
     "slug": {
-      "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/artifactSlug",
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
       "description": "URL-safe, human-identifying slug for the artifact \u2014 the ONE generic display/identity field every artifact schema should rely on rather than locally re-defining an equivalent 'title' property."
     }
   }

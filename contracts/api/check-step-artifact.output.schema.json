@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/check-step-artifact.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "check-step-artifact output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "check-step-artifact",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "properties": {
@@ -75,7 +85,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },

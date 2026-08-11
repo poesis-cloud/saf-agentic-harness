@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/start-session.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "start-session output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "start-session",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "required": [
@@ -26,15 +36,15 @@
           ],
           "properties": {
             "agent": {
-              "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/agentSlug",
+              "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
               "description": "The framework-agent identity. The harness opens agent sessions — this is always present."
             },
             "sessionId": {
-              "$ref": "../context.schema.json#/definitions/sessionId",
+              "$ref": "gsmarc://saf/contracts/context/v1#/$defs/sessionId",
               "description": "The opened session id."
             },
             "parentSessionId": {
-              "$ref": "../context.schema.json#/definitions/parentSessionId",
+              "$ref": "gsmarc://saf/contracts/context/v1#/$defs/parentSessionId",
               "description": "The opened session's parent session id, if any."
             }
           },
@@ -48,7 +58,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },

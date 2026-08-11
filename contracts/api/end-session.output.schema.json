@@ -1,8 +1,18 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "gsmarc://saf/contracts/api/end-session.output/v1",
-    "$ref": "../report.schema.json",
+    "$ref": "gsmarc://saf/contracts/report/v1",
     "title": "end-session output contract",
+    "properties": {
+        "context": {
+            "properties": {
+                "function": {
+                    "const": "end-session",
+                    "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+                }
+            }
+        }
+    },
     "oneOf": [
         {
             "properties": {
@@ -22,7 +32,7 @@
                 "outcome": {
                     "properties": {
                         "status": {
-                            "$ref": "../report.schema.json#/definitions/errorStatus",
+                            "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
                             "description": "Error status."
                         }
                     },

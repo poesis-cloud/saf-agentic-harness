@@ -1,31 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/check-step-artifact.input/v1",
+  "$ref": "gsmarc://saf/contracts/inquiry/v1",
   "title": "check-step-artifact input contract",
-  "type": "object",
-  "additionalProperties": false,
   "required": [
-    "sessionId",
     "artifactPath"
   ],
   "properties": {
-    "sessionId": {
-      "type": "string",
-      "minLength": 1,
-      "description": "The session this invocation runs in."
-    },
-    "parentSessionId": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "The parent session that opened this session, if any."
-    },
     "artifactPath": {
-      "type": "string",
-      "minLength": 1,
+      "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath",
       "description": "Workspace-relative path of the artifact being written."
     }
   },
+  "unevaluatedProperties": false,
   "description": "Input contract for the check-step-artifact harness function."
 }

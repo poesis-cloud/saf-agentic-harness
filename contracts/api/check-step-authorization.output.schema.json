@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/check-step-authorization.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "check-step-authorization output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "check-step-authorization",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "required": [
@@ -19,7 +29,7 @@
           "description": "The function outcome."
         },
         "authorization": {
-          "$ref": "#/definitions/authorization",
+          "$ref": "#/$defs/authorization",
           "not": {
             "required": [
               "failureMessage"
@@ -42,7 +52,7 @@
           }
         },
         "authorization": {
-          "$ref": "#/definitions/authorization",
+          "$ref": "#/$defs/authorization",
           "required": [
             "failureMessage"
           ]
@@ -54,7 +64,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },
@@ -67,7 +77,7 @@
     }
   ],
   "unevaluatedProperties": false,
-  "definitions": {
+  "$defs": {
     "authorization": {
       "type": "object",
       "required": [
@@ -78,22 +88,20 @@
       ],
       "properties": {
         "actor": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/agentSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
           "description": "The acting agent identity."
         },
         "artifactPath": {
-          "type": "string",
-          "minLength": 1,
+          "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath",
           "description": "The target artifact path."
         },
         "action": {
-          "$ref": "../conf/framework/access-control-list.conf.schema.json#/definitions/action",
+          "$ref": "gsmarc://saf/contracts/conf/framework/access-control-list.conf/v1#/$defs/action",
           "description": "The requested action."
         },
         "resource": {
-          "type": "string",
-          "minLength": 1,
-          "description": "The artifact schema/resource the privilege applies to."
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
+          "description": "The artifact schema slug the privilege applies to — the resource under test, resolved from the write path (function 8, invariant 2)."
         },
         "failureMessage": {
           "type": "string",

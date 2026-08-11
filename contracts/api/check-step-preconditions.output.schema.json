@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/check-step-preconditions.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "check-step-preconditions output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "check-step-preconditions",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the structurally identical check-step-postconditions output."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "required": [
@@ -30,10 +40,10 @@
               "condition": {
                 "oneOf": [
                   {
-                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stepCondition"
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stepCondition"
                   },
                   {
-                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stateCondition"
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stateCondition"
                   }
                 ],
                 "description": "The condition that was checked."
@@ -101,10 +111,10 @@
               "condition": {
                 "oneOf": [
                   {
-                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stepCondition"
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stepCondition"
                   },
                   {
-                    "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/stateCondition"
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stateCondition"
                   }
                 ],
                 "description": "The condition that was checked."
@@ -167,7 +177,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },

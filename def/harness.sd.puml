@@ -20,7 +20,7 @@ note over Harness
   Every completed function invocation appends one
   entry to its session's log — logs/<sessionId>.log.jsonl
   (a workflow instance is a cross-log view, ordered by
-  ts under the single-driver invariant). Every call/return
+  timestamp under the single-driver invariant). Every call/return
   pair below names its contract's actual In/Out fields.
 end note
 
@@ -148,12 +148,13 @@ end
 
 == Step close ==
 Sub --> Host : step session ends
-Host -> Adapter : hook ""PostToolUse"" — dispatch class
-Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
-Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 Host -> Adapter : hook ""SubagentStop""
 Adapter -> Harness : ""11 end-session""(sessionId: agent_id, no parentSessionId needed)
 Harness --> Adapter : { outcome: ended }\n(never surfaced to the host)
+Adapter -> Adapter : ""SessionTracker"" pops the step session —\nthe dispatching orchestrator session is current again
+Host -> Adapter : hook ""PostToolUse"" — dispatch class
+Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
+Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 alt postconditions hold — step journaled executed
   Adapter --> Host : { ""continue"": true }
   Host --> Orch : dispatch returns — next iteration resolves the next step

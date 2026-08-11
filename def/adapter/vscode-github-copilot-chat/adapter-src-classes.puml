@@ -13,7 +13,11 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
 
   package "harness core (external, see ../../core/harness-src-classes.puml)" as harness_core #eeeeee {
     interface Command <<external>> {
-      +execute_function(invocation: FunctionInvocation) : Report
+      +execute_function(inquiry: Inquiry) : Report
+    }
+    abstract class Inquiry <<external>> {
+      +session_id : str
+      +parent_session_id : str | None
     }
     abstract class Report <<external>> {
       +context : Context
@@ -22,17 +26,43 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
   }
 
   package "vscode-github-copilot-chat (the adapter - outside src/, depends ONLY on the harness core's commands)" as adapter {
+    class HookEvent <<dataclass>> {
+      +hook_event_name : str
+      +timestamp : str
+      +raw_host_session_id : str
+      +tool_name : str | None
+      +tool_input : Mapping[str, Any]
+      +payload : Mapping[str, Any]
+    }
+    class HookDecision <<dataclass>> {
+      +exit_code : int
+      +stdout : str
+    }
     class HookBinding <<dataclass>> {
-      +tool_classes : Mapping[str, str]
+      +write_tools : Mapping[str, str]
+      +delete_tools : tuple[str, ...]
+      +dispatch_tools : tuple[str, ...]
+      +mediated_command_tools : tuple[str, ...]
+      +tool_keys : tuple[str, ...]
+      +input_keys : tuple[str, ...]
+      +path_keys : tuple[str, ...]
+      +nested_path_keys : tuple[str, ...]
+      +host_session_keys : tuple[str, ...]
+      +host_step_session_keys : tuple[str, ...]
+      +host_step_actor_keys : tuple[str, ...]
+      +dispatch_agent_keys : tuple[str, ...]
+      +dispatch_model_keys : tuple[str, ...]
       +model_ids : Mapping[str, str]
-      +resolve_tool_class(tool: str) : str
+      +resolve_event_class(event: HookEvent) : EventClass
+      +resolve_write_action(tool: str) : str
+      +extract_artifact_paths(tool_input: Mapping[str, Any]) : tuple[Path, ...]
       +resolve_model_id(host_model: str) : str
     }
     class HookClassifier {
       -_binding : HookBinding
-      +classify_event(event: dict) : Boundary
+      +classify_event(event: HookEvent) : EventClass
     }
-    enum Boundary {
+    enum EventClass {
       SESSION_STARTED
       STEP_STARTING
       STEP_STARTED
@@ -40,11 +70,15 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       WRITE_ENDED
       STEP_ENDED
       SESSION_ENDED
+      MEDIATED_ATTRIBUTION
+      PASS_THROUGH
     }
     class SessionTracker {
+      -_store_path : Path
       +push_current(raw_host_id: str, session_id: str) : None
       +pop_current(raw_host_id: str) : None
       +clear_current(raw_host_id: str) : None
+      +reset_current(raw_host_id: str, session_id: str) : None
       +resolve_current(raw_host_id: str) : str | None
     }
     class Adapter {
@@ -52,18 +86,21 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       -_classifier : HookClassifier
       -_tracker : SessionTracker
       -_renderer : HookRenderer
-      -_commands : Mapping[Boundary, tuple[Command, ...]]
-      +handle_hook_event(event: dict) : str
+      -_commands : Mapping[EventClass, tuple[Command, ...]]
+      +handle_hook_event(event: HookEvent) : HookDecision
     }
     class HookRenderer {
       -_binding : HookBinding
-      +render_decision(boundary: Boundary, reports: tuple[Report, ...]) : str
+      +render_decision(event_class: EventClass, reports: tuple[Report, ...]) : HookDecision
+      +render_stamped_input(event: HookEvent, session_id: str) : HookDecision
+      +render_pass_through() : HookDecision
     }
 
     note bottom of Adapter
       This adapter's only host-aware code, depending
-      EXCLUSIVELY on ""Command"" - the harness core's public
-      API. No ""services"", no ""stores"", no ""config"": basic
+      EXCLUSIVELY on ""Command"" and the ""Inquiry""
+      types it builds - the harness core's public API. No
+      ""services"", no ""stores"", no ""config"": basic
       layering, an adapter depends on a system's public
       surface, never its internals. Session identification
       uses only host-observed event data (""HookBinding"" is
@@ -77,6 +114,10 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       checking services already hold what they need for
       their own reasons) - this class only relays whatever
       outcome comes back, generically, to the host decision.
+      A write tool naming several paths (I8) fans out to one
+      function-8 / function-9 invocation per distinct path
+      via ""HookBinding.extract_artifact_paths"", collapsed
+      into a single host decision by ""HookRenderer"".
       There is only ONE adapter today; if a second host is
       ever added, whatever proves genuinely shared factors out
       then - not speculatively now.
@@ -98,8 +139,10 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       fact (C8, function 11), never duplicated here. Plain
       file I/O, no harness dependency.
     end note
-    note bottom of Boundary
-      Lifecycle participles avoid the step/session clash
+    note bottom of EventClass
+      NINE classes: the seven harness boundaries plus the two
+      host events that reach no harness function. Lifecycle
+      participles avoid the step/session clash
       (1 step = 1 session): STEP_STARTING is the dispatch
       about to open the step - it can DENY; STEP_STARTED is
       the step session having opened - it can only INJECT;
@@ -110,8 +153,16 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       ""SessionTracker"" resolves as current for the firing.
       STEP_STARTING and STEP_ENDED occur
       in the dispatching (orchestrator) session - their
-      entries journal to its log. Host events outside these
-      boundaries are adapter telemetry - never journaled.
+      entries journal to its log.
+      MEDIATED_ATTRIBUTION (H4) invokes NO function: it
+      stamps the resolved session id onto the model-authored
+      harness command the host is about to run. PASS_THROUGH
+      is every other firing - foreign session, non-artifact
+      path, unclassified tool - answered with exit 0 and
+      empty output. Only the seven boundaries appear in
+      ""Adapter._commands""; the other two are rendered
+      directly. Host events outside these classes are
+      adapter telemetry - never journaled.
     end note
   }
 

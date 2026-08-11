@@ -15,19 +15,19 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "#/definitions/actor"
+        "$ref": "#/$defs/actor"
       }
     },
     "roles": {
-      "description": "Framework-defined privilege sets. Each role is a slug-named set of privileges; each privilege is one artifact schema slug plus one action verb (CREATE|READ|UPDATE|DELETE).",
+      "description": "Framework-defined privilege sets. Each role is a slug-named set of privileges; each privilege is one artifact schema slug plus one action verb (create|update|delete).",
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "#/definitions/role"
+        "$ref": "#/$defs/role"
       }
     }
   },
-  "definitions": {
+  "$defs": {
     "actor": {
       "type": "object",
       "additionalProperties": false,
@@ -38,7 +38,7 @@
       "description": "One actor declaration: a framework agent (identified by its frontmatter `name` slug) and the roles assigned to it.",
       "properties": {
         "slug": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/agentSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
           "description": "The agent's frontmatter `name` slug (e.g. business-owner)."
         },
         "roles": {
@@ -46,7 +46,7 @@
           "type": "array",
           "minItems": 1,
           "items": {
-            "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/roleSlug"
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/roleSlug"
           }
         }
       }
@@ -61,13 +61,13 @@
       "description": "One role declaration: a slug-named set of privileges.",
       "properties": {
         "slug": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/roleSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/roleSlug",
           "description": "The role slug referenced by actors."
         },
         "privileges": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/privilege"
+            "$ref": "#/$defs/privilege"
           },
           "description": "The privileges granted to holders of this role."
         }
@@ -83,22 +83,21 @@
       "description": "One artifact+action privilege.",
       "properties": {
         "artifact": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/artifactSlug"
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug"
         },
         "action": {
-          "$ref": "#/definitions/action"
+          "$ref": "#/$defs/action"
         }
       }
     },
     "action": {
       "type": "string",
       "enum": [
-        "CREATE",
-        "READ",
-        "UPDATE",
-        "DELETE"
+        "create",
+        "update",
+        "delete"
       ],
-      "description": "The action verb (CREATE, READ, UPDATE, DELETE) permitted on the artifact."
+      "description": "The action verb (create, update, delete) permitted on the artifact. Reads are deliberately not modeled: agent sourcing is unrestricted by design (harness invariant C3), so a read privilege would be undefined at the write boundary."
     }
   }
 }

@@ -1,21 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/resolve-workflow-instructions.input/v1",
+  "$ref": "gsmarc://saf/contracts/inquiry/v1",
   "title": "resolve-workflow-instructions input contract",
-  "type": "object",
-  "required": [
-    "sessionId"
-  ],
-  "properties": {
-    "sessionId": {
-      "$ref": "../context.schema.json#/definitions/sessionId",
-      "description": "The session this invocation runs in."
-    },
-    "parentSessionId": {
-      "$ref": "../context.schema.json#/definitions/parentSessionId",
-      "description": "The parent session that opened this session, if any."
-    }
-  },
   "unevaluatedProperties": false,
-  "description": "Input contract for the resolve-workflow-instructions harness function."
+  "description": "Input contract for the resolve-workflow-instructions harness function: the shared input envelope, unextended — the instruction set is keyed by the session's own agent."
 }

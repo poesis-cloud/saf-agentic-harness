@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/resolve-workflow-skills.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "resolve-workflow-skills output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "resolve-workflow-skills",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "required": [
@@ -21,7 +31,7 @@
         "skills": {
           "type": "array",
           "items": {
-            "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/skillSlug",
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/skillSlug",
             "description": "One skill slug."
           },
           "minItems": 1,
@@ -34,7 +44,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },

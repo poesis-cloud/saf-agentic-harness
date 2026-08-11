@@ -3,7 +3,7 @@
   "$id": "gsmarc://saf/contracts/context/v1",
   "title": "Harness context contract",
   "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session start. Session origin is recorded by start-session and recovered through sessionId when needed.",
-  "definitions": {
+  "$defs": {
     "sessionId": {
       "type": "string",
       "minLength": 1,
@@ -42,11 +42,11 @@
       "description": "The harness function that produced this report."
     },
     "sessionId": {
-      "$ref": "#/definitions/sessionId",
+      "$ref": "#/$defs/sessionId",
       "description": "The session this invocation ran in."
     },
     "parentSessionId": {
-      "$ref": "#/definitions/parentSessionId",
+      "$ref": "#/$defs/parentSessionId",
       "description": "The parent session that opened this session, if any."
     },
     "workflowInstanceId": {
@@ -54,7 +54,8 @@
         "string",
         "null"
       ],
-      "description": "The workflow instance this invocation belongs to, if any."
+      "pattern": "^[a-z0-9-]+-[A-Z0-9]+$",
+      "description": "The workflow instance this invocation belongs to, if any. Always prefixed by its workflowSlug followed by an uppercase mint (e.g. verification-01J9XQ) — the prefix is load-bearing: function 3's latest-open-instance deduction filters candidate entries by it."
     }
   },
   "unevaluatedProperties": false

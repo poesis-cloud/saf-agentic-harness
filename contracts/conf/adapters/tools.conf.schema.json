@@ -36,27 +36,27 @@
       }
     },
     "toolKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the host tool name."
     },
     "inputKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the tool's input argument."
     },
     "pathKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the target artifact path."
     },
     "actorKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the acting agent identity."
     },
     "hostSessionKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the host-observed session id."
     },
     "hostParentSessionKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the host-observed parent session id."
     },
     "dispatchTools": {
@@ -69,15 +69,15 @@
       }
     },
     "dispatchAgentKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the dispatched agent identity."
     },
     "dispatchModelKeys": {
-      "$ref": "#/definitions/keyList",
+      "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the model profile identifier."
     }
   },
-  "definitions": {
+  "$defs": {
     "keyList": {
       "description": "Ordered payload field names to probe (first hit wins).",
       "type": "array",

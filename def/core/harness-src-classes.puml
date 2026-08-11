@@ -18,7 +18,40 @@ package "CD - Harness core classes (src/)" <<Frame>> {
 
   package "commands" {
     interface Command {
-      +execute_function(invocation: FunctionInvocation) : Report
+      +execute_function(inquiry: Inquiry) : Report
+    }
+    abstract class Inquiry <<dataclass>> {
+      +session_id : str
+      +parent_session_id : str | None
+    }
+    class StartSessionInquiry <<dataclass>> {
+      +agent : str
+    }
+    class EndSessionInquiry <<dataclass>> {
+    }
+    class ResolveWorkflowInstructionsInquiry <<dataclass>> {
+    }
+    class ResolveWorkflowSkillsInquiry <<dataclass>> {
+    }
+    class ResolveStepInquiry <<dataclass>> {
+      +workflow_slug : str
+    }
+    class ResolveStepModelInquiry <<dataclass>> {
+    }
+    class CheckStepPreconditionsInquiry <<dataclass>> {
+    }
+    class ResolveStepInstructionsInquiry <<dataclass>> {
+    }
+    class ResolveStepSkillsInquiry <<dataclass>> {
+    }
+    class CheckStepAuthorizationInquiry <<dataclass>> {
+      +artifact_path : Path
+      +action : str
+    }
+    class CheckStepArtifactInquiry <<dataclass>> {
+      +artifact_path : Path
+    }
+    class CheckStepPostconditionsInquiry <<dataclass>> {
     }
     class StartSessionCommand {
       -_lifecycle : SessionLifecycle
@@ -65,12 +98,18 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     end note
     note bottom of Command
       TWELVE commands - exactly one per harness function,
-      hook- and host-blind. Commands are the JSON boundary:
-      parse the FunctionInvocation input object (session
-      attribution fields + function-specific fields),
-      invoke the service, and return the exact concrete
-      Report object that becomes command ""out"" and
-      log entry ""report"". Any event->boundary->functions
+      hook- and host-blind. Commands are the JSON boundary
+      and the ONLY classes bound to the API contracts: each
+      parses and contract-validates its ""in"" object into
+      its own ""Inquiry"" subtype, unpacks that into
+      the service call, and returns the concrete ""Report""
+      subtype bound to its own output contract - the exact
+      object that becomes command ""out"" and log entry
+      ""report"". ONE function = ONE input type = ONE output
+      type = TWO contracts. Services never receive a
+      ""Inquiry"" (commands unpack it into typed
+      parameters), so nothing under services ever depends
+      upward on ""commands"". Any event->boundary->functions
       orchestration happens entirely outside src/, never
       inside a command.
     end note
@@ -108,11 +147,9 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class StepResolver {
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +resolve_step(invocation: FunctionInvocation, workflow_slug: str) : StepResolutionReport
+        +resolve_step(session_id: str, parent_session_id: str | None, workflow_slug: str) : StepResolutionReport
       }
       class StepResolutionReport <<dataclass>> {
-        +workflow_slug : str
-        +workflow_instance_id : str
         +step : Step | None
       }
     }
@@ -122,7 +159,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
         -_profiles : ModelProfiles
-        +resolve_step_model(invocation: FunctionInvocation) : ModelProfileReport
+        +resolve_step_model(session_id: str, parent_session_id: str | None) : ModelProfileReport
       }
       class ModelProfileReport <<dataclass>> {
         +profile : ModelProfileBinding
@@ -130,7 +167,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class ModelProfileBinding <<dataclass>> {
         +slug : str
         +score : float
-        +costRank : int
+        +cost_rank : int
         +reason : str
       }
     }
@@ -140,29 +177,36 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_evaluator : ConditionEvaluator
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +check_step_preconditions(invocation: FunctionInvocation) : ConditionCheckReport
+        +check_step_preconditions(session_id: str, parent_session_id: str | None) : CheckStepPreconditionsReport
       }
       class StepPostconditionChecker {
         -_evaluator : ConditionEvaluator
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
-        +check_step_postconditions(invocation: FunctionInvocation) : ConditionCheckReport
+        +check_step_postconditions(session_id: str, parent_session_id: str | None) : CheckStepPostconditionsReport
       }
       class StepAuthorizationChecker {
         -_acl : AccessControlList
         -_workspace_layout : WorkspaceLayout
-        +check_step_authorization(invocation: FunctionInvocation, artifact_path: Path) : AuthorizationReport
+        -_artifact_store : ArtifactStore
+        -_session_log_store : SessionLogStore
+        +check_step_authorization(session_id: str, parent_session_id: str | None, artifact_path: Path, action: str) : AuthorizationReport
       }
       class StepArtifactChecker {
         -_artifact_store : ArtifactStore
-        +check_step_artifact(invocation: FunctionInvocation, artifact_path: Path) : ArtifactCheckReport
+        -_session_log_store : SessionLogStore
+        +check_step_artifact(session_id: str, parent_session_id: str | None, artifact_path: Path) : ArtifactCheckReport
       }
       class ConditionEvaluator {
         -_artifact_store : ArtifactStore
         +evaluate_conditions(conditions: tuple[StepCondition | StateCondition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
       }
-      class ConditionCheckReport <<dataclass>> {
+      abstract class ConditionCheckReport <<dataclass>> {
         +condition_checks : tuple[ConditionCheck, ...]
+      }
+      class CheckStepPreconditionsReport <<dataclass>> {
+      }
+      class CheckStepPostconditionsReport <<dataclass>> {
       }
       class AuthorizationReport <<dataclass>> {
         +authorization : Authorization
@@ -170,6 +214,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class Authorization <<dataclass>> {
         +actor : str
         +artifact_path : Path
+        +action : str
+        +resource : str
         +failure_message : str | None
       }
       class ArtifactCheckReport <<dataclass>> {
@@ -183,32 +229,49 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +action : str
         +from_ref : str | None
       }
-      class CheckReport <<dataclass>> {
-        +findings : tuple[Finding, ...]
-      }
       class ConditionCheck <<dataclass>> {
         +condition : StepCondition | StateCondition
         +outcome : str
         +failure_message : str | None
       }
+      note bottom of StepAuthorizationChecker
+        Function 8 guards three things at one boundary:
+        the ACL grant, the staging baseline
+        (""ArtifactStore.is_staging_clean"" - invariant 5),
+        and the logs path (""WorkspaceLayout.is_logs_path""
+        - invariant 6: logs are harness-authored, so no
+        agent write there is ever grantable).
+      end note
+      note bottom of ConditionCheckReport
+        Functions 5 and 10 return structurally identical
+        results but are bound to DISTINCT output contracts,
+        so each gets its own leaf type - the abstract base
+        carries the shared payload. Which function produced
+        a given report is read from ""context.function"",
+        never inferred from the type.
+      end note
     }
 
     package "context_resolution" {
       class WorkflowInstructionResolver {
         -_catalog : WorkflowCatalog
-        +resolve_workflow_instructions(invocation: FunctionInvocation) : WorkflowInstructionsReport
+        -_session_log_store : SessionLogStore
+        +resolve_workflow_instructions(session_id: str, parent_session_id: str | None) : WorkflowInstructionsReport
       }
       class WorkflowSkillResolver {
         -_catalog : WorkflowCatalog
-        +resolve_workflow_skills(invocation: FunctionInvocation) : WorkflowSkillsReport
+        -_session_log_store : SessionLogStore
+        +resolve_workflow_skills(session_id: str, parent_session_id: str | None) : WorkflowSkillsReport
       }
       class StepInstructionResolver {
         -_catalog : WorkflowCatalog
-        +resolve_step_instructions(invocation: FunctionInvocation) : StepInstructionsReport
+        -_session_log_store : SessionLogStore
+        +resolve_step_instructions(session_id: str, parent_session_id: str | None) : StepInstructionsReport
       }
       class StepSkillResolver {
         -_catalog : WorkflowCatalog
-        +resolve_step_skills(invocation: FunctionInvocation) : StepSkillsReport
+        -_session_log_store : SessionLogStore
+        +resolve_step_skills(session_id: str, parent_session_id: str | None) : StepSkillsReport
       }
       class WorkflowInstructionsReport <<dataclass>> {
         +instructions : tuple[str, ...]
@@ -242,6 +305,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +discover_artifacts(selector: str) : tuple[Artifact, ...]
         +scan_raw_paths(scope: Path) : Iterator[Path]
         +validate_artifact(artifact_path: Path) : tuple[Finding, ...]
+        +is_staging_clean(artifact_path: Path) : bool
         +commit_artifact(artifact_path: Path) : None
         +revert_artifact(artifact_path: Path) : Finding
       }
@@ -261,25 +325,26 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         write staging area. ""discover_artifacts"" reads
         committed state and raises on an invalid artifact;
         ""scan_raw_paths"" enumerates the raw universe for
-        sweeps; ""commit_artifact"" promotes a validated
-        staged write into state and ""revert_artifact""
-        discards an invalid one - the harness's only
-        deliberate Git actions. Finding is homed here - the
-        schema-validation finding every check composes
-        (CheckReport.findings).
+        sweeps; ""is_staging_clean"" backs function 8's
+        invariant 5 (target absent, or tracked and clean
+        against HEAD); ""commit_artifact"" promotes a
+        validated staged write into state and
+        ""revert_artifact"" discards an invalid one - the
+        harness's only deliberate Git actions. Finding is
+        homed here and stays internal to this store: it is
+        what ""validate_artifact"" and ""revert_artifact""
+        produce, and function 9 renders it into
+        ""ArtifactCheck.failure_message"" - no report
+        carries a Finding collection.
       end note
     }
 
     package "session_log_store" {
-      class FunctionInvocation <<dataclass>> {
-        +session_id : str
-        +parent_session_id : str | None
-        +fields : Mapping[str, Any]
-      }
       class SessionLogStore {
         -_jsonl : JsonlStore
         +create_session_log(entry: LogEntry) : Log
         +mint_workflow_instance_id(workflow_slug: str) : str
+        +find_latest_open_instance(workflow_slug: str) : str | None
         +load_session_log(session_id: str) : Log
         +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
         +append_log_entry(session_id: str, entry: LogEntry) : None
@@ -289,13 +354,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +entries : tuple[LogEntry, ...]
       }
       class LogEntry <<dataclass>> {
-        +ts : str
+        +timestamp : str
         +report : Report
-      }
-      class StepRef <<dataclass>> {
-        +slug : str
-        +actor : str
-        +artifact : str | None
       }
       abstract class Report <<dataclass>> {
         +context : Context
@@ -332,14 +392,20 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         created by function 0's start entry (the
         file's first line) and, best-effort, closed by
         function 11's entry (the file's last line, C8);
+        ""find_latest_open_instance"" backs function 3's
+        instance deduction (invariant 8);
         ""load_workflow_instance_view"" assembles the cross-log ""WorkflowInstanceView"" -
-        discovery scan + ts ordering under the single-driver
-        invariant (see Logging). Report is the abstract base
+        discovery scan + timestamp ordering under the single-driver
+        invariant (see Logging). EVERY service holds this
+        store and appends its own entry through
+        ""append_log_entry"": 1 invocation = 1 entry is a
+        per-service obligation, not a command-layer one.
+        Report is the abstract base
         every service result extends (the subtypes live with
         their services); the log entry wraps the report with
-        ""ts"" only - context and outcome live on the Report
-        base. WorkflowInstanceView is assembled here, never
-        persisted.
+        ""timestamp"" only - context and outcome live on the
+        Report base. WorkflowInstanceView is assembled here,
+        never persisted.
       end note
     }
   }
@@ -364,9 +430,12 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       +workspace_dir : Path
     }
     class AccessControlList <<dataclass>> {
-      +grants : Mapping[str, frozenset[str]]
-      +is_framework_agent(actor: str) : bool
-      +list_privileges(actor: str) : frozenset[str]
+      +grants : Mapping[str, frozenset[Privilege]]
+      +list_privileges(actor: str) : frozenset[Privilege]
+    }
+    class Privilege <<dataclass>> {
+      +artifact : str
+      +action : str
     }
     class ModelProfiles <<dataclass>> {
       +profiles : Mapping[str, ModelProfile]
@@ -374,11 +443,12 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     }
     class ModelProfile <<dataclass>> {
       +capabilities : Mapping[str, int]
-      +costRank : int
+      +cost_rank : int
     }
     class WorkspaceLayout <<dataclass>> {
       +nodes : tuple[ArtifactNode | FolderNode, ...]
-      +resolve_resource(path: Path) : str
+      +resolve_resource(path: Path, artifact_type: str | None) : str
+      +is_logs_path(path: Path) : bool
     }
     class ArtifactNode <<dataclass>> {
       +slug : str
@@ -422,8 +492,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     class StateCondition <<dataclass>> {
       +kind : str
       +slug : str
-      +setSelector : Mapping[str, Any]
-      +setPredicate : str
+      +set_selector : Mapping[str, Any]
+      +set_predicate : str
     }
     note bottom of ConfigLoader
       Parse + contract-validate + semantic rules
@@ -484,6 +554,29 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   Command <|.. ResolveWorkflowSkillsCommand
   Command <|.. ResolveStepInstructionsCommand
   Command <|.. ResolveStepSkillsCommand
+
+  ' --- input surface: one input type per harness function (1:1 with the input contracts) ---
+  Inquiry <|-- StartSessionInquiry
+  Inquiry <|-- EndSessionInquiry
+  Inquiry <|-- ResolveWorkflowInstructionsInquiry
+  Inquiry <|-- ResolveWorkflowSkillsInquiry
+  Inquiry <|-- ResolveStepInquiry
+  Inquiry <|-- ResolveStepModelInquiry
+  Inquiry <|-- CheckStepPreconditionsInquiry
+  Inquiry <|-- ResolveStepInstructionsInquiry
+  Inquiry <|-- ResolveStepSkillsInquiry
+  Inquiry <|-- CheckStepAuthorizationInquiry
+  Inquiry <|-- CheckStepArtifactInquiry
+  Inquiry <|-- CheckStepPostconditionsInquiry
+  note on link
+    Seven of the twelve add nothing to the envelope - they
+    exist because each is bound to its own distinct
+    ""*.input.schema.json"" (its ""$id"" IS the type's
+    identity), exactly as ""SessionEndReport"" exists on the
+    output side. The base mirrors ""inquiry.schema.json"",
+    as ""Report"" mirrors ""report.schema.json"".
+  end note
+
   Application ..> Command : builds + dispatches\n(composition root, at src root)
   Application ..> ConfigLoader : builds every config\ndataclass fail-fast at start
 
@@ -497,15 +590,15 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   Report <|-- SessionEndReport
   Report <|-- StepResolutionReport
   Report <|-- ModelProfileReport
-  Report <|-- CheckReport
   Report <|-- ConditionCheckReport
+  ConditionCheckReport <|-- CheckStepPreconditionsReport
+  ConditionCheckReport <|-- CheckStepPostconditionsReport
   Report <|-- AuthorizationReport
   Report <|-- ArtifactCheckReport
   Report <|-- WorkflowInstructionsReport
   Report <|-- WorkflowSkillsReport
   Report <|-- StepInstructionsReport
   Report <|-- StepSkillsReport
-  CheckReport "findings" o-- Finding : every check finding is\nthe Finding homed in\nstores/artifact_store
   SessionStartReport o-- SessionRef
   ConditionCheckReport o-- ConditionCheck
   AuthorizationReport o-- Authorization
@@ -514,31 +607,41 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   ModelProfileReport o-- ModelProfileBinding
   StepResolutionReport o-- Step : the configured step,\nverbatim
   note on link
-    Every service returns a Report subtype (homed in
+    TWELVE leaf report types, one per function, each bound to
+    its own ""*.output.schema.json"" - the mirror of the twelve
+    input types. Every service returns one (the base is homed in
     stores/session_log_store); ""context"" and ""outcome""
     live on the base - every result carries its function's
-    outcome by construction, under one shared field
-    name with function-owned values. The command
+    outcome by construction, under one shared field name with
+    function-owned values. The command
     returns that exact object as the contract ""out""
     JSON and the log entry persists it verbatim as
-    ""report"", wrapped by the entry's own ""ts"" only.
+    ""report"", wrapped by the entry's own ""timestamp"" only.
   end note
 
-  ' --- one dependency direction ---
+  ' --- one dependency direction: strictly downward layers ---
   "commands" ..> "services"
+  "commands" ..> "stores" : the ""Report"" + ""LogEntry"" types only\n(skip-level type reference, never behavior)
   "services" ..> "stores"
   "services" ..> "config"
   "stores" ..> "utils"
   "config" ..> "utils"
 
   note bottom of "services"
-    One service per harness function (1:1:1 with commands),
-    grouped in subpackages by family - session_registration /
+    ELEVEN services for twelve functions: one service per
+    function EXCEPT ""SessionLifecycle"", which owns the
+    session's two boundary writes (0 and 11) because they are
+    one responsibility - opening and closing the same file.
+    Grouped in subpackages by family - session_lifecycle /
     step_resolution / model_resolution / checking /
     context_resolution - and each result dataclass is homed in
     the subpackage of the classes returning it, exclusively.
+    EVERY service holds ""SessionLogStore"": it journals its own
+    invocation (1 invocation = 1 entry), and several also read
+    the log to deduce the session's agent or in-flight step.
     Dependencies are constructor-injected private attributes;
-    method names are verb + subject; commands render the typed
+    method names are verb + subject; commands unpack the typed
+    ""Inquiry"" into these calls and render the typed
     results to the contract ""out"" JSON.
   end note
 }

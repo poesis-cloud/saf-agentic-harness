@@ -1,8 +1,8 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/conf/framework/model-profiles.conf/v1",
   "title": "Model profile catalog configuration schema",
-  "description": "Validation schema for the conf/model-profiles.conf.yaml catalog. Owns the canonical capability-tag vocabulary (#/definitions/capabilities): the same tag->0-10 map shape scored per model here and weighted per workflow step in conf/workflows/*.workflow.conf.yaml.",
+  "description": "Validation schema for the conf/model-profiles.conf.yaml catalog. Owns the canonical capability-tag vocabulary (#/$defs/capabilities): the same tag->0-10 map shape scored per model here and weighted per workflow step in conf/workflows/*.workflow.conf.yaml.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,12 +12,12 @@
     "modelProfiles": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/modelProfile"
+        "$ref": "#/$defs/modelProfile"
       },
       "description": "Canonical model catalog: capability scores and cost rank per model profile."
     }
   },
-  "definitions": {
+  "$defs": {
     "modelProfile": {
       "type": "object",
       "additionalProperties": false,
@@ -49,7 +49,7 @@
         },
         "capabilities": {
           "description": "0-10 relative judgments per capability tag.",
-          "$ref": "#/definitions/capabilities"
+          "$ref": "#/$defs/capabilities"
         }
       }
     },

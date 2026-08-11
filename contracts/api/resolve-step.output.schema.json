@@ -1,8 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/api/resolve-step.output/v1",
-  "$ref": "../report.schema.json",
+  "$ref": "gsmarc://saf/contracts/report/v1",
   "title": "resolve-step output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "resolve-step",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
   "oneOf": [
     {
       "required": [
@@ -19,7 +29,7 @@
           "description": "The function outcome."
         },
         "step": {
-          "$ref": "../conf/framework/workflow.conf.schema.json#/definitions/step",
+          "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/step",
           "description": "The resolved step object from the workflow configuration."
         }
       }
@@ -40,7 +50,7 @@
         "outcome": {
           "properties": {
             "status": {
-              "$ref": "../report.schema.json#/definitions/errorStatus",
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
               "description": "Error status."
             }
           },

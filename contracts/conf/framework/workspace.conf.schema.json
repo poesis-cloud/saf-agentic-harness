@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/conf/framework/workspace.conf/v1",
   "title": "Workspace layout configuration schema",
   "description": "Validation schema for conf/workspace.conf.yaml: the structural blueprint of the workspace. A recursive tree of two dedicated node types: `artifactNode` (a file bound to an `artifact` schema slug + `template` slug and a required `cardinality`) and `folderNode` (a container of `children`, no schema/template/required cardinality of its own). Every node's `slug` is its OWN path segment only \u2014 the full workspace-relative path is deduced by concatenating ancestor slugs top-down; a `slug` may embed `<name>` VARIABLE placeholders (e.g. `<epic-slug>`), optionally mixed with literal text (e.g. `<epic-slug>.epic.md`), and the same variable name may recur across a node and its descendants. Artifact-to-artifact derivation constraints (which kinds a given artifact may declare as sources) live in the artifact schemas themselves \u2014 the node's `artifact` binding is the join point.",
@@ -15,11 +15,11 @@
       "items": {
         "oneOf": [
           {
-            "$ref": "#/definitions/artifactNode",
+            "$ref": "#/$defs/artifactNode",
             "description": "One artifact node."
           },
           {
-            "$ref": "#/definitions/folderNode",
+            "$ref": "#/$defs/folderNode",
             "description": "One folder node."
           }
         ]
@@ -27,7 +27,7 @@
       "description": "Recursive tree of workspace nodes."
     }
   },
-  "definitions": {
+  "$defs": {
     "artifactNode": {
       "description": "An artifact (file) node: a leaf that binds its own path segment (`slug`) to an artifact schema (`artifact`) and template (`template`), with a required `cardinality`. Never has `children` \u2014 artifacts are files, not folders.",
       "type": "object",
@@ -41,7 +41,7 @@
       ],
       "properties": {
         "slug": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/nodeSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/nodeSlug",
           "description": "This artifact file's own path segment (not the full path: ancestors contribute their own segments)."
         },
         "description": {
@@ -59,11 +59,11 @@
           ]
         },
         "artifact": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/artifactSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
           "description": "The artifact kind that validates this node's file, identified by its schema slug (the centralized `artifactSlug`)."
         },
         "template": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/templateSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/templateSlug",
           "description": "The artifact template that seeds this node's file, identified by its template slug."
         }
       }
@@ -79,7 +79,7 @@
       ],
       "properties": {
         "slug": {
-          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/nodeSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/nodeSlug",
           "description": "This folder's own path segment (not the full path: ancestors contribute their own segments)."
         },
         "description": {
@@ -93,11 +93,11 @@
           "items": {
             "oneOf": [
               {
-                "$ref": "#/definitions/artifactNode",
+                "$ref": "#/$defs/artifactNode",
                 "description": "One artifact node."
               },
               {
-                "$ref": "#/definitions/folderNode",
+                "$ref": "#/$defs/folderNode",
                 "description": "One folder node."
               }
             ]

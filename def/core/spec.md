@@ -158,11 +158,20 @@ point; its input is the function's JSON `in` object:
 ```
 
 Every session-bound function's `in` carries the session attribution fields directly:
-`sessionId` and nullable `parentSessionId`. Function-specific fields live
-beside them in the same object (for example `workflowSlug` for function 3 or `artifactPath`
-for functions 8–9). Whatever surrounds each invocation — a hook mechanism — supplies
-the session fields; a raw agent-authored value is not trusted. Function 0 is the bootstrap
-exception: its `in` always carries the framework agent name as a required `agent` slug,
+`sessionId` and nullable `parentSessionId`. That pair IS the shared **inquiry** envelope
+([contracts/inquiry.schema.json](../../contracts/inquiry.schema.json)) every
+function's input contract roots, exactly as every output contract roots the **report**
+envelope — the pairing is ontological: every harness function is asked something about a
+session (an inquiry) and answers with its account (a report).
+Function-specific fields live beside them in the same object (for example `workflowSlug` for
+function 3 or `artifactPath` for functions 8–9); seven of the twelve add nothing at all and
+are the bare envelope. Whatever surrounds each invocation — a hook mechanism — supplies
+the session fields; a raw agent-authored value is not trusted. Requiring `sessionId` on every
+inquiry — including function 0's — is deliberate: the id is observed or minted by the
+surrounding mechanism *before* invocation (function 0, invariant 2), so the id always exists
+before the session record it opens. Function 0 is the bootstrap
+exception only in that its `in` also carries the framework agent name as a required `agent`
+slug,
 because no opening exists yet and the session record is the only place to attach that
 identity — the harness opens agent sessions: harnessing agents is what this function, and
 the harness itself, is for.
@@ -173,7 +182,10 @@ rendered by the command, and persisted byte-identically as the
 log entry's `report`. Reports share the `context` object (`function`, `sessionId`, nullable
 `parentSessionId`, nullable `workflowInstanceId` — the exact invocation context the log entry
 persists) and the `outcome` object (`status`, plus the `error` detail — required on error
-statuses, absent otherwise), and add one function-owned specific property where needed. Any
+statuses, absent otherwise), and add one function-owned specific property where needed. Each
+output contract additionally pins `context.function` to its own `const` — the discriminator
+the log-entry envelope's `oneOf` selects on, and what keeps two structurally identical reports
+(functions 5 and 10) distinguishable both in the journal and in the type model. Any
 session metadata beyond correlation, such as framework-agent identity when applicable, is
 recorded by function 0's registration and recovered through `sessionId` when needed. The
 normative schemas live at `contracts/api/<function>.input.schema.json` and
@@ -181,11 +193,12 @@ normative schemas live at `contracts/api/<function>.input.schema.json` and
 them. Shared contracts live beside them:
 [contracts/conf/framework/access-control-list.conf.schema.json](../../contracts/conf/framework/access-control-list.conf.schema.json) (action vocabulary),
 [contracts/context.schema.json](../../contracts/context.schema.json),
+[contracts/inquiry.schema.json](../../contracts/inquiry.schema.json),
 [contracts/report.schema.json](../../contracts/report.schema.json), and
 [contracts/log-entry.schema.json](../../contracts/log-entry.schema.json).
 
 | # | Function | What it answers | When |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 0 | [`start-session`](#0-start-session) | Which framework-agent session just opened, under which parent session — the registration every later entry's session ids trace back to? | session-started / step-started — every framework-agent session, always first |
 | 1 | [`resolve-workflow-instructions`](#1-resolve-workflow-instructions) | Which workflow-context guidance does the orchestrator's session load? | session-started |
 | 2 | [`resolve-workflow-skills`](#2-resolve-workflow-skills) | Which skills does the orchestrator's session load? | session-started |
@@ -288,8 +301,9 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
   through untouched and unstarted: the harness starts agent sessions, nothing else.
   This holds without an
   explicit access-control-list lookup at this function: for a root session (no parent) the
-  caller's own scoping already guarantees it (an agent-scoped trigger fires only for a genuine
-  framework orchestrator); for a step session (parent present) it is a consequence of the
+  caller's own scoping already guarantees it (the surrounding mechanism opens root sessions
+  only for a genuine framework orchestrator — however the host lets it scope that trigger);
+  for a step session (parent present) it is a consequence of the
   step-resolution correlation this function also validates (function 3 only ever resolves
   configured, ACL-validated workflow actors, so a non-framework `agent` simply finds no
   correlation to complete).
@@ -683,7 +697,7 @@ Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../
    $\text{Score}(m) = \sum_{\text{tag}} \text{capability\_score}_m[\text{tag}] \times \text{step.capabilities}[\text{tag}]$
 
    Highest score wins; ties break toward lower `costRank`; if both are equal, the
-   lexicographically lowest model `id` wins. Cost sensitivity emerges
+   lexicographically lowest model `slug` wins. Cost sensitivity emerges
    structurally: low, sparse weights compress candidate scores into a narrow band where the
    cheap-model tie-break dominates; high weights on discriminating tags let capability dominate
    cost.
@@ -712,7 +726,7 @@ Evaluated strictly against persisted workspace state
 - **In** — `sessionId` + nullable `parentSessionId`. The step key is resolved by the
   harness from the session ids and logs — hook-plane correlation at the boundaries,
   in-flight-step deduction for the agent probe — never supplied by an agent.
-- **Out** — `ConditionCheckReport`: the aggregate `outcome` (`pass` / `fail`) +
+- **Out** — `CheckStepPreconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
   `conditionChecks`: one check per
   declared precondition — the condition object itself, verbatim from the workflow
   configuration, its `outcome`, and its `failureMessage` when failing.
@@ -933,7 +947,9 @@ clean against `HEAD` — the commit gate's precondition (C6).
 
 - **Roles are framework-defined.** The framework owns the role catalog: each role is a named
   set of privileges, where each privilege is exactly one artifact schema slug plus one action
-  verb (`CREATE`, `READ`, `UPDATE`, `DELETE`). Roles are not declared by agents.
+  verb (`create`, `update`, `delete`). Roles are not declared by agents. Reads are
+  deliberately not modeled: agent sourcing is unrestricted by design (C3), so the privilege
+  vocabulary carries no read verb — there is nothing for it to guard at the write boundary.
 - **Actors are role-to-agent mappings.** An actor assigns one or more framework-defined roles
   to a single framework agent. Agents are the `.agent.md` files in the framework's
   `agents/` directory, identified by the `name` value in their YAML frontmatter.
@@ -945,7 +961,7 @@ clean against `HEAD` — the commit gate's precondition (C6).
 **Interface**
 
 - **In** — `sessionId` + nullable `parentSessionId` + the **artifact path**
-  (`artifactPath`) + the write `action` (`create`, `read`, `update`, `delete`), derived from
+  (`artifactPath`) + the write `action` (`create`, `update`, `delete`), derived from
   the host write tool. The actor is derived from the registered session, never
   supplied by the agent; the resource — the artifact's schema slug — is derived from the path
   (invariant 2).
@@ -977,7 +993,7 @@ Example:
       "artifactPath": "portfolio/epics/epic-payments.md",
       "action": "update",
       "resource": "epic",
-      "failureMessage": "missing privilege: UPDATE epic"
+      "failureMessage": "missing privilege: update epic"
     }
   }
 }
@@ -996,6 +1012,14 @@ Contract schemas — [contracts/api/check-step-authorization.input.schema.json](
 - One log entry per authorization decision (allow / deny with the missing privilege).
 - On a deny, the write never lands — the workspace never sees unauthorized bytes.
 
+**Enforcement scope.** "Never executes" holds while the boundary fires — a host whose hook
+plane fails open (timeout, spawn failure) can let a write bypass this function entirely. The
+bypass is bounded, per C6's graded guarantee: unmediated bytes land only in the working tree,
+never in committed state (no function 9 ran, so nothing promoted them), and the dirtied path
+then fails this function's own staging-baseline check (invariant 5) for every later mediated
+write — the escape cannot compound through the harness. Residual cleanup is C6's
+detect-and-remediate plane.
+
 **Invariants**
 
 1. The actor is the AGENT (normalized agent identity) derived from the registered host
@@ -1009,6 +1033,9 @@ Contract schemas — [contracts/api/check-step-authorization.input.schema.json](
 5. A write whose staging baseline is not clean against `HEAD` is denied at the same boundary:
    dirty tracked targets, pre-existing untracked targets, and paths outside the artifact layout
    do not execute — so the staged write is always the only staged content at its path (C6).
+6. A write targeting the workspace logs path is denied always, for every actor: logs are
+   harness-authored, single-writer (C0) — no agent privilege can grant authorship of the
+   journal, and no role can declare one (the ACL vocabulary has no resource for it).
 
 ### 9. check-step-artifact
 
@@ -1092,8 +1119,9 @@ function 3's cursor reads nothing else.
 
 - **In** — `sessionId` + nullable `parentSessionId`. The step key is resolved by the
   hook plane from the returning dispatch and session ids — never supplied by an agent.
-- **Out** — `ConditionCheckReport`: the aggregate `outcome` (`pass` / `fail`) +
-  `conditionChecks`, exactly as function 5.
+- **Out** — `CheckStepPostconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
+  `conditionChecks`, exactly as function 5 (same payload, distinct type — one output contract
+  each).
 - **Caller usage** — on a passing outcome the orchestrator calls function 3 for the next step;
   on a failing one — per its `reports-handling` instruction (function 1) — it handles the
   failure messages and calls function 3 again — the failed step is not
@@ -1281,7 +1309,8 @@ Workspace state is the union of:
   the workspace state paths: an agent write becomes state only when function 9's commit gate
   promotes it (C6).
 - Persisted **logs** — the harness's session logs under the workspace logs path:
-  harness-authored, append-only, single-writer. They have no invalid-write window, so they are
+  harness-authored, append-only, single-writer, and **local-only** — never committed or
+  synced (see [Logging](#logging)). They have no invalid-write window, so they are
   exempt from the commit gate and read directly from the working tree.
 
 Both are first-class state for deterministic checks and replay.
@@ -1338,7 +1367,8 @@ exclusively schema-valid artifacts, at all times: the write boundary is a **Git 
   Validators that must enumerate invalids read the raw universe (`scan_raw`) of committed
   state instead.
 - Enables safe asynchronous / remote workspace sync: what syncs is committed state — a synced
-  replica is trustably valid.
+  replica is trustably valid. Sync and handoff claims are scoped to **artifacts**: logs are
+  local-only and never sync (see [Logging](#logging)).
 - The commit gate governs artifacts — the agent-authored plane. Logs are harness-authored,
   append-only, single-writer (C0): they have no invalid-write window and are exempt.
 - **Guarantee scope by plane** — the harness's write boundary only sees harness-mediated
@@ -1468,7 +1498,7 @@ step, so step pre- and postconditions apply before and after it — while write 
 | session-started | Session-open event with no correlated unresolved `step-resolution` entry | 0 (opening — always first) + 1, 2 |
 | step-starting | Dispatch about to open a step session | 5 (preconditions — THE enforcement point) |
 | step-started | Session-open event correlated to an unresolved `step-resolution` entry | 0 (opening — always first) + 6, 7 |
-| write-starting | Write tool about to mutate an artifact path | 8 (authorization + staging baseline — can deny) |
+| write-starting | Write tool about to mutate an artifact path | 8 (authorization + staging baseline — can deny; a target under the workspace logs path is denied always — function 8, invariant 6) |
 | write-ended | Write tool has landed a staged write on an artifact path | 9 (schema validity — the commit gate) |
 | step-ended | Dispatch returned after the step session ended | 10 (postconditions — THE evaluation point) |
 | session-ended | Session-end event, whenever the surrounding mechanism can observe it | 11 (closing — best-effort, C8) |
@@ -1502,16 +1532,16 @@ Five packages, one dependency direction — `commands → services → {stores, 
 ```text
 src/
   application.py      # the composition root: builds the object graph (config dataclasses fail-fast) and dispatches argv to one command
-  commands/           # usage entry points (≈ web controllers): parse input, invoke the service(s), render the result — no domain logic
+  commands/           # usage entry points (≈ web controllers): parse input into the function's own Inquiry subtype, invoke the service(s), render the result — no domain logic
   services/           # the logical domain services commands use: all harness logic lives here
     session_lifecycle/ # SessionLifecycle + its results: SessionStartReport (0), SessionEndReport (11)
-    step_resolution/  # StepResolver + its result: StepResolution
+    step_resolution/  # StepResolver + its result: StepResolutionReport
     model_resolution/ # StepModelResolver + its result: ModelProfileReport
     checking/         # the checkers + ConditionEvaluator + their result reports and ConditionCheck
     context_resolution/ # the four context resolvers + their instruction/skill report classes
   stores/             # data access, mirroring services: one family subpackage per store — used by services exclusively
     artifact_store/   # ArtifactStore + its persisted dataclasses: Artifact, Finding
-    session_log_store/ # SessionLogStore + its persisted/derived dataclasses: Log, LogEntry, StepRef, the Report base, WorkflowInstanceView
+    session_log_store/ # SessionLogStore + its persisted/derived dataclasses: Log, LogEntry, the Report base, WorkflowInstanceView
   config/             # ConfigLoader + the configuration dataclasses it constructs (parse + contract-validate + semantic rules)
   utils/              # domain-free mechanics: loaders (env/json/yaml/markdown) + higher-level SchemaValidator / JsonlStore
 ```
@@ -1519,25 +1549,35 @@ src/
 Four placement rules settle the boundary questions:
 
 - **Harness contracts use JSON Schema 2020-12 and GSM-style composition.** The harness contract
-  dialect is `https://json-schema.org/draft/2020-12/schema`, matching GSM/ITIP's Archetype
-  validation posture rather than draft-07 portability. Contract extension uses a root `$ref`
-  when a schema specializes exactly one base contract (e.g. a function output rooting
-  `report.schema.json`), with sibling constraints (`properties`, `required`, `oneOf`,
+  dialect is `https://json-schema.org/draft/2020-12/schema` — every contract, including the
+  configuration and slug libraries — matching GSM/ITIP's Archetype
+  validation posture rather than draft-07 portability; shared definitions live under the
+  2020-12 `$defs` keyword, never the pre-2019 `definitions`. Contract extension uses a root `$ref`
+  when a schema specializes exactly one base contract — every function output roots
+  `report.schema.json` and every function inquiry roots `inquiry.schema.json` — with
+  sibling constraints (`properties`, `required`, `oneOf`,
   `unevaluatedProperties`) added directly. `allOf` is reserved for true facets, conditional
   composition, or multi-source intersection — not for ordinary single-base extension.
+  A rooted schema uses `unevaluatedProperties: false`, never `additionalProperties: false`,
+  which cannot see the base's properties through the `$ref`.
 - **Contract identities follow the GSM `gsmarc://` `$id` convention.** Every schema declares a
   canonical `$id` of the form `gsmarc://saf/<path>/<stem>/v1`, where `<path>` mirrors the file's
-  location under `contracts/` or `artifacts/` and `<stem>` is the filename without
-  `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `safe`,
-  logical path, filename stem as the identity segment, and `/v1` version suffix. `$ref` links
-  use these canonical ids (or repo-relative paths where the loader resolves them), so a
-  contract can be moved or renamed only by updating its `$id` and every reference to it.
+  repo location (`contracts/`, `artifacts/`, or an adapter's own `adapters/<adapter>/contracts/`)
+  and `<stem>` is the filename without
+  `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `saf`,
+  logical path, filename stem as the identity segment, and `/v1` version suffix. Every
+  cross-file `$ref` uses the target's canonical `$id` — **never a filesystem-relative path**:
+  because each schema declares a `gsmarc://` `$id`, that id (not the file's location) is the
+  base URI a relative reference resolves against, so `../report.schema.json` would resolve to
+  a `gsmarc://` URI that does not exist and the contract would not compile. Absolute ids are
+  also scope-independent inside `oneOf` branches. A contract
+  can therefore be moved or renamed only by updating its `$id` and every reference to it.
 - **Canonical slug convention, centralized.** Every framework entity named by a slug uses the
   same URL-safe form: lowercase letters, digits, and hyphens (`[a-z0-9-]+`). Every `*Slug`
   definition lives in ONE shared library,
   [contracts/slugs.schema.json](../../contracts/slugs.schema.json) — no contract
   defines its own copy; every reference is a `$ref` to it, in-repo (from within the library
-  itself) or cross-file via `gsmarc://saf/contracts/slugs/v1#/definitions/<slug>`. The
+  itself) or cross-file via `gsmarc://saf/contracts/slugs/v1#/$defs/<slug>`. The
   slug is also the filename stem used to locate the entity's definition:
   - `workflowSlug` = stem of `conf/workflows/<slug>.workflow.conf.yaml`,
   - `stepSlug` = a step slug, unique within its workflow,
@@ -1596,8 +1636,11 @@ where the contract
 lives. External dependencies are drawn: **cel-python** (CEL compilation/evaluation, used by
 `ConditionEvaluator`), **jsonschema** (contract validation, used by `SchemaValidator`), and
 **PyYAML** (safe loading, used by `YamlLoader`) — the harness's only third-party imports. One
-dependency direction, as in the source layout: `commands → services →
-{stores, config}`, with `utils` beneath `stores` and `config`.
+dependency direction, strictly downward: `commands → services →
+{stores, config}`, with `utils` beneath `stores` and `config`. Downward *skip-level* type
+references are legal and drawn — `commands` names `Report` and `LogEntry` (homed in
+`stores/session_log_store/`) because a command returns and persists a report; no upward edge
+exists anywhere, and no layer ever calls *behavior* it skipped over.
 
 ![Harness source classes diagram](harness-src-classes.png)
 
@@ -1607,30 +1650,53 @@ dependency direction, as in the source layout: `commands → services →
   (`dispatch_command`).
 - **`commands`** — `Command` is the single interface (`execute_function`), realized by
   **twelve commands — exactly one per harness function** — each holding its
-  service(s) as private attributes: parse the function's `in` object, invoke, render the typed
-  result to the `out` object. No command composes services: functions 3 and 4 are fully
+  service(s) as private attributes. A command is the ONLY class bound to the API contracts:
+  it parses and contract-validates the function's `in` object into **its own `Inquiry`
+  subtype**, unpacks that into the service call, and returns the concrete `Report` subtype
+  bound to its own output contract. **One function = one input type = one output type = two
+  contracts** — the twelve input dataclasses (`StartSessionInquiry`, `ResolveStepInquiry`,
+  `CheckStepAuthorizationInquiry`, …) mirror the twelve reports and are homed here, beside the
+  commands that parse into them; the abstract `Inquiry` base carries the session
+  attribution pair and mirrors `inquiry.schema.json`, exactly as `Report` mirrors
+  `report.schema.json`. Seven of the twelve add no field of their own — their identity is
+  their contract's `$id`, not their shape (`SessionEndReport` is the same case on the output
+  side). Services never receive a `Inquiry`: the command unpacks it into typed
+  parameters, so nothing beneath `commands` ever depends upward on it.
+  No command composes services: functions 3 and 4 are fully
   independent, and whoever needs both composes them outside the harness core (the
   orchestrator per its instructions, or whatever mediates a given host's hook events). Commands
   are hook-
   and host-blind: any event→boundary→functions orchestration happens entirely outside `src/`,
   never inside a command.
-- **`services`** — all harness logic, one service per function, grouped in **subpackages
+- **`services`** — all harness logic: **eleven services for twelve functions** — one per
+  function except `SessionLifecycle`, which owns the session's two boundary writes (0 and 11)
+  because opening and closing the same file is one responsibility. Grouped in **subpackages
   by family**, and each result dataclass homed in the subpackage of the classes returning it —
-  **exclusively with them**:
+  **exclusively with them**. **Every service holds `SessionLogStore`**: it appends its own
+  invocation's entry (1 invocation = 1 entry is a per-service obligation, not a command-layer
+  one), and several also read the log for their own logic — the session's agent (1–2), its
+  in-flight step (4–10), its registered actor (8).
   - `session_lifecycle/` — `SessionLifecycle` (0 → `SessionStartReport`; 11 →
     `SessionEndReport`);
   - `context_resolution/` — the four context resolvers (1–2, 6–7) with their report classes:
     `WorkflowInstructionsReport`, `WorkflowSkillsReport`, `StepInstructionsReport`, and
     `StepSkillsReport`;
-  - `step_resolution/` — `StepResolver` (3 → `StepResolution`);
+  - `step_resolution/` — `StepResolver` (3 → `StepResolutionReport`, carrying the resolved
+    `step` only: the instance id is `context.workflowInstanceId`, never a second projection);
   - `model_resolution/` — `StepModelResolver` (4 → `ModelProfileReport`);
-  - `checking/` — `StepPreconditionChecker` (5), `StepPostconditionChecker` (10),
-    `StepAuthorizationChecker` (8 — live only: `check_step_authorization(actor,
-    artifact_path)`), `StepArtifactChecker` (9), plus `ConditionEvaluator` (the CEL
-    machinery functions 5 and 10 share, via cel-python) — with their results `CheckReport`
-    (outcome + findings + condition checks) and `ConditionCheck`. The internal workspace
-    sweep is not a checker service: it is store capability (`ArtifactStore.scan_raw_paths` +
-    `validate_artifact`), commandless by design (see
+  - `checking/` — `StepPreconditionChecker` (5 → `CheckStepPreconditionsReport`),
+    `StepPostconditionChecker` (10 → `CheckStepPostconditionsReport`) — structurally identical
+    payloads bound to distinct output contracts, so each is its own leaf type over the abstract
+    `ConditionCheckReport` base that carries `conditionChecks`; which function produced a given
+    report is read from `context.function`, never inferred from the type —
+    `StepAuthorizationChecker` (8 → `AuthorizationReport`, whose `Authorization` carries
+    `actor`, `artifactPath`, `action`, `resource`, and the failure message: it guards the ACL
+    grant, the staging baseline via `ArtifactStore.is_staging_clean` (invariant 5), and the
+    logs path via `WorkspaceLayout.is_logs_path` (invariant 6)), `StepArtifactChecker`
+    (9 → `ArtifactCheckReport`), plus `ConditionEvaluator` (the CEL
+    machinery functions 5 and 10 share, via cel-python) and `ConditionCheck`. The internal
+    workspace sweep is not a checker service: it is store capability
+    (`ArtifactStore.scan_raw_paths` + `validate_artifact`), commandless by design (see
     [Internal validation](#internal-validation--not-functions)).
 
   **Report identity rule:** every service returns a concrete `Report` subtype; every command
@@ -1650,7 +1716,9 @@ dependency direction, as in the source layout: `commands → services →
     produces `Finding`s; `commit_artifact` promotes a validated staged write into committed
     state and `revert_artifact` discards an invalid one — together the harness's only
     deliberate Git actions), alongside `Artifact`
-    and `Finding` (source, rule, message — the check finding persisted inside `CheckReport`).
+    and `Finding` (source, rule, message — internal to this store: what `validate_artifact` and
+    `revert_artifact` produce, and what function 9 renders into
+    `ArtifactCheck.failureMessage`; no report carries a `Finding` collection).
   - `session_log_store/` — `SessionLogStore` owns the log side (`create_session_log` writes
     function 0's registration entry — the file's first line; `mint_workflow_instance_id` mints
     an instance id — prefixed by its `workflow_slug` (e.g. `verification-01J9XQ`) — no file;
@@ -1671,8 +1739,13 @@ dependency direction, as in the source layout: `commands → services →
 
   Frozen dataclasses throughout: public typed attributes, no getters/setters.
 - **`config`** — `ConfigLoader` plus the configuration dataclasses it constructs, homed
-  together: `FrameworkLayout`, `AccessControlList`, `ModelProfiles`/`ModelProfile`,
-  `WorkspaceLayout`/`ArtifactNode`/`FolderNode`, `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`.
+  together: `FrameworkLayout`, `AccessControlList`/`Privilege` (a privilege is the modeled
+  `artifact` + `action` pair the contract declares, never a flattened string),
+  `ModelProfiles`/`ModelProfile`,
+  `WorkspaceLayout`/`ArtifactNode`/`FolderNode` (`resolve_resource(path, artifact_type)` — the
+  `artifact_type` disambiguates when several artifact schemas' path patterns match, function 8
+  invariant 2; `is_logs_path(path)` backs invariant 6),
+  `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`.
   Each `load_*` method performs parse + contract-validation + semantic rules
   - dataclass construction as ONE act; there is **no aggregate `FrameworkConfig`**: each
   service receives exactly the dataclasses it needs.
@@ -1690,7 +1763,7 @@ Every configuration source has a contract and a configuration dataclass (in `src
 beside the `ConfigLoader` that builds it):
 
 | Configuration | Contract | Typed view |
-|---|---|---|
+| --- | --- | --- |
 | `.env` layout environment | required-variable set (below) | `FrameworkLayout` |
 | `conf/access-control-list.conf.yaml` | `conf/framework/access-control-list.conf.schema.json` | `AccessControlList` |
 | `conf/model-profiles.conf.yaml` | `conf/framework/model-profiles.conf.schema.json` | `ModelProfiles` |
@@ -1860,7 +1933,10 @@ session logs.
 - **Ordering — `timestamp` plus single-driver invariant** — every entry's `timestamp` (the log entry's
   wall-clock write time) is the cross-log total ordering key: entries across every session log
   sort by `timestamp`, giving a single total order for the instance view regardless of which session
-  wrote which entry. Within one session log, file order and `timestamp` agree by construction (a
+  wrote which entry. This rests on one clock assumption: all of an instance's logs are written
+  by one machine's clock (logs are local-only, below), and that clock is monotonic enough
+  across a handoff — a backwards wall-clock jump between driving sessions could misorder the
+  view. Within one session log, file order and `timestamp` agree by construction (a
   single-writer log only ever appends forward in time). At most one live session drives a
   workflow instance at any time (the single-driver invariant), so a handoff between driving
   sessions is just a `timestamp`-ordered continuation, not a special case. Function 3's cursor reads
@@ -1873,9 +1949,14 @@ session logs.
   MUST normalize it to a safe slug (`[a-z0-9-]`) before it reaches the harness — a raw id is a
   path-traversal vector.
 
-A note on sync: many small per-session files partition merge conflicts under asynchronous
-workspace sync (C6) far better than one shared log would — an accepted design trade against
-the cross-log assembly of instance views.
+A note on scope: **logs are local-only** — they live in the working tree under the workspace
+logs path and are never committed or synced. What syncs between clones is committed artifact
+state (C6); the journal stays with the machine that wrote it. Three consequences, accepted as
+explicit non-goals: cross-machine mid-instance handoff is not supported (the instance view —
+and with it function 3's latest-open-instance deduction — exists only where its logs live);
+C8's ended-session refusal holds only on the writing machine; and the audit trail's durability
+is the local filesystem's, not the repository's. Per-session files still keep appends
+single-writer and contention-free locally.
 
 The logs are the audit and replay trace, but not the branching input: `resolve-step` reads
 only journaled step outcomes (through the instance view); every other check recomputes from
@@ -1900,7 +1981,7 @@ workflow definitions plus current artifacts.
   configuration classes are **frozen dataclasses** exposing public typed attributes directly
   (`entry.report`, never `entry.get_report()`); computed facts are query methods named verb +
   subject (`log.list_executed_steps()`); boolean queries read as predicates
-  (`acl.is_framework_agent(actor)`) only where they compute, never to wrap an attribute.
+  (`store.is_staging_clean(path)`) only where they compute, never to wrap an attribute.
 - **Method names are verb + subject** — `resolve_step`, `check_step_preconditions`,
   `load_workflow_catalog`, `append_log_entry`; never bare `check()` / `load()` / `run()`.
 - **Immutability by default** — dataclasses are `frozen=True`; collections cross boundaries as
@@ -1914,8 +1995,9 @@ workflow definitions plus current artifacts.
 ### SOLID
 
 - **S**ingle responsibility — one reason to change per class; the re-implementation target is a
-  1:1 function → service → command alignment (each service realizes exactly one harness
-  function).
+  1:1 function → command alignment, and a 1:1 function → service alignment everywhere except
+  `SessionLifecycle`, whose two functions (0 and 11) open and close the same file and are
+  therefore one responsibility.
 - **O**pen/closed — behavior extends through configuration (workflows, catalog, ACL, model
   catalog), never by modifying the harness core.
 - **L**iskov substitution — every typed view and entity honors its base contract (`Artifact`
