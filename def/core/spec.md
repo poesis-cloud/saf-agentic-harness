@@ -176,13 +176,13 @@ persists) and the `outcome` object (`status`, plus the `error` detail — requir
 statuses, absent otherwise), and add one function-owned specific property where needed. Any
 session metadata beyond correlation, such as framework-agent identity when applicable, is
 recorded by function 0's registration and recovered through `sessionId` when needed. The
-normative schemas live at `harness/contracts/api/<function>.input.schema.json` and
-`harness/contracts/api/<function>.output.schema.json`; each function section links to
+normative schemas live at `contracts/api/<function>.input.schema.json` and
+`contracts/api/<function>.output.schema.json`; each function section links to
 them. Shared contracts live beside them:
-[harness/contracts/conf/framework/access-control-list.conf.schema.json](harness/contracts/conf/framework/access-control-list.conf.schema.json) (action vocabulary),
-[harness/contracts/context.schema.json](harness/contracts/context.schema.json),
-[harness/contracts/report.schema.json](harness/contracts/report.schema.json), and
-[harness/contracts/log-entry.schema.json](harness/contracts/log-entry.schema.json).
+[contracts/conf/framework/access-control-list.conf.schema.json](../../contracts/conf/framework/access-control-list.conf.schema.json) (action vocabulary),
+[contracts/context.schema.json](../../contracts/context.schema.json),
+[contracts/report.schema.json](../../contracts/report.schema.json), and
+[contracts/log-entry.schema.json](../../contracts/log-entry.schema.json).
 
 | # | Function | What it answers | When |
 |---|---|---|---|
@@ -276,7 +276,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/start-session.input.schema.json](harness/contracts/api/start-session.input.schema.json) and [harness/contracts/api/start-session.output.schema.json](harness/contracts/api/start-session.output.schema.json).
+Contract schemas — [contracts/api/start-session.input.schema.json](../../contracts/api/start-session.input.schema.json) and [contracts/api/start-session.output.schema.json](../../contracts/api/start-session.output.schema.json).
 
 **Preconditions**
 
@@ -372,7 +372,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-workflow-instructions.input.schema.json](harness/contracts/api/resolve-workflow-instructions.input.schema.json) and [harness/contracts/api/resolve-workflow-instructions.output.schema.json](harness/contracts/api/resolve-workflow-instructions.output.schema.json).
+Contract schemas — [contracts/api/resolve-workflow-instructions.input.schema.json](../../contracts/api/resolve-workflow-instructions.input.schema.json) and [contracts/api/resolve-workflow-instructions.output.schema.json](../../contracts/api/resolve-workflow-instructions.output.schema.json).
 
 **Preconditions**
 
@@ -434,7 +434,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-workflow-skills.input.schema.json](harness/contracts/api/resolve-workflow-skills.input.schema.json) and [harness/contracts/api/resolve-workflow-skills.output.schema.json](harness/contracts/api/resolve-workflow-skills.output.schema.json).
+Contract schemas — [contracts/api/resolve-workflow-skills.input.schema.json](../../contracts/api/resolve-workflow-skills.input.schema.json) and [contracts/api/resolve-workflow-skills.output.schema.json](../../contracts/api/resolve-workflow-skills.output.schema.json).
 
 **Preconditions**
 
@@ -534,7 +534,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-step.input.schema.json](harness/contracts/api/resolve-step.input.schema.json) and [harness/contracts/api/resolve-step.output.schema.json](harness/contracts/api/resolve-step.output.schema.json).
+Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contracts/api/resolve-step.input.schema.json) and [contracts/api/resolve-step.output.schema.json](../../contracts/api/resolve-step.output.schema.json).
 
 **Preconditions**
 
@@ -649,7 +649,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-step-model.input.schema.json](harness/contracts/api/resolve-step-model.input.schema.json) and [harness/contracts/api/resolve-step-model.output.schema.json](harness/contracts/api/resolve-step-model.output.schema.json).
+Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../contracts/api/resolve-step-model.input.schema.json) and [contracts/api/resolve-step-model.output.schema.json](../../contracts/api/resolve-step-model.output.schema.json).
 
 **Preconditions**
 
@@ -754,7 +754,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/check-step-preconditions.input.schema.json](harness/contracts/api/check-step-preconditions.input.schema.json) and [harness/contracts/api/check-step-preconditions.output.schema.json](harness/contracts/api/check-step-preconditions.output.schema.json).
+Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](../../contracts/api/check-step-preconditions.input.schema.json) and [contracts/api/check-step-preconditions.output.schema.json](../../contracts/api/check-step-preconditions.output.schema.json).
 
 **Preconditions**
 
@@ -833,7 +833,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-step-instructions.input.schema.json](harness/contracts/api/resolve-step-instructions.input.schema.json) and [harness/contracts/api/resolve-step-instructions.output.schema.json](harness/contracts/api/resolve-step-instructions.output.schema.json).
+Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json](../../contracts/api/resolve-step-instructions.input.schema.json) and [contracts/api/resolve-step-instructions.output.schema.json](../../contracts/api/resolve-step-instructions.output.schema.json).
 
 **Preconditions**
 
@@ -902,7 +902,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/resolve-step-skills.input.schema.json](harness/contracts/api/resolve-step-skills.input.schema.json) and [harness/contracts/api/resolve-step-skills.output.schema.json](harness/contracts/api/resolve-step-skills.output.schema.json).
+Contract schemas — [contracts/api/resolve-step-skills.input.schema.json](../../contracts/api/resolve-step-skills.input.schema.json) and [contracts/api/resolve-step-skills.output.schema.json](../../contracts/api/resolve-step-skills.output.schema.json).
 
 **Preconditions**
 
@@ -983,7 +983,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/check-step-authorization.input.schema.json](harness/contracts/api/check-step-authorization.input.schema.json) and [harness/contracts/api/check-step-authorization.output.schema.json](harness/contracts/api/check-step-authorization.output.schema.json).
+Contract schemas — [contracts/api/check-step-authorization.input.schema.json](../../contracts/api/check-step-authorization.input.schema.json) and [contracts/api/check-step-authorization.output.schema.json](../../contracts/api/check-step-authorization.output.schema.json).
 
 **Preconditions**
 
@@ -1051,7 +1051,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/check-step-artifact.input.schema.json](harness/contracts/api/check-step-artifact.input.schema.json) and [harness/contracts/api/check-step-artifact.output.schema.json](harness/contracts/api/check-step-artifact.output.schema.json).
+Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../../contracts/api/check-step-artifact.input.schema.json) and [contracts/api/check-step-artifact.output.schema.json](../../contracts/api/check-step-artifact.output.schema.json).
 
 **Preconditions**
 
@@ -1133,7 +1133,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/check-step-postconditions.input.schema.json](harness/contracts/api/check-step-postconditions.input.schema.json) and [harness/contracts/api/check-step-postconditions.output.schema.json](harness/contracts/api/check-step-postconditions.output.schema.json).
+Contract schemas — [contracts/api/check-step-postconditions.input.schema.json](../../contracts/api/check-step-postconditions.input.schema.json) and [contracts/api/check-step-postconditions.output.schema.json](../../contracts/api/check-step-postconditions.output.schema.json).
 
 **Preconditions**
 
@@ -1199,7 +1199,7 @@ Example:
 }
 ```
 
-Contract schemas — [harness/contracts/api/end-session.input.schema.json](harness/contracts/api/end-session.input.schema.json) and [harness/contracts/api/end-session.output.schema.json](harness/contracts/api/end-session.output.schema.json).
+Contract schemas — [contracts/api/end-session.input.schema.json](../../contracts/api/end-session.input.schema.json) and [contracts/api/end-session.output.schema.json](../../contracts/api/end-session.output.schema.json).
 
 **Preconditions**
 
@@ -1526,8 +1526,8 @@ Four placement rules settle the boundary questions:
   `unevaluatedProperties`) added directly. `allOf` is reserved for true facets, conditional
   composition, or multi-source intersection — not for ordinary single-base extension.
 - **Contract identities follow the GSM `gsmarc://` `$id` convention.** Every schema declares a
-  canonical `$id` of the form `gsmarc://safe/<path>/<stem>/v1`, where `<path>` mirrors the file's
-  location under `harness/contracts/` or `artifacts/` and `<stem>` is the filename without
+  canonical `$id` of the form `gsmarc://saf/<path>/<stem>/v1`, where `<path>` mirrors the file's
+  location under `contracts/` or `artifacts/` and `<stem>` is the filename without
   `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `safe`,
   logical path, filename stem as the identity segment, and `/v1` version suffix. `$ref` links
   use these canonical ids (or repo-relative paths where the loader resolves them), so a
@@ -1535,9 +1535,9 @@ Four placement rules settle the boundary questions:
 - **Canonical slug convention, centralized.** Every framework entity named by a slug uses the
   same URL-safe form: lowercase letters, digits, and hyphens (`[a-z0-9-]+`). Every `*Slug`
   definition lives in ONE shared library,
-  [harness/contracts/slugs.schema.json](harness/contracts/slugs.schema.json) — no contract
+  [contracts/slugs.schema.json](../../contracts/slugs.schema.json) — no contract
   defines its own copy; every reference is a `$ref` to it, in-repo (from within the library
-  itself) or cross-file via `gsmarc://safe/harness/contracts/slugs/v1#/definitions/<slug>`. The
+  itself) or cross-file via `gsmarc://saf/contracts/slugs/v1#/definitions/<slug>`. The
   slug is also the filename stem used to locate the entity's definition:
   - `workflowSlug` = stem of `conf/workflows/<slug>.workflow.conf.yaml`,
   - `stepSlug` = a step slug, unique within its workflow,
@@ -1704,14 +1704,14 @@ its pieces live via environment variables, loaded from a `.env` file at the fram
 containing the `.env` file — and every other layout variable resolves relative to it:
 
 ```bash
-FRAMEWORK_DIR=/abs/path/to/safe-agentic-framework   # the anchor: absolute; all other paths resolve relative to it
+FRAMEWORK_DIR=/abs/path/to/safe-agentic-organization   # the anchor: absolute; all other paths resolve relative to it
 FRAMEWORK_AGENTS_DIR=agents
 FRAMEWORK_ARTIFACTS_DIR=artifacts
 FRAMEWORK_SKILLS_DIR=.github/skills
 FRAMEWORK_TEMPLATES_DIR=templates
 FRAMEWORK_WORKFLOWS_DIR=conf/workflows
 FRAMEWORK_INSTRUCTIONS_DIR=instructions
-FRAMEWORK_WORKSPACE_DIR=../safe-agentic-portfolio
+FRAMEWORK_WORKSPACE_DIR=../agentic-workspace
 ```
 
 `FrameworkLayout` is the dataclass over these variables — validated fail-fast like any other
@@ -1813,7 +1813,7 @@ Example:
 }
 ```
 
-Contract schema — [harness/contracts/log-entry.schema.json](harness/contracts/log-entry.schema.json).
+Contract schema — [contracts/log-entry.schema.json](../../contracts/log-entry.schema.json).
 
 **The status rule.** The only status is the function's outcome, and each function defines
 and owns it in its own I/O contract, inside its report — under ONE shared field name,
@@ -1934,14 +1934,14 @@ a code branch justified by no clause is a candidate for deletion.
 
 ### Unit testing
 
-`harness/tests/unit/` is a structural mirror of `harness/src/`: one test module per src module
+`tests/unit/` is a structural mirror of `src/`: one test module per src module
 (`tests/unit/<package>/test_<module>.py` ↔ `src/<package>/<module>.py`), one test class per src
 class. Isolation comes from the constructor-injection convention — collaborators are replaced
 by fakes and tmp-dir workspaces, never by monkey-patching internals.
 
 ### Functional testing (proposal)
 
-`harness/tests/functional/` — one test module per harness FUNCTION (twelve), exercising the real
+`tests/functional/` — one test module per harness FUNCTION (twelve), exercising the real
 command entry point over a fixture framework configuration and a fixture workspace:
 
 - each test asserts the full Interface (In → Out), the Postconditions (exact log entries

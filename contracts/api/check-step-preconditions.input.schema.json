@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/check-step-preconditions.input/v1",
+  "$id": "gsmarc://saf/contracts/api/check-step-preconditions.input/v1",
   "title": "check-step-preconditions input contract",
   "type": "object",
   "required": [

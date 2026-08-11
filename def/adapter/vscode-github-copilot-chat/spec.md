@@ -260,13 +260,13 @@ check, and named an explicit interim mechanism, not a permanent design.
 **In** (stdin):
 
 ```json
-{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "run_in_terminal", "tool_input": { "command": "harness/harness.py resolve-step --workflow verification" } }
+{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "run_in_terminal", "tool_input": { "command": "harness.py resolve-step --workflow verification" } }
 ```
 
 **Out** (stdout, exit 0):
 
 ```json
-{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": { "command": "harness/harness.py resolve-step --workflow verification --session-id chat-session-guid-t3" } } }
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": { "command": "harness.py resolve-step --workflow verification --session-id chat-session-guid-t3" } } }
 ```
 
 **H5 `PostToolUse` — write class — write-ended.** The commit gate (function 9) — validates
@@ -551,7 +551,7 @@ argument (host-fixed, not model-authored):
     "UserPromptSubmit": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat value-management-officer",
+        "command": "adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat value-management-officer",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 30
       }
@@ -661,7 +661,7 @@ Registers the step session (function 0, with parent) and injects the step's decl
     "SubagentStart": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh SubagentStart vscode-github-copilot-chat",
+        "command": "adapters/dispatch.sh SubagentStart vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 60
       }
@@ -775,7 +775,7 @@ adapter classifies by `tool_name`):
     "PreToolUse": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",
+        "command": "adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 60
       }
@@ -982,7 +982,7 @@ harness command entry point.
   "hook_event_name": "PreToolUse",
   "session_id": "chat-session-guid",
   "tool_name": "run_in_terminal",
-  "tool_input": { "command": "harness/harness.py resolve-step --workflow verification", "…": "…" },
+  "tool_input": { "command": "harness.py resolve-step --workflow verification", "…": "…" },
   "tool_use_id": "call_ghi789"
 }
 ```
@@ -1010,7 +1010,7 @@ harness command entry point.
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
     "updatedInput": {
-      "command": "harness/harness.py resolve-step --workflow verification --session-id chat-session-guid-t3"
+      "command": "harness.py resolve-step --workflow verification --session-id chat-session-guid-t3"
     }
   }
 }
@@ -1045,7 +1045,7 @@ into workspace state or reverts it, feeding the failure back to the writing agen
     "PostToolUse": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",
+        "command": "adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 60
       }
@@ -1222,7 +1222,7 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
     "SubagentStop": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",
+        "command": "adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 10
       }
@@ -1230,7 +1230,7 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
     "Stop": [
       {
         "type": "command",
-        "command": "harness/adapters/dispatch.sh Stop vscode-github-copilot-chat",
+        "command": "adapters/dispatch.sh Stop vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 10
       }
@@ -1309,7 +1309,7 @@ VS Code hook engine
 dispatch.sh <Event> vscode-github-copilot-chat [<agentSlug>]
   │ (2) exec: argv (event, env, optional scoping agent) + stdin unchanged
   │     — no contract of its own: a pure forwarder that locates this adapter's own
-  │     hook entry by the env argument (harness/adapters/<env>/adapter.py)
+  │     hook entry by the env argument (adapters/<env>/adapter.py)
   ▼
 adapters/vscode-github-copilot-chat/adapter.py hook --event <Event> [--agent <agentSlug>]
   │ (3) this adapter (host-aware, inside the harness component):
@@ -1318,8 +1318,8 @@ adapters/vscode-github-copilot-chat/adapter.py hook --event <Event> [--agent <ag
   │     sequences (registration first), fans out per path, aborts on failure →
   │     invokes the harness function commands — harness.py, 1 command per function,
   │     hook/host-blind — each governed by
-  │     harness/contracts/api/<function>.input|output.schema.json; every completed
-  │     invocation journals per harness/contracts/log-entry.schema.json (the report IS
+  │     contracts/api/<function>.input|output.schema.json; every completed
+  │     invocation journals per contracts/log-entry.schema.json (the report IS
   │     the out object — harness report identity rule); this adapter's renderer maps the
   │     reports to the host decision
   ▼
@@ -1353,12 +1353,12 @@ VS Code hook engine (permissionDecision / decision:block / additionalContext / u
 - **Seam 2 has no contract**: `dispatch.sh` adds nothing but argv shaping.
 
 **Component vs planes.** "No hook logic outside the harness" reads at the **component**
-level (`harness/`); within the component the split is explicit and structural, and basic
+level (the harness repository); within the component the split is explicit and structural, and basic
 layering applies between them: an adapter depends on a system's public API, never its
 internals. The **harness core** (`src/` + `harness.py`) exposes exactly one command per
 function — twelve commands, hook/host-blind by package graph, the surface agents
 (`resolve-step`, `resolve-step-model`) invoke DIRECTLY, with
-no adapter detour. This **adapter** (`harness/adapters/vscode-github-copilot-chat/`) owns
+no adapter detour. This **adapter** (`adapters/vscode-github-copilot-chat/`) owns
 everything host-aware for this host: classification + session-tracking + rendering code,
 its OWN declarative YAML, its OWN tools, the two seam contracts, and a thin
 envelope-parse/field-mapping edge. Its only dependency into the harness core is the command
@@ -1367,7 +1367,7 @@ API itself — never `ConfigLoader`, never `AccessControlList`, never the sessio
 today — no shared abstraction is factored out speculatively; a second host, if it ever
 exists, is the point at which genuinely common code gets pulled out, not before.
 
-**Should `dispatch.sh` become a CLI under `harness/cli/`?** No — verdict: keep the shim.
+**Should `dispatch.sh` become a CLI under `cli/`?** No — verdict: keep the shim.
 The command surfaces already exist: `harness.py` is the pure function CLI — one executable
 entry point per function, each under a JSON I/O contract, needing no event→boundary
 normalization — and this adapter's hook entry is the host-facing surface. `dispatch.sh`'s
@@ -1392,11 +1392,11 @@ Three render targets, all from this adapter's sources at bundle render time,
 ```json
 {
   "hooks": {
-    "SubagentStart": [ { "type": "command", "command": "harness/adapters/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PreToolUse":    [ { "type": "command", "command": "harness/adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PostToolUse":   [ { "type": "command", "command": "harness/adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "SubagentStop":  [ { "type": "command", "command": "harness/adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ],
-    "Stop":          [ { "type": "command", "command": "harness/adapters/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ]
+    "SubagentStart": [ { "type": "command", "command": "adapters/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "PreToolUse":    [ { "type": "command", "command": "adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "PostToolUse":   [ { "type": "command", "command": "adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "SubagentStop":  [ { "type": "command", "command": "adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ],
+    "Stop":          [ { "type": "command", "command": "adapters/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ]
   }
 }
 ```
@@ -1408,7 +1408,7 @@ Three render targets, all from this adapter's sources at bundle render time,
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [ { "type": "command", "command": "harness/adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat <orchestrator-slug>", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
+    "UserPromptSubmit": [ { "type": "command", "command": "adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat <orchestrator-slug>", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
   }
 }
 ```
@@ -1528,9 +1528,9 @@ still await the next harness-core-spec revision.
   `SubagentStop` (absent from the old registration entirely — the step-started boundary was
   unreachable). Replaced wholesale here.
 - **I11 — Stale references to the old adapter name** (left untouched per scope):
-  `harness/Makefile` (`adapters/github-copilot/hooks.yaml`, and its render target
+  `Makefile` (`adapters/github-copilot/hooks.yaml`, and its render target
   `.copilot/hooks.json` — not a VS Code discovery location, see I10),
-  `harness/README.md`, `harness/adapters/README.md`, and `conf/model-profiles.conf.yaml`
+  `README.md`, `adapters/README.md`, and the embedding framework's `conf/model-profiles.conf.yaml`
   comments. *Integrated:* this adapter's own definition ([`spec.md`](spec.md),
   [`adapter-src-classes.puml`](adapter-src-classes.puml)) now names this adapter and
   its own code. `builds/github-copilot/` is a
@@ -1578,7 +1578,7 @@ still await the next harness-core-spec revision.
   `hook` command — `harness.py`
   is **twelve pure function commands**, the direct surface agents invoke — and
   this adapter's OWN code (there is no shared-adapter package: with a single host today, all
-  of it lives directly under `harness/adapters/vscode-github-copilot-chat/`) owns
+  of it lives directly under `adapters/vscode-github-copilot-chat/`) owns
   event classification (`HookClassifier` + `Boundary`), session identification
   (`SessionTracker`), orchestration (`Adapter`: sequencing with registration first,
   per-path fan-out, abort-on-failure), and rendering (`HookRenderer`, governed by the

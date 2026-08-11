@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/context/v1",
+  "$id": "gsmarc://saf/contracts/context/v1",
   "title": "Harness context contract",
   "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session start. Session origin is recorded by start-session and recovered through sessionId when needed.",
   "definitions": {

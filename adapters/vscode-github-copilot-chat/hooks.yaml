@@ -17,7 +17,7 @@ hooks:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh SubagentStart vscode-github-copilot-chat,
+        command: adapters/dispatch.sh SubagentStart vscode-github-copilot-chat,
         cwd: "{{FRAMEWORK_DIR}}",
         timeout: 60,
       },
@@ -26,7 +26,7 @@ hooks:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh PreToolUse vscode-github-copilot-chat,
+        command: adapters/dispatch.sh PreToolUse vscode-github-copilot-chat,
         cwd: "{{FRAMEWORK_DIR}}",
         timeout: 60,
       },
@@ -35,7 +35,7 @@ hooks:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh PostToolUse vscode-github-copilot-chat,
+        command: adapters/dispatch.sh PostToolUse vscode-github-copilot-chat,
         cwd: "{{FRAMEWORK_DIR}}",
         timeout: 60,
       },
@@ -44,7 +44,7 @@ hooks:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh SubagentStop vscode-github-copilot-chat,
+        command: adapters/dispatch.sh SubagentStop vscode-github-copilot-chat,
         cwd: "{{FRAMEWORK_DIR}}",
         timeout: 10,
       },
@@ -53,7 +53,7 @@ hooks:
     [
       {
         type: command,
-        command: harness/adapters/dispatch.sh Stop vscode-github-copilot-chat,
+        command: adapters/dispatch.sh Stop vscode-github-copilot-chat,
         cwd: "{{FRAMEWORK_DIR}}",
         timeout: 10,
       },

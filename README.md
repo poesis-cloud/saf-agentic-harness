@@ -13,6 +13,18 @@ only an orientation pointer. Each host binding has its own specification under
 `def/adapter/<host>/spec.md` (e.g.
 [`def/adapter/vscode-github-copilot-chat/spec.md`](def/adapter/vscode-github-copilot-chat/spec.md)).
 
+## SAF context
+
+This repository is the **engine** product of the Systemic Agentic Framework (SAF). It knows
+nothing about any particular methodology: the embedding framework and the data plane are
+supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSPACE_DIR`).
+
+- [`safe-agentic-organization`](https://github.com/poesis-cloud/safe-agentic-organization) —
+  the SAFe-shaped framework application (agents, skills, workflows, instructions, artifacts,
+  templates) that embeds this harness.
+- [`agentic-workspace`](https://github.com/poesis-cloud/agentic-workspace) — the shared data
+  plane the harness reads, checks, and commits into.
+
 ## Layout
 
 - `def/` — `harness.sd.puml`, the sequence diagram spanning one workflow instance across
@@ -31,9 +43,9 @@ only an orientation pointer. Each host binding has its own specification under
 ## Validation
 
 ```bash
-make -C harness verify
-make -C harness check-catalog
-make -C harness full
+make verify
+make check-catalog
+make full
 ```
 
 See [`def/core/spec.md`](def/core/spec.md#validation-surface) for what each target runs.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/log-entry/v1",
+  "$id": "gsmarc://saf/contracts/log-entry/v1",
   "title": "Harness log entry contract",
   "description": "One append-only log entry for one completed harness function invocation. The persisted log entry integrates the function report with its wall-clock write time; the report contains its session context and function-specific payload.",
   "type": "object",

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/resolve-step-skills.output/v1",
+  "$id": "gsmarc://saf/contracts/api/resolve-step-skills.output/v1",
   "$ref": "../report.schema.json",
   "title": "resolve-step-skills output contract",
   "oneOf": [
@@ -21,7 +21,7 @@
         "skills": {
           "type": "array",
           "items": {
-            "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/skillSlug",
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/skillSlug",
             "description": "One skill slug."
           },
           "description": "Ordered skill slugs injected into the agent's session context."

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/start-session.input/v1",
+  "$id": "gsmarc://saf/contracts/api/start-session.input/v1",
   "title": "start-session input contract",
   "type": "object",
   "additionalProperties": false,
@@ -10,7 +10,7 @@
   ],
   "properties": {
     "agent": {
-      "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/agentSlug",
       "description": "The framework-agent identity. The harness opens agent sessions — this is always required."
     },
     "sessionId": {

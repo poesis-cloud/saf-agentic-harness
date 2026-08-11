@@ -4,7 +4,7 @@
 This entry shim lives at the harness project root; the importable `harness` package lives under
 `src/`. It puts `src/` on sys.path so `harness.*` imports resolve, then runs the CLI. Run it from
 the harness dir as `python3 harness.py <command>`, or from the framework root as
-`python3 harness/harness.py <command>`.
+`python3 harness.py <command>`.
 """
 
 import sys

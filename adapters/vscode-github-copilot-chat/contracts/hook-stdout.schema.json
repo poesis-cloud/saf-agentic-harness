@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "gsmarc://safe/harness/adapters/vscode-github-copilot-chat/contracts/hook-stdout/v1",
+    "$id": "gsmarc://saf/adapters/vscode-github-copilot-chat/contracts/hook-stdout/v1",
     "title": "vscode-github-copilot-chat hook stdout contract",
     "description": "Seam 4 of the adapter's invocation plumbing: the host decision JSON the harness hook command prints on stdout (exit 0) for VS Code's hook engine to honor. Exit 2 (stderr to model, action blocked) remains only the hard-failure fallback; every deliberate decision uses these shapes. Empty stdout on exit 0 is a valid passthrough (no decision, no context) and is NOT governed by this contract. Grounded in extensions/copilot/src/platform/chat/common/chatHookService.ts (per-event outputs) and .../extension/chat/vscode-node/chatHookService.ts (collapsing, hookEventName compatibility) in microsoft/vscode.",
     "type": "object",

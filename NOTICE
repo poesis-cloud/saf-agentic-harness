@@ -1,0 +1,25 @@
+SDLC Agentic Framework
+Copyright 2026 Poesis Cloud and contributors
+
+This product is distributed under the Apache License, Version 2.0.
+You may obtain a copy of the License at <http://www.apache.org/licenses/LICENSE-2.0>
+
+-------------------------------------------------------------------------------
+
+EXTERNAL PREREQUISITES — NOT COVERED BY THIS LICENSE
+-------------------------------------------------------------------------------
+
+This framework depends on the following external components that are distributed
+independently under their own upstream licenses. They are not included in this
+repository and are NOT relicensed under Poesis Cloud's Apache-2.0:
+
+- SE:* specialist bench agents
+    (GitHub Copilot / VS Code extensions — subject to Microsoft / GitHub ToS)
+
+- AI Runway / Azure AI services
+    (Microsoft Azure — subject to Microsoft service agreements)
+
+Users of this framework are responsible for reviewing and accepting the terms
+of each upstream component independently.
+
+-------------------------------------------------------------------------------

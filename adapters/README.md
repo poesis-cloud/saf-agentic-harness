@@ -16,13 +16,13 @@ deny/fail). Each adapter's `hooks.yaml` calls it with its own env id as the seco
 nothing in the script itself varies per host.
 
 ```bash
-harness/adapters/dispatch.sh <event> <env>
+adapters/dispatch.sh <event> <env>
 ```
 
 ## Per-adapter layout
 
 ```text
-harness/
+agentic-harness/
   adapters/
     dispatch.sh          # shared, generic — every adapter calls this; nothing host-specific inside
     <env>/

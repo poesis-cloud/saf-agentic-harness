@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "gsmarc://safe/harness/adapters/vscode-github-copilot-chat/contracts/hook-stdin/v1",
+    "$id": "gsmarc://saf/adapters/vscode-github-copilot-chat/contracts/hook-stdin/v1",
     "title": "vscode-github-copilot-chat hook stdin contract",
     "description": "Seam 1 of the adapter's invocation plumbing: the host event JSON that VS Code's hook engine writes to the hook command's stdin, forwarded unchanged by dispatch.sh to the harness hook command. Envelope fields are merged under every event's own fields; the host may add fields (the contract is deliberately open). Grounded in extensions/copilot/src/extension/chat/vscode-node/chatHookService.ts (common envelope), .../platform/chat/common/chatHookService.ts and hookCommandTypes.ts (per-event inputs) in microsoft/vscode.",
     "type": "object",

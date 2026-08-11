@@ -1,0 +1,32 @@
+# markdownlint-cli2 configuration
+# Relaxed ruleset — SKILL.md and agent .md files are authored for AI consumption
+# (compact, no decorative blank lines) and do not comply with strict formatting rules.
+
+default: true
+
+# MD013 — line length: disable (skills/agents files have long lines)
+MD013: false
+
+# MD022 — blanks around headings: disable (SKILL.md compact style)
+MD022: false
+
+# MD031 — blanks around fences: disable (SKILL.md compact style)
+MD031: false
+
+# MD032 — blanks around lists: disable (SKILL.md compact style)
+MD032: false
+
+# MD033 — inline HTML: allow (badges in README, HTML comment copyright headers)
+MD033: false
+
+# MD040 — fenced code language: ENABLED (language specifiers are required)
+# MD040: true  # (default — leave enabled; fix missing languages at source)
+
+# MD041 — first line must be h1: disable (NOTICE, template files, frontmatter-first files)
+MD041: false
+
+# MD056 — table column count: disable (some tables in SKILL.md use extended columns)
+MD056: false
+
+# MD058 — blanks around tables: disable (SKILL.md compact style)
+MD058: false

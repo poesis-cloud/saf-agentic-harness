@@ -1,0 +1,29 @@
+# Apache-2.0 License Header Template
+#
+# Every Poesis-authored SHIP file (skills, agents, instructions, prompt files,
+# YAML configs) committed to this repository MUST carry this header as the
+# first lines of the file. See CONTRIBUTING.md for details.
+#
+# Usage: prepend the block below (lines starting after the dashed separator)
+# to each file. Replace the comment character (#) with the appropriate
+# comment syntax for the target file type (// for JavaScript/TypeScript,
+# <!-- --> for XML/HTML, etc.).
+#
+# For JSON files (which do not support comments): embed the copyright as a
+# "$license" key at the top level of the object.
+#
+# -----------------------------------------------------------------------
+
+# Copyright 2026 Poesis Cloud and contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.

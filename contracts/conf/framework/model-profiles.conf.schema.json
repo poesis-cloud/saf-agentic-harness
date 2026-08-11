@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "gsmarc://safe/harness/contracts/conf/framework/model-profiles.conf/v1",
+  "$id": "gsmarc://saf/contracts/conf/framework/model-profiles.conf/v1",
   "title": "Model profile catalog configuration schema",
   "description": "Validation schema for the conf/model-profiles.conf.yaml catalog. Owns the canonical capability-tag vocabulary (#/definitions/capabilities): the same tag->0-10 map shape scored per model here and weighted per workflow step in conf/workflows/*.workflow.conf.yaml.",
   "type": "object",

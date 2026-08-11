@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "gsmarc://safe/harness/contracts/conf/adapters/models.conf/v1",
+  "$id": "gsmarc://saf/contracts/conf/adapters/models.conf/v1",
   "title": "Host model binding configuration schema",
-  "description": "Validation schema for harness/adapters/<env>/models.yaml. The adapter maps canonical model profile ids from conf/model-profiles.conf.yaml to host-specific model identifiers used at dispatch.",
+  "description": "Validation schema for adapters/<env>/models.yaml. The adapter maps canonical model profile ids from conf/model-profiles.conf.yaml to host-specific model identifiers used at dispatch.",
   "type": "object",
   "additionalProperties": false,
   "required": [

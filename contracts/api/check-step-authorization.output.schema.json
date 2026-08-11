@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/check-step-authorization.output/v1",
+  "$id": "gsmarc://saf/contracts/api/check-step-authorization.output/v1",
   "$ref": "../report.schema.json",
   "title": "check-step-authorization output contract",
   "oneOf": [
@@ -78,7 +78,7 @@
       ],
       "properties": {
         "actor": {
-          "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/agentSlug",
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/agentSlug",
           "description": "The acting agent identity."
         },
         "artifactPath": {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/report/v1",
+  "$id": "gsmarc://saf/contracts/report/v1",
   "title": "Harness report envelope contract",
   "description": "Generic report envelope shared by every harness function. Function output contracts extend this envelope with function-specific result properties; error outcomes use the same envelope and optional error detail. Every function's `out` value is a concrete report: the exact object returned by the service, rendered by the command, forwarded unchanged by the hook adapter, and persisted byte-identically as the log entry's `report` (see log-entry.schema.json).",
   "type": "object",

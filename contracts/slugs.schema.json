@@ -1,8 +1,8 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
-    "$id": "gsmarc://safe/harness/contracts/slugs/v1",
+    "$id": "gsmarc://saf/contracts/slugs/v1",
     "title": "Canonical framework slug definitions",
-    "description": "Centralized library of every canonical `*Slug` definition referenced across the harness's contracts. Every framework entity named by a slug uses the same URL-safe form (lowercase letters, digits, and hyphens: `[a-z0-9-]+`) and is also the filename stem used to locate the entity's definition \u2014 except `templateSlug` (nested `/`-separated path segments, since templates are organized per layer/actor, not in a flat directory) and `nodeSlug` (a workspace path segment, which may embed `<name>` VARIABLE placeholders). This file has no root shape of its own: it exists solely to be `$ref`'d \u2014 in-repo via `#/definitions/<slug>`, cross-file via `gsmarc://safe/harness/contracts/slugs/v1#/definitions/<slug>`.",
+    "description": "Centralized library of every canonical `*Slug` definition referenced across the harness's contracts. Every framework entity named by a slug uses the same URL-safe form (lowercase letters, digits, and hyphens: `[a-z0-9-]+`) and is also the filename stem used to locate the entity's definition \u2014 except `templateSlug` (nested `/`-separated path segments, since templates are organized per layer/actor, not in a flat directory) and `nodeSlug` (a workspace path segment, which may embed `<name>` VARIABLE placeholders). This file has no root shape of its own: it exists solely to be `$ref`'d \u2014 in-repo via `#/definitions/<slug>`, cross-file via `gsmarc://saf/contracts/slugs/v1#/definitions/<slug>`.",
     "definitions": {
         "workflowSlug": {
             "description": "URL-safe slug naming a workflow \u2014 the stem of the workflow configuration filename (e.g. verification from verification.workflow.conf.yaml).",

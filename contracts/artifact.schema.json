@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/artifact/v1",
+  "$id": "gsmarc://saf/contracts/artifact/v1",
   "title": "Generic artifact schema",
   "description": "Base schema for all artifacts validated by the deterministic orchestration harness. Methodology-specific artifact schemas in artifacts/ extend this base via a top-level $ref (structural base, per the GSM convention; allOf is reserved for if/then facets). The harness is agnostic to the methodology that owns the artifact; this base only supplies the generic object shape and the one universal identity field (slug).",
   "type": "object",
@@ -10,7 +10,7 @@
   ],
   "properties": {
     "slug": {
-      "$ref": "gsmarc://safe/harness/contracts/slugs/v1#/definitions/artifactSlug",
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/definitions/artifactSlug",
       "description": "URL-safe, human-identifying slug for the artifact \u2014 the ONE generic display/identity field every artifact schema should rely on rather than locally re-defining an equivalent 'title' property."
     }
   }

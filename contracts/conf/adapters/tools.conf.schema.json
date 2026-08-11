@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/conf/adapters/tools.conf/v1",
+  "$id": "gsmarc://saf/contracts/conf/adapters/tools.conf/v1",
   "title": "Host adapter binding configuration schema",
-  "description": "Validation schema for harness/adapters/<env>/tools.yaml: the host-specific tool/payload binding the HookService reads. INTERNAL configuration \u2014 harness-owned (ships with the harness, resolved structurally), unlike the conf/*.conf.yaml files which are the embedding framework's EXTERNAL configuration. Both families go through the same one-act loader (parse + contract-validate); only ownership and location differ. hostSessionKeys/hostParentSessionKeys extract host-observed sessionId/parentSessionId values for adapter-mediated sessions; other invocation surfaces may mint or source session ids outside this adapter binding.",
+  "description": "Validation schema for adapters/<env>/tools.yaml: the host-specific tool/payload binding the HookService reads. INTERNAL configuration \u2014 harness-owned (ships with the harness, resolved structurally), unlike the conf/*.conf.yaml files which are the embedding framework's EXTERNAL configuration. Both families go through the same one-act loader (parse + contract-validate); only ownership and location differ. hostSessionKeys/hostParentSessionKeys extract host-observed sessionId/parentSessionId values for adapter-mediated sessions; other invocation surfaces may mint or source session ids outside this adapter binding.",
   "type": "object",
   "additionalProperties": false,
   "required": [

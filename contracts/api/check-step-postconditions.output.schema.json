@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/check-step-postconditions.output/v1",
+  "$id": "gsmarc://saf/contracts/api/check-step-postconditions.output/v1",
   "$ref": "../report.schema.json",
   "title": "check-step-postconditions output contract",
   "oneOf": [

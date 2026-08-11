@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "gsmarc://safe/harness/contracts/api/end-session.output/v1",
+    "$id": "gsmarc://saf/contracts/api/end-session.output/v1",
     "$ref": "../report.schema.json",
     "title": "end-session output contract",
     "oneOf": [

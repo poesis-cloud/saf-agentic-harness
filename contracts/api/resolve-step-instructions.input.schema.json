@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "gsmarc://safe/harness/contracts/api/resolve-step-instructions.input/v1",
+  "$id": "gsmarc://saf/contracts/api/resolve-step-instructions.input/v1",
   "title": "resolve-step-instructions input contract",
   "type": "object",
   "required": [
