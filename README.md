@@ -19,7 +19,7 @@ This repository is the **engine** product of the Systemic Agentic Framework (SAF
 nothing about any particular methodology: the embedding framework and the data plane are
 supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSPACE_DIR`).
 
-- [`saf-safe-agentic-organization`](https://github.com/poesis-cloud/saf-safe-agentic-organization) —
+- [`saf-agentic-organization`](https://github.com/poesis-cloud/saf-agentic-organization) —
   the SAFe-shaped framework application (agents, skills, workflows, instructions, artifacts,
   templates) that embeds this harness.
 - [`saf-agentic-workspace`](https://github.com/poesis-cloud/saf-agentic-workspace) — the shared data

@@ -1704,7 +1704,7 @@ its pieces live via environment variables, loaded from a `.env` file at the fram
 containing the `.env` file — and every other layout variable resolves relative to it:
 
 ```bash
-FRAMEWORK_DIR=/abs/path/to/saf-safe-agentic-organization   # the anchor: absolute; all other paths resolve relative to it
+FRAMEWORK_DIR=/abs/path/to/saf-agentic-organization   # the anchor: absolute; all other paths resolve relative to it
 FRAMEWORK_AGENTS_DIR=agents
 FRAMEWORK_ARTIFACTS_DIR=artifacts
 FRAMEWORK_SKILLS_DIR=.github/skills
