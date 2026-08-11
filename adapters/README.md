@@ -22,7 +22,7 @@ adapters/dispatch.sh <event> <env>
 ## Per-adapter layout
 
 ```text
-agentic-harness/
+saf-agentic-harness/
   adapters/
     dispatch.sh          # shared, generic — every adapter calls this; nothing host-specific inside
     <env>/

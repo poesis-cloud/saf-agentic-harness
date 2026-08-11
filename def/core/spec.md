@@ -1704,14 +1704,14 @@ its pieces live via environment variables, loaded from a `.env` file at the fram
 containing the `.env` file — and every other layout variable resolves relative to it:
 
 ```bash
-FRAMEWORK_DIR=/abs/path/to/safe-agentic-organization   # the anchor: absolute; all other paths resolve relative to it
+FRAMEWORK_DIR=/abs/path/to/saf-safe-agentic-organization   # the anchor: absolute; all other paths resolve relative to it
 FRAMEWORK_AGENTS_DIR=agents
 FRAMEWORK_ARTIFACTS_DIR=artifacts
 FRAMEWORK_SKILLS_DIR=.github/skills
 FRAMEWORK_TEMPLATES_DIR=templates
 FRAMEWORK_WORKFLOWS_DIR=conf/workflows
 FRAMEWORK_INSTRUCTIONS_DIR=instructions
-FRAMEWORK_WORKSPACE_DIR=../agentic-workspace
+FRAMEWORK_WORKSPACE_DIR=../saf-agentic-workspace
 ```
 
 `FrameworkLayout` is the dataclass over these variables — validated fail-fast like any other
