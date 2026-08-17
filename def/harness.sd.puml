@@ -134,8 +134,8 @@ else no grant
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
 Host -> Adapter : hook ""PostToolUse"" — write class
-Adapter -> Harness : ""9 check-step-artifact""(sessionId, parentSessionId, artifactPath)
-Harness --> Adapter : { outcome: valid | reverted,\nartifactCheck?: { failureMessage, revert: { action, from } } }
+Adapter -> Harness : ""9 check-step-artifact""(sessionId, parentSessionId, artifactPaths)
+Harness --> Adapter : { outcome: valid | reverted,\nartifactChecks?: [{ artifactPath, failureMessage, revert: { action, from } }, …] }
 alt write is schema-valid
   Harness -> Harness : commit the staged write — workspace state\n(HEAD) advances atomically, attributed to the session
   Adapter --> Host : { ""continue"": true }

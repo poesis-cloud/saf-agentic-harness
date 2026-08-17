@@ -34,7 +34,8 @@
             "code": {
               "type": "string",
               "minLength": 1,
-              "description": "Stable error code for programmatic handling."
+              "pattern": "^[a-z0-9-]+$",
+              "description": "Stable slug-form error code for programmatic handling. The core specification's named codes (invalid-inquiry, session-ended, session-unregistered, session-conflict, not-facilitator, unknown-workflow, unknown-action, step-in-flight, step-correlation-missing, condition-evaluation-failed, artifact-schema-unresolved) are normative."
             },
             "message": {
               "type": "string",
@@ -79,13 +80,12 @@
     "errorStatus": {
       "type": "string",
       "enum": [
-        "input-error",
+        "inquiry-error",
         "state-error",
         "configuration-error",
-        "invocation-error",
         "system-error"
       ],
-      "description": "The set of error statuses every harness function may return."
+      "description": "The set of error statuses every harness function may return. inquiry-error covers everything wrong with the inquiry itself — contract/domain validation failures and illegitimate calls alike, distinguished by error.code."
     }
   }
 }

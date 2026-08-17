@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/conf/adapters/tools.conf/v1",
   "title": "Host adapter binding configuration schema",
-  "description": "Validation schema for adapters/<env>/tools.yaml: the host-specific tool/payload binding the HookService reads. INTERNAL configuration \u2014 harness-owned (ships with the harness, resolved structurally), unlike the conf/*.conf.yaml files which are the embedding framework's EXTERNAL configuration. Both families go through the same one-act loader (parse + contract-validate); only ownership and location differ. hostSessionKeys/hostParentSessionKeys extract host-observed sessionId/parentSessionId values for adapter-mediated sessions; other invocation surfaces may mint or source session ids outside this adapter binding.",
+  "description": "Validation schema for adapters/<env>/tools.yaml: the host-specific tool/payload binding an adapter reads. INTERNAL configuration — adapter-owned (ships with the adapter, resolved structurally), unlike the conf/*.conf.yaml files which are the embedding framework's EXTERNAL configuration. Both families go through the same one-act loader (parse + contract-validate); only ownership and location differ. hostSessionKeys/hostParentSessionKeys extract host-observed sessionId/parentSessionId values for adapter-mediated sessions; other invocation surfaces may mint or source session ids outside this adapter binding.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,9 +10,7 @@
     "toolKeys",
     "inputKeys",
     "pathKeys",
-    "actorKeys",
-    "hostSessionKeys",
-    "hostParentSessionKeys"
+    "hostSessionKeys"
   ],
   "properties": {
     "writeTools": {
@@ -27,12 +25,12 @@
       }
     },
     "deleteTools": {
-      "description": "Host tool names that delete files.",
+      "description": "Host tool names that delete files (mapped to the delete action — denied unconditionally in v1, core function 8).",
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1,
-        "description": "One host tool name that performs deletion."
+        "description": "One host tool name."
       }
     },
     "toolKeys": {
@@ -47,9 +45,15 @@
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the target artifact path."
     },
-    "actorKeys": {
-      "$ref": "#/$defs/keyList",
-      "description": "Ordered payload field names to probe for the acting agent identity."
+    "nestedPathKeys": {
+      "description": "Path expressions extracting artifact paths nested in array payloads, where no flat key reaches them (e.g. replacements[].filePath) — each yields zero or more paths per call.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_]+(\\[\\])?(\\.[A-Za-z0-9_]+(\\[\\])?)*$",
+        "description": "One dotted path expression; [] marks an array to fan out over."
+      }
     },
     "hostSessionKeys": {
       "$ref": "#/$defs/keyList",
@@ -59,13 +63,21 @@
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the host-observed parent session id."
     },
+    "hostStepSessionKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host-observed step-session id (the per-dispatch invocation id)."
+    },
+    "hostStepActorKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the step session's acting agent identity."
+    },
     "dispatchTools": {
       "description": "Host tool names that start a child step-session (subagent dispatch).",
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1,
-        "description": "One host tool name that performs subagent dispatch."
+        "description": "One host tool name."
       }
     },
     "dispatchAgentKeys": {
@@ -75,13 +87,34 @@
     "dispatchModelKeys": {
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the model profile identifier."
+    },
+    "mediatedCommandTools": {
+      "description": "Host tool names carrying agent-authored command strings that may invoke the harness command entry point (the mediated attribution surface — functions 3–4 only).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
+    },
+    "mediatedCommandKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the command string of a mediated-command tool."
+    },
+    "guardedShellTools": {
+      "description": "Host tool names whose command strings can reach the filesystem outside any write-classified tool (terminals, task runners). A command that textually references a workspace artifact-layout path or the workspace logs path is DENIED at the pre-tool boundary — an advisory-grade guard (textual matching is bypassable; C6's detect-and-remediate plane remains the guarantee), closing the routine write escape hatch.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
     }
   },
   "$defs": {
     "keyList": {
-      "description": "Ordered payload field names to probe (first hit wins).",
+      "description": "Ordered payload field names to probe (first hit wins). Empty means the host offers no such field.",
       "type": "array",
-      "minItems": 1,
       "items": {
         "type": "string",
         "minLength": 1,

@@ -164,7 +164,8 @@ function's input contract roots, exactly as every output contract roots the **re
 envelope — the pairing is ontological: every harness function is asked something about a
 session (an inquiry) and answers with its account (a report).
 Function-specific fields live beside them in the same object (for example `workflowSlug` for
-function 3 or `artifactPath` for functions 8–9); seven of the twelve add nothing at all and
+function 3, `artifactPath` for function 8, or the set-valued `artifactPaths` for function 9);
+seven of the twelve add nothing at all and
 are the bare envelope. Whatever surrounds each invocation — a hook mechanism — supplies
 the session fields; a raw agent-authored value is not trusted. Requiring `sessionId` on every
 inquiry — including function 0's — is deliberate: the id is observed or minted by the
@@ -242,6 +243,72 @@ participant, separate from the host-agnostic Harness core) realizing the boundar
 
 ![Harness functions sequence diagram](../harness.sd.png)
 
+### Outcomes, failure modes, and refusals
+
+Five normative rules make every branch of every function testable from this specification
+alone. Function-specific violation outcomes are integrated **inline** in each function's
+Preconditions and Invariants (rule 5) — there is no separate failure catalog to drift.
+
+**1. The error-status assignment rule.** Every function may return the four shared error
+statuses; which condition produces which status is fixed by kind, never per-function taste:
+
+| Status | Assigned to | Journaled |
+| --- | --- | --- |
+| `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`; `unknown-action`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
+| `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
+| `system-error` | The environment fails: Git index lock, disk full, an unreadable log, log creation or append failing (the report is still returned; the entry is lost — best-effort) | Yes, when the log is writable |
+
+Three of these apply uniformly to **every** function and are not repeated per function:
+contract validation of the inquiry (`inquiry-error`/`invalid-inquiry` — surfacing at the
+command exit plane, rule 4), the C8
+refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-error`.
+`error.code` values are lowercase slugs (`[a-z0-9-]+`);
+the codes named in this specification
+(`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
+`session-kind-mismatch`, `not-facilitator`,
+`unknown-workflow`, `unknown-action`, `step-in-flight`, `step-correlation-missing`,
+`condition-evaluation-failed`, `artifact-schema-unresolved`) are normative; implementations
+may add codes but never repurpose these. Statuses, codes, and structured fields are the
+normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
+tests assert their presence and key facts, never exact wording.
+
+**2. The `not-applicable` outcome.** Functions 0, 4, 5, and 10 answer `not-applicable` when
+persisted state names **no target** for the call: function 0 for a step session with no
+correlated unresolved step resolution (a foreign or non-framework dispatch) and for a root
+session whose `agent` names no framework agent; functions 4, 5, and 10 when the invoking
+session has no in-flight step — which also absorbs a duplicate step-ended delivery: after the
+first function-10 outcome the step is no longer in flight, so re-delivery finds no target.
+`not-applicable` is a success status, **never journaled** (there is no session log it belongs
+to — the one explicit exception to 1 invocation = 1 entry), and carries no function-specific
+payload. Hook planes render it as pass-through (C7).
+
+**3. The C8 refusal shape.** A session-bound call against a session whose log carries an
+ending entry returns `state-error` with code `session-ended` — and is **not journaled**: no
+entry ever follows the ending entry (function 11, invariant 1). This is the only `state-error`
+that does not journal.
+
+**4. The failure-journaling rule.** Error outcomes are ordinary outcomes and journal to the
+attributed session's log — with these exceptions, all forced by the absence of an open
+target log: the C8 refusal (rule 3) and `not-applicable` (rule 2) are **returned but never
+journaled**; `session-unregistered` returns its report (the context is constructible — the
+id is a valid slug) but has no log to journal to; and a **contract-validation failure**
+(`invalid-inquiry`) produces **no report at all** — a contract-valid report cannot be built
+when the inquiry's own `sessionId` is missing or malformed, so the failure surfaces at the
+**command exit plane** (stderr + nonzero exit), exactly like a crashed invocation (see
+[Logging](#logging)). A completed invocation whose log append
+fails still returns its report and surfaces `system-error` at the trigger plane.
+
+**5. The precondition classification rule.** Every precondition in this specification is one
+of: **(E) enforced** — the function checks it and **names its violation outcome inline**, in
+place, as part of the precondition itself; **(C) by construction** — guaranteed upstream
+(fail-fast configuration load, boundary
+normalization, physical file ordering), so the function carries no runtime branch for it and
+tests exercise the upstream guarantee instead; **(O) caller obligation** — outside the
+harness's assertion boundary (C2), documented but not asserted. TDD derives one red test per
+(E) violation, per invariant, per example — plus, for every function, the three uniform
+failure tests of rule 1.
+
 ### 0. start-session
 
 The session seed: the first function of every session, triggered strictly before any other
@@ -293,20 +360,19 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
 
 **Preconditions**
 
-- The surrounding mechanism has observed or minted a `sessionId` and, when applicable, a
-  `parentSessionId`, and normalized any host-sourced ids to a safe slug — the id becomes a log
-  filename (see [Logging](#logging)).
-- `agent` resolves to a framework agent identity (C7) — a caller with no genuine
-  framework-agent identity to supply simply names no real agent, so the session passes
-  through untouched and unstarted: the harness starts agent sessions, nothing else.
-  This holds without an
-  explicit access-control-list lookup at this function: for a root session (no parent) the
-  caller's own scoping already guarantees it (the surrounding mechanism opens root sessions
-  only for a genuine framework orchestrator — however the host lets it scope that trigger);
-  for a step session (parent present) it is a consequence of the
-  step-resolution correlation this function also validates (function 3 only ever resolves
-  configured, ACL-validated workflow actors, so a non-framework `agent` simply finds no
-  correlation to complete).
+- (E) The surrounding mechanism has observed or minted a `sessionId` and, when applicable, a
+  `parentSessionId`, normalized to a safe slug — the id becomes a log
+  filename (see [Logging](#logging)) — and `agent` is present. Enforced at the contract
+  boundary — violation: `inquiry-error` (`invalid-inquiry`), unjournalable (rule 4).
+- (E) `agent` resolves to a framework agent identity (C7) — enforced by this function
+  itself, differently per session kind, violation in both cases: `not-applicable` (rule 2 —
+  the session passes through untouched and unstarted: the harness starts agent sessions,
+  nothing else). For a **root** session (no parent), the function checks `agent` against the
+  access control list's declared actors — the one membership lookup in the session plane,
+  deliberately owned by the core rather than trusted to the caller's scoping. For a **step**
+  session (parent present), the correlation IS the check: function 3 only ever resolves
+  configured, ACL-validated workflow actors, so a non-framework `agent` — or any foreign
+  dispatch — simply finds no correlation to complete.
 - Trigger — the session-started boundary for hook-opened sessions, before
   functions 1–2 (orchestrator session) or 6–7 (step session) run at the
   same boundary, where applicable.
@@ -331,7 +397,13 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
    parent, at any nesting depth.
 4. Starting is idempotent per session: re-delivery of the same session-start signal (host
    resume, duplicate hook) appends no second
-   registration for an already-registered `sessionId`.
+   registration for an already-registered **open** `sessionId` — the duplicate call returns
+   the same
+   `started` report as the first, rebuilt from the existing registration entry, with no
+   second entry. Replay serves open sessions only: a start against an **ended** id is the C8
+   refusal (`state-error`, `session-ended`) — a dead identity never revives. A
+   re-registration naming a **different** `agent` for an already-registered `sessionId` is
+   `state-error` (`session-conflict`), journaled: identity never silently mutates.
 
 ### 1. resolve-workflow-instructions
 
@@ -388,13 +460,17 @@ Example:
 
 Contract schemas — [contracts/api/resolve-workflow-instructions.input.schema.json](../../contracts/api/resolve-workflow-instructions.input.schema.json) and [contracts/api/resolve-workflow-instructions.output.schema.json](../../contracts/api/resolve-workflow-instructions.output.schema.json).
 
-**Preconditions**
+**Preconditions** (functions 1 and 2 share these)
 
-- A session opened with no unresolved `resolve-step` entry correlating to it (typically: its
+- (E) A session opened with no unresolved `resolve-step` entry correlating to it (typically: its
   registration carries no `parentSessionId`) — an orchestrator session
-  (a step session loads functions 6–7 instead).
-- The session's agent is a framework orchestrator (C7 — foreign sessions pass
-  through untouched).
+  (a step session loads functions 6–7 instead) — violation: `state-error`
+  (`session-kind-mismatch`), journaled.
+- (E) The session is registered (a start entry exists) — violation: `inquiry-error`
+  (`session-unregistered`), unjournalable (rule 4).
+- (C) The session's agent is a framework orchestrator (C7) — guaranteed by function 0's
+  registration gate; an orchestrator facilitating zero workflows is rejected at configuration
+  load ([Internal validation](#internal-validation--not-functions)).
 - Trigger — the session-started boundary (hook plane).
 
 **Postconditions**
@@ -453,7 +529,7 @@ Contract schemas — [contracts/api/resolve-workflow-skills.input.schema.json](.
 **Preconditions**
 
 - A session opened with no unresolved `resolve-step` entry correlating to it — an
-  orchestrator session.
+  orchestrator session. Function 1's preconditions and violation outcomes apply identically.
 - Trigger — the session-started boundary (hook plane).
 
 **Postconditions**
@@ -552,12 +628,20 @@ Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contra
 
 **Preconditions**
 
-- The configuration is validated (fail-fast at load): the workflow exists, its step DAG is
-  acyclic, every step routes.
-- The user assented to the workflow (per the selection instruction). Instance continuation or
+- (C) The configuration is validated (fail-fast at load): the step DAG of every catalog
+  workflow is acyclic, every step routes.
+- (E) `workflowSlug` names a workflow in the catalog — the one agent-supplied parameter, so
+  its domain validation is runtime, not load-time — violation: `inquiry-error`
+  (`unknown-workflow`), journaled.
+- (E) The session's agent is the named workflow's facilitator — violation: `inquiry-error`
+  (`not-facilitator`), journaled.
+- (O) The user assented to the workflow (per the selection instruction) — not persisted
+  state, so never asserted by the harness (C2): a caller obligation carried by the
+  orchestrator's injected instructions. Instance continuation or
   opening is deduced (In, above) — no id is ever given.
-- The attributed `sessionId` resolves to a currently open, registered session — the
-  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system)).
+- (E) The attributed `sessionId` resolves to a currently open, registered session — the
+  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system))
+  — violation: `inquiry-error` (`session-unregistered`), unjournalable (rule 4).
 - Trigger — mediated agent invocation, each time the orchestrator asks "what's
   next?" on a driven workflow: after starting it on user assent, and after each step's
   outcome journals — including after a failed outcome, where the same call re-resolves the
@@ -604,13 +688,17 @@ Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contra
 8. **Instance correlation is deduced, latest-open-wins**: `resolve-step(workflowSlug)`
    continues the latest open instance of that workflow, else opens one. Older open instances
    simply stop being the latest — abandonment is not a state, and no register closes
-   anything. Agents never pass or mint instance ids — the id surfaces read-only in the
+   anything. Should two open instances share an identical latest-entry `timestamp`, the
+   lexicographically lowest `workflowInstanceId` wins — a deterministic tie-break, never an
+   error. Agents never pass or mint instance ids — the id surfaces read-only in the
    report's `context`.
 9. **One workflow instance and one in-flight step per orchestrator session**: an orchestrator
    session drives at most one workflow instance over its whole lifetime (one workflow end =
    one return to the user, which ends the session — see the Session definition), and between
    a step's resolution
-   and its journaled outcome it resolves no other step. Running concurrent instances — whether
+   and its journaled outcome it resolves no other step — a resolve-step call arriving while a
+   step is in flight is refused (`state-error`, `step-in-flight`, journaled), never silently
+   re-resolved. Running concurrent instances — whether
    of the same workflow or different workflows — is a deliberate non-goal for now. The log still
    carries `workflowInstanceId`, so a later concurrent model can be added without changing the
    identity of past entries.
@@ -667,11 +755,12 @@ Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../
 
 **Preconditions**
 
-- The model catalog and the step's capability map are loaded and validated (fail-fast at load).
-- An in-flight step exists in the invoking session: function 3 resolved it and its outcome has
-  not journaled yet.
-- The attributed `sessionId` resolves to a currently open, registered session — the
-  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system)).
+- (C) The model catalog and the step's capability map are loaded and validated (fail-fast at load).
+- (E) An in-flight step exists in the invoking session: function 3 resolved it and its outcome has
+  not journaled yet — violation: `not-applicable` (rule 2).
+- (E) The attributed `sessionId` resolves to a currently open, registered session — the
+  mediated-invocation backstop (see [Invocation surfaces](#invocation-surfaces-one-command-system))
+  — violation: `inquiry-error` (`session-unregistered`), unjournalable (rule 4).
 - Trigger — mediated agent invocation, between resolution and dispatch. The
   invocation is session-attributed (see [Logging](#logging)).
 
@@ -772,14 +861,16 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
 
 **Preconditions**
 
-- A resolved step is in hand, carrying its declared precondition list from the workflow
-  configuration.
-- Persisted workspace state and the logs are readable.
+- (E) A resolved step is in hand — an in-flight step in the invoking session — carrying its
+  declared precondition list from the workflow
+  configuration — violation: `not-applicable` (rule 2).
+- (C) Persisted workspace state and the logs are readable (an unreadable environment is the
+  uniform `system-error`, rule 1).
 - Trigger — the step-starting boundary (THE enforcement point: a failing precondition denies
-  the dispatch); optionally the orchestrator, probing before dispatch for early feedback
-  (the in-flight step is deduced from its session ids/logs) — the probe is advisory,
-  the boundary enforces. Both run in the dispatching (orchestrator) session: the step
-  session does not exist yet at this boundary.
+  the dispatch), in the dispatching (orchestrator) session: the step
+  session does not exist yet at this boundary. There is no agent-facing probe: the mediated
+  surface serves functions 3–4 only — the orchestrator learns of a failing precondition from
+  the denied dispatch, equivalent feedback one hook later.
 
 **Postconditions**
 
@@ -788,6 +879,13 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
   boundary belongs to.
 - No artifact is touched — the invocation's own log entry is the only write: checking never
   mutates artifacts.
+
+**Enforcement scope.** "THE enforcement point" holds while the boundary fires — a host whose
+hook plane fails open (timeout, spawn failure) can let a dispatch bypass this function. The
+bypass is bounded: an ungated step still cannot deliver state (functions 8–9 still guard its
+writes, and its missing-precondition work fails function 10's evaluation — the step never
+journals executed, so re-resolution recovers). Residual cleanup is C6's detect-and-remediate
+plane, exactly as function 8's enforcement scope.
 
 **Invariants**
 
@@ -805,9 +903,15 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
    runtime constant. Every `artifacts['<slug>'].<property>` reference is statically validated
    against that slug's artifact schema — an unresolvable slug or an undeclared property is a
    hard error, not a false pass. An empty selected set is a normal value: the predicate decides
-   whether it passes or fails.
+   whether it passes or fails. A CEL expression failing **at runtime** (an evaluation error,
+   not a false predicate) is `state-error` (`condition-evaluation-failed`), journaled, the
+   error detail naming the condition slug; a false predicate is never an error — it is a
+   `fail` check inside a normal report. Statically invalid expressions (unresolvable slug,
+   undeclared property) cannot reach runtime — the configuration load rejects them.
 3. Condition slugs are the audit handle: unique within a step, and every check logs the full
    condition object with its outcome under that slug.
+4. A step declaring zero preconditions passes vacuously: `outcome: pass` with an empty
+   `conditionChecks` array — an explicit, journaled entry, never a skipped invocation.
 
 ### 6. resolve-step-instructions
 
@@ -849,17 +953,23 @@ Example:
 
 Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json](../../contracts/api/resolve-step-instructions.input.schema.json) and [contracts/api/resolve-step-instructions.output.schema.json](../../contracts/api/resolve-step-instructions.output.schema.json).
 
-**Preconditions**
+**Preconditions** (functions 6 and 7 share these)
 
-- A session opened and the logs are readable (the correlation source).
-- An unresolved `resolve-step` entry correlating to this session exists in the logs — matched
+- (C) A session opened and the logs are readable (the correlation source).
+- (E) An unresolved `resolve-step` entry correlating to this session exists in the logs — matched
   exactly via the registration's `parentSessionId` to the parent session's latest
   `step-resolution` entry whose actor is the session's agent and whose step has no later
   function-10 outcome. Hosts without parent-session payloads may fall back to the most recent
   unresolved `step-resolution` entry whose actor is the session's agent. A session with no such
-  correlation is the orchestrator's and loads functions 1–2 instead.
-- The session's agent resolves to a framework agent identity (C7 — foreign sessions pass
-  through untouched).
+  correlation is the orchestrator's and loads functions 1–2 instead — violation (the
+  correlation concluded, or the invocation is out of order): `state-error`
+  (`step-correlation-missing`), journaled. An uncorrelatable dispatch never reaches this
+  function on the normal path: function 0 already answered `not-applicable` for it and the
+  hook plane stopped there (rule 2).
+- (E) The session is registered — violation: `inquiry-error` (`session-unregistered`),
+  unjournalable (rule 4).
+- (C) The session's agent resolves to a framework agent identity (C7) — guaranteed by
+  function 0's registration gate.
 - Trigger — the step-started boundary (hook plane).
 
 **Postconditions**
@@ -920,8 +1030,8 @@ Contract schemas — [contracts/api/resolve-step-skills.input.schema.json](../..
 
 **Preconditions**
 
-- A session opened with an unresolved `resolve-step` entry correlating to it (function 6's
-  correlation) — a step session.
+- A session opened with an unresolved `resolve-step` entry correlating to it — a step
+  session. Function 6's preconditions and violation outcomes apply identically.
 - Trigger — the step-started boundary (hook plane).
 
 **Postconditions**
@@ -950,6 +1060,10 @@ clean against `HEAD` — the commit gate's precondition (C6).
   verb (`create`, `update`, `delete`). Roles are not declared by agents. Reads are
   deliberately not modeled: agent sourcing is unrestricted by design (C3), so the privilege
   vocabulary carries no read verb — there is nothing for it to guard at the write boundary.
+  **`delete` is a forward declaration**: the verb exists in the vocabulary and roles may
+  grant it, but delete enforcement downstream of authorization (what the commit gate
+  validates for an absence) is an explicit v1 non-goal — this function denies every `delete`
+  unconditionally until it is modeled (failure modes, below).
 - **Actors are role-to-agent mappings.** An actor assigns one or more framework-defined roles
   to a single framework agent. Agents are the `.agent.md` files in the framework's
   `agents/` directory, identified by the `name` value in their YAML frontmatter.
@@ -1003,8 +1117,10 @@ Contract schemas — [contracts/api/check-step-authorization.input.schema.json](
 
 **Preconditions**
 
-- The ACL, workspace layout, and the framework's artifact schemas are loaded (path → resource
-  resolution needs them), and the host write tool has been mapped to a write `action`.
+- (C) The ACL, workspace layout, and the framework's artifact schemas are loaded (path → resource
+  resolution needs them).
+- (E) The host write tool has been mapped to an `action` in the contract vocabulary —
+  violation: `inquiry-error` (`unknown-action`), journaled.
 - Trigger — the write-starting boundary, once per pending write.
 
 **Postconditions**
@@ -1029,7 +1145,10 @@ detect-and-remediate plane.
    artifact schemas' own path patterns (disambiguated by the artifact's `type` when several
    match).
 3. Authorization is whole-resource: any `#property` suffix on an artifact path is ignored.
-4. A write nobody granted is denied at the boundary — denial is the enforcement.
+4. A write nobody granted is denied at the boundary — denial is the enforcement. Every deny
+   is an ordinary `denied` outcome, journaled, its `failureMessage` naming the cause: the
+   missing privilege, the unsupported `delete` (ACL principles, above), the unresolvable
+   resource, the logs path (invariant 6), or the unclean baseline (invariant 5).
 5. A write whose staging baseline is not clean against `HEAD` is denied at the same boundary:
    dirty tracked targets, pre-existing untracked targets, and paths outside the artifact layout
    do not execute — so the staged write is always the only staged content at its path (C6).
@@ -1046,12 +1165,21 @@ into workspace state (`HEAD`).
 
 **Interface**
 
-- **In** — `sessionId` + nullable `parentSessionId` + the written artifact path.
-  **Out** — `ArtifactCheckReport`: the `outcome` — `valid` (validated and committed into
-  workspace state) or `reverted` (judged invalid and discarded from staging) — plus, when
-  reverted, the `artifactCheck`: the failure message and the revert record.
-- **Caller usage** — the agent receives the failure message and rewrites the artifact
-  correctly; a write never silently corrupts the workspace.
+- **In** — `sessionId` + nullable `parentSessionId` + **`artifactPaths`**: every artifact path
+  the just-landed write staged — the whole set of one tool call, a single-path write being a
+  set of one. The set is the atomic unit: it validates and commits, or is discarded, as one.
+  The set bounds one **tool call**, never the step's deliverable: 1 step = 1 artifact binds
+  *delivery* (function 10 evaluates the step's declared `artifact`), while the write plane
+  guards every write the session's privileges admit — a host tool may stage several paths in
+  one call, and the harness handles what the host can do, not what the methodology
+  recommends.
+  **Out** — `ArtifactCheckReport`: the `outcome` — `valid` (every path validated; the whole
+  set committed as ONE commit) or `reverted` (any path judged invalid; the whole staged set
+  discarded — call-level atomicity) — plus, when reverted, `artifactChecks`: one record per
+  **failing** path (its `artifactPath`, the failure message, and the revert action); valid
+  siblings are discarded with the set, implied by set membership.
+- **Caller usage** — the agent receives the failure message(s) and rewrites the artifacts
+  correctly; a write never silently corrupts the workspace, and no partial set ever commits.
 
 Example:
 
@@ -1060,7 +1188,7 @@ Example:
   "in": {
     "sessionId": "01j9xqr7t3",
     "parentSessionId": "01j9xq0f2m",
-    "artifactPath": "portfolio/payments/features/feature-refunds.md"
+    "artifactPaths": ["portfolio/payments/features/feature-refunds.md"]
   },
   "out": {
     "context": {
@@ -1070,10 +1198,13 @@ Example:
       "workflowInstanceId": "verification-01J9XQ"
     },
     "outcome": { "status": "reverted" },
-    "artifactCheck": {
-      "failureMessage": "frontmatter.status: 'shipped' is not one of the enum values",
-      "revert": { "action": "restored", "from": "HEAD" }
-    }
+    "artifactChecks": [
+      {
+        "artifactPath": "portfolio/payments/features/feature-refunds.md",
+        "failureMessage": "frontmatter.status: 'shipped' is not one of the enum values",
+        "revert": { "action": "restored", "from": "HEAD" }
+      }
+    ]
   }
 }
 ```
@@ -1082,32 +1213,44 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
 
 **Preconditions**
 
-- The framework's artifact schemas are loaded and the written path resolves to one of them.
-  Function 8 has already established a clean staging baseline: the target path was absent or
-  tracked-and-clean against `HEAD`, so the staged write is the only staged content at its path.
+- (E) The framework's artifact schemas are loaded and every written path resolves to one of
+  them — function 8 should have denied an unresolvable path, so reaching this function with
+  one is abnormal — violation: `state-error` (`artifact-schema-unresolved`), journaled, and
+  the whole staged set is discarded defensively.
+- (C) Function 8 has already established a clean staging baseline: each target path was absent
+  or tracked-and-clean against `HEAD`, so the staged set is the only staged content at its
+  paths.
 - Trigger — the write-ended boundary, after every write.
 
 **Postconditions**
 
-- C6 holds by construction: workspace state advanced only by the validated write's commit, or
-  the staged write was discarded — committed state never contained the invalid bytes.
-- One log entry per write validation (`valid` / `reverted`). When reverted, the same entry's
-  report carries the revert action, so there is no second revert entry.
+- C6 holds by construction: workspace state advanced only by the validated set's single
+  commit, or the whole staged set was discarded — committed state never contained the invalid
+  bytes, and never a partial set.
+- One log entry per write validation (`valid` / `reverted`), covering the whole set. When
+  reverted, the same entry's
+  report carries the failing paths' revert records, so there is no second revert entry.
 
 **Invariants**
 
 1. Every artifact write is validated against its matched artifact schema (path patterns + `type`
    disambiguation; schemas extend the harness base contract via `$ref`).
-2. An invalid write is always **reverted** — discarded from staging: restore the tracked path
-   from `HEAD`, or delete a newly created path — and denied with the failure message so the
+2. Any invalid path reverts the **whole set** — call-level atomicity: every staged path of the
+   call is discarded (restore tracked paths from `HEAD`, delete newly created ones) and the
+   failure messages name each failing path so the
    agent retries. The discard never touches workspace state: the invalid bytes existed only in
    staging. Unclean baselines were denied before the write (function 8, invariant 5), so
    `invalid but left in place` is not a function-9 outcome.
-3. A valid write is **committed** in the same act — 1 validated write = 1 commit, attributed
+3. A fully valid set is **committed** in the same act — 1 validated set = 1 commit, attributed
    to the acting session (its `sessionId` in the commit message) so Git history and the
    session log correlate. The commit and the discard are the harness's only deliberate Git
-   actions: the discard is recorded inside the validation entry's report (the revert record);
+   actions: the discard is recorded inside the validation entry's report (the revert records);
    the commit's record is the Git history itself, correlated by session id.
+4. A staged path byte-identical to `HEAD` validates vacuously and stages nothing: a set of
+   only such paths reports `valid` and creates no commit — `valid` asserts validity, not that
+   a commit occurred.
+5. A Git failure mid-commit or mid-discard is the uniform `system-error` (rule 1): the staged
+   state is whatever the failure left — C6's detect-and-remediate plane owns residual cleanup.
 
 ### 10. check-step-postconditions
 
@@ -1119,6 +1262,10 @@ function 3's cursor reads nothing else.
 
 - **In** — `sessionId` + nullable `parentSessionId`. The step key is resolved by the
   hook plane from the returning dispatch and session ids — never supplied by an agent.
+  This correlation **normatively relies on function 3, invariant 9** (one in-flight step per
+  orchestrator session): the invoking session's single in-flight step IS the step being
+  evaluated, so a host event payload need not echo the step session's own id — hosts whose
+  dispatch-return events carry no step identity are fully supported.
 - **Out** — `CheckStepPostconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
   `conditionChecks`, exactly as function 5 (same payload, distinct type — one output contract
   each).
@@ -1165,8 +1312,10 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
 
 **Preconditions**
 
-- The step was dispatched from a correlated unresolved `step-resolution` entry and its execution
-  is being evaluated — at the step-ended boundary.
+- (E) The step was dispatched from a correlated unresolved `step-resolution` entry and its execution
+  is being evaluated — an in-flight step exists — violation: `not-applicable` (rule 2). This
+  also absorbs a duplicate step-ended delivery: after the first outcome journals, the step is
+  no longer in flight, so re-delivery finds no target — enforcing invariant 2 structurally.
 - Trigger — the step-ended boundary (THE evaluation point: the step's session has ended, the
   state it left is final). The invocation runs in the dispatching (orchestrator) session — the
   same session that owns the step's precondition check: at step-ended the step session has
@@ -1180,13 +1329,18 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
 
 **Invariants**
 
-1. `state` assertions evaluate over persisted artifacts only — never agent memory (C2).
+1. `state` assertions evaluate over persisted artifacts only — never agent memory (C2). A CEL
+   expression failing at runtime is `state-error` (`condition-evaluation-failed`), journaled,
+   exactly as function 5, invariant 2.
 2. Postconditions are evaluated ONCE per step pass, at the step-ended boundary — the step's
    session has ended, the state it left is final; the step's own session end adds no second
    evaluation of the same state.
 3. The step's outcome logs from this function: its postconditions hold, or they do not.
    This journaled outcome is exactly what function 3's cursor reads — a step whose latest
    outcome passes counts as executed.
+4. A step declaring zero postconditions passes vacuously: `outcome: pass` with an empty
+   `conditionChecks` array — journaled, and sufficient for the cursor to count the step
+   executed.
 
 ### 11. end-session
 
@@ -1252,7 +1406,8 @@ Contract schemas — [contracts/api/end-session.input.schema.json](../../contrac
    everything, ending follows everything — no further entry is ever appended to an ended
    session's log (enforced by C8 at every other function, not by this one).
 2. Idempotent per session: re-delivery of the same session-end signal, or an ending call
-   against a session already ended, appends no second ending entry and is never an error.
+   against a session already ended or never started, appends no second ending entry and is
+   never an error — the call returns the same `ended` outcome (idempotent no-op).
 3. Best-effort by design: this function's absence from a session's log is not a fault
    condition anywhere else in this contract — no other function's precondition requires an
    ending entry to exist, only that one does not exist for OTHER, later invocations to be
@@ -1273,7 +1428,8 @@ enforcement point (see [Configuration plane](#configuration-plane)): `ConfigLoad
 contract-validates every source as ONE act — an unvalidated parse never escapes — and applies
 the semantic rules JSON Schema cannot express (non-empty steps, unique step slugs, resolvable
 `stepCondition` references, unique condition slugs per step, acyclic step DAGs, at least one
-positive capability weight per step, an acyclic advisory workflow graph), the
+positive capability weight per step, an acyclic advisory workflow graph, every orchestrator
+agent facilitating at least one workflow), the
 cross-configuration coherence rules (workflow actors exist in the ACL, capability tags belong
 to the model catalog's vocabulary, step `artifact` slugs resolve to artifact schemas,
 instruction/skill refs resolve to files in the framework layout), and the layout environment
@@ -1393,8 +1549,15 @@ any other host agent or session pass through untouched and unlogged.
 #### C8 - Session ending
 
 A session whose log carries an ending entry (function 11) accepts no further invocation:
-every session-bound function's precondition includes checking that its target session's log
-carries no such entry, and refuses the call if it does. This holds regardless of what any
+every session-bound function's precondition — **functions 0–10; function 11 is explicitly
+exempt** (its idempotent no-op IS the specified answer to an ended session, function 11
+invariant 2) — includes checking that its target session's log
+carries no such entry, and refuses the call if it does — the refusal is `state-error` with
+code `session-ended`, never journaled (no entry may follow the ending entry; see
+[Outcomes, failure modes, and refusals](#outcomes-failure-modes-and-refusals), rule 3).
+The refusal takes precedence over function 0's idempotent replay: a dead identity never
+revives — replay serves OPEN sessions only.
+This holds regardless of what any
 adapter's own bookkeeping believes is "current" — the check reads the target session's own
 log, the harness's own persisted state (C0), never an adapter-side record. Ending is
 best-effort (function 11, invariant 3): a session that never receives an ending entry is
@@ -1505,11 +1668,28 @@ step, so step pre- and postconditions apply before and after it — while write 
 
 This keeps the harness env-agnostic: normalizing host-specific event names and tool payloads,
 and deciding which tools are dispatches and which are writes, is entirely someone else's job.
+The correlation classifier in the table ("with/without a correlated unresolved
+`step-resolution` entry") is the **fallback**, for hosts whose event vocabulary cannot
+distinguish the two session-open kinds: a host with structurally distinct events (a dedicated
+subagent-start event, an agent-scoped prompt event) classifies by those events directly, and
+the correlation is then needed only to resolve *which step* a step session serves — validated
+inside function 0 itself — never to classify the boundary. Likewise a host that hands the
+step session its actor directly needs no actor derivation.
 The step-starting and step-ended boundaries occur in the dispatching (orchestrator) session —
 their entries journal to its log; the step session's own log carries its registration (0), its
 context resolutions (6–7), and its write-boundary entries (8–9).
 Observational host events that do not enter one of these boundaries are outside this
 specification's concern, and they are not written to the harness journal.
+
+**Context injection is per-boundary, and rendering is the embedding mechanism's duty
+(normative).** Functions 1–2 and 6–7 return **refs**; whatever embeds the harness renders
+them into the host's session context at the boundary: instruction refs are resolved and
+**inlined** (small, normative content), skill ids are emitted as **load directives** — the
+resolved path plus the instruction to read it before acting, never an inline dump (skills are
+lazy-loaded by design; inlining would defeat that and bloat the context). A host MAY scope
+injected context to the current request only — re-resolution at every session-started /
+step-started boundary is therefore **mandatory**, not an optimization: the functions'
+"session context contains…" postconditions read per-request on such hosts.
 
 The boundary names are lifecycle participles precisely to dissolve the step/session clash the
 1 step = 1 session invariant creates: **step-starting** (the dispatch about to open the step —
@@ -1532,6 +1712,7 @@ Five packages, one dependency direction — `commands → services → {stores, 
 ```text
 src/
   application.py      # the composition root: builds the object graph (config dataclasses fail-fast) and dispatches argv to one command
+  errors.py           # the error model as code: HarnessError base + one exception per error status (InquiryError, StateError, ConfigurationError, SystemFailureError)
   commands/           # usage entry points (≈ web controllers): parse input into the function's own Inquiry subtype, invoke the service(s), render the result — no domain logic
   services/           # the logical domain services commands use: all harness logic lives here
     session_lifecycle/ # SessionLifecycle + its results: SessionStartReport (0), SessionEndReport (11)
@@ -1648,6 +1829,18 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
   root of `src/`, above every package: it builds every configuration dataclass through
   `ConfigLoader` (fail-fast) and wires the object graph, then dispatches `argv` to one command
   (`dispatch_command`).
+- **`errors` (src root)** — the error model as code, beneath every layer like `utils`: the
+  abstract `HarnessError` (carrying the contract's `error` detail — `code`, `message`,
+  `retryable`) with one subtype per error status — `InquiryError`, `StateError`,
+  `ConfigurationError`, `SystemFailureError` (named to avoid Python's builtin `SystemError`).
+  An exception is **raised where the failure is detected** (stores, config, service logic)
+  and **caught at exactly one seam** — the service's public method, which renders the
+  matching error `Report` (status from the exception type, detail from its fields) and
+  journals it per the failure-journaling rules: reports are the contract, exceptions the
+  internal transport — no exception ever crosses the command boundary. The one exception:
+  `ConfigurationError` from the fail-fast load escapes to the trigger plane, since no
+  function exists yet to report through. `not-applicable` is never an exception — it is an
+  ordinary success return.
 - **`commands`** — `Command` is the single interface (`execute_function`), realized by
   **twelve commands — exactly one per harness function** — each holding its
   service(s) as private attributes. A command is the ONLY class bound to the API contracts:
@@ -1677,7 +1870,8 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
   one), and several also read the log for their own logic — the session's agent (1–2), its
   in-flight step (4–10), its registered actor (8).
   - `session_lifecycle/` — `SessionLifecycle` (0 → `SessionStartReport`; 11 →
-    `SessionEndReport`);
+    `SessionEndReport`) — also holding `AccessControlList` for function 0's root-session
+    membership gate (the session plane's one ACL lookup);
   - `context_resolution/` — the four context resolvers (1–2, 6–7) with their report classes:
     `WorkflowInstructionsReport`, `WorkflowSkillsReport`, `StepInstructionsReport`, and
     `StepSkillsReport`;
@@ -1693,7 +1887,8 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
     `actor`, `artifactPath`, `action`, `resource`, and the failure message: it guards the ACL
     grant, the staging baseline via `ArtifactStore.is_staging_clean` (invariant 5), and the
     logs path via `WorkspaceLayout.is_logs_path` (invariant 6)), `StepArtifactChecker`
-    (9 → `ArtifactCheckReport`), plus `ConditionEvaluator` (the CEL
+    (9 → `ArtifactCheckReport` — an empty `artifact_checks` tuple renders as the property's
+    **absence** in the `valid` contract branch), plus `ConditionEvaluator` (the CEL
     machinery functions 5 and 10 share, via cel-python) and `ConditionCheck`. The internal
     workspace sweep is not a checker service: it is store capability
     (`ArtifactStore.scan_raw_paths` + `validate_artifact`), commandless by design (see
@@ -1713,15 +1908,17 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
     checked by `StepAuthorizationChecker` before a write is admitted; `discover_artifacts` reads
     committed state and raises on
     an invalid artifact, C6; `scan_raw_paths` enumerates the raw universe; `validate_artifact`
-    produces `Finding`s; `commit_artifact` promotes a validated staged write into committed
-    state and `revert_artifact` discards an invalid one — together the harness's only
+    produces `Finding`s; `commit_artifacts` promotes a validated staged set into committed
+    state as one commit (function 9's call-level atomicity)
+    and `revert_artifact` discards an invalid one — together the harness's only
     deliberate Git actions), alongside `Artifact`
     and `Finding` (source, rule, message — internal to this store: what `validate_artifact` and
     `revert_artifact` produce, and what function 9 renders into
     `ArtifactCheck.failureMessage`; no report carries a `Finding` collection).
   - `session_log_store/` — `SessionLogStore` owns the log side (`create_session_log` writes
     function 0's registration entry — the file's first line; `mint_workflow_instance_id` mints
-    an instance id — prefixed by its `workflow_slug` (e.g. `verification-01J9XQ`) — no file;
+    an instance id — prefixed by its `workflow_slug` plus an uppercase Crockford-base32 mint
+    of at least four characters (e.g. `verification-01J9XQ`) — no file;
     `find_latest_open_instance(workflow_slug)` backs function 3's invariant 8: scans
     `<workspace>/logs/` for that prefix, groups entries per instance, and returns the most
     recently active still-open instance (or `None`), see [Logging](#logging); `load_session_log`
@@ -1892,11 +2089,17 @@ Contract schema — [contracts/log-entry.schema.json](../../contracts/log-entry.
 and owns it in its own I/O contract, inside its report — under ONE shared field name,
 `outcome`, so every report carries one, even where a single value is possible: 0
 `started`; 1–2, 4, and 6–7 `resolved`; 3 `step-resolution`/`no-next-step`;
-5 and 10 `pass`/`fail`; 8 `allowed`/`denied`; 9 `valid`/`reverted`; 11 `ended`; all functions
+5 and 10 `pass`/`fail`; 8 `allowed`/`denied`; 9 `valid`/`reverted`; 11 `ended`; functions 0,
+4, 5, and 10 may also return `not-applicable` (persisted state names no target — returned,
+never journaled); all functions
 may also
-return `input-error`, `state-error`,
-`configuration-error`, `invocation-error`, or `system-error`. Error outcomes are ordinary outcomes
-in the same report envelope; they carry the `error` detail object — required on error statuses,
+return `inquiry-error`, `state-error`,
+`configuration-error`, or `system-error` — which condition maps to which
+status, and which failures journal, is fixed by the
+[Outcomes, failure modes, and refusals](#outcomes-failure-modes-and-refusals) rules and each
+function's failure-mode table. Error outcomes are ordinary outcomes
+in the same report envelope; they carry the `error` detail object — required on error
+statuses,
 forbidden on success statuses — rather than using a
 separate error-report type. One field name for uniform handling, function-owned values — no
 envelope status field, no global status enum. Two consequences:
@@ -1924,7 +2127,8 @@ session logs.
   is a permissible later optimization, not a contract change).
 - **Latest-open resolution (function 3's deduction)** — `resolve-step(workflowSlug)` never
   receives an instance id (function 3, invariant 8): a minted `workflowInstanceId` is always
-  prefixed by its `workflowSlug` (e.g. `verification-01J9XQ`), so `find_latest_open_instance`
+  prefixed by its `workflowSlug` plus an uppercase Crockford-base32 mint of at least four
+  characters (e.g. `verification-01J9XQ`), so `find_latest_open_instance`
   filters candidate entries by that prefix, groups them per instance, and — among instances
   still *open* (function 3, invariant 1: at least one step not journaled executed) — returns
   the one whose latest entry (by `timestamp`) is most recent; none open (or none found) means
@@ -1986,8 +2190,11 @@ workflow definitions plus current artifacts.
   `load_workflow_catalog`, `append_log_entry`; never bare `check()` / `load()` / `run()`.
 - **Immutability by default** — dataclasses are `frozen=True`; collections cross boundaries as
   tuples and read-only mappings; entities expose behavior, not mutable attribute bags.
-- **Fail fast, loudly** — domain exceptions (`ConfigError`, …) carry the FULL reports;
-  no silent fallbacks, no blanket `except Exception`.
+- **Fail fast, loudly** — the error model is code (`errors.py`): failures raise the matching
+  `HarnessError` subtype carrying the FULL detail (`code`, `message`, `retryable`);
+  no silent fallbacks, no blanket `except Exception` — services catch `HarnessError`
+  subtypes at their public seam and render error reports; only `ConfigurationError` escapes
+  (fail-fast load).
 - **No import-time side effects; constructor injection only** — the composition root
   (`application.py`, at the src root) is the single place that builds the object graph; no
   globals, no singletons, no service locators.

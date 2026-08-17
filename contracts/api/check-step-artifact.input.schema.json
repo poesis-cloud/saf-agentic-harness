@@ -4,12 +4,16 @@
   "$ref": "gsmarc://saf/contracts/inquiry/v1",
   "title": "check-step-artifact input contract",
   "required": [
-    "artifactPath"
+    "artifactPaths"
   ],
   "properties": {
-    "artifactPath": {
-      "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath",
-      "description": "Workspace-relative path of the artifact being written."
+    "artifactPaths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+      },
+      "description": "Every artifact path the just-landed write staged — the whole set of one tool call, validated and committed (or discarded) atomically as one unit. A single-path write is a set of one."
     }
   },
   "unevaluatedProperties": false,

@@ -54,9 +54,9 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
 - [Rendered registration](#rendered-registration) — the workspace `.github/hooks/*.json` file
   plus the orchestrator `.agent.md` frontmatter block
 - [Inconsistencies with the harness spec](#inconsistencies-with-the-harness-spec) — findings
-  fed back into [`../../core/spec.md`](../../core/spec.md); the adapter-plane design (I5's
-  rendering surface, I11's layout tree, I14) is now **integrated** here and in this adapter's
-  own class diagram — the remaining findings await the next harness-spec revision.
+  fed back into [`../../core/spec.md`](../../core/spec.md); all are now **resolved or
+  integrated** except the permanently tracked items (I4's host-native attribution surface,
+  I13(a)/(d) host verifications).
 
 ---
 
@@ -698,11 +698,13 @@ Registers the step session (function 0, with parent) and injects the step's decl
    [Session identity binding](#session-identity-binding) — so any write hooks (H3/H5) firing
    during the step resolve to it, not to the dispatching orchestrator session; H7 pops it
    back on step close.
-   C7 gate needs no ACL lookup: start-session correlates this session to the parent's
+   C7 gate needs no ACL lookup **adapter-side**: start-session correlates this session to the
+   parent's
    latest unresolved `step-resolution` entry for `agent_type` — only a configured,
    ACL-validated workflow actor is ever named there, so a non-framework `agent_type` simply
    finds no correlation and the function reports not-applicable; nothing is registered or
-   logged, and the adapter never touches the access control list itself.
+   logged, and the adapter never touches the access control list itself (the core's own
+   root-session membership gate lives in `SessionLifecycle`, not here — see I15).
 2. Function 6 `resolve-step-instructions` —
    `{ "in": { "sessionId": "<step>", "parentSessionId": "<parent>" } }`.
    Step correlation — matching this session to the parent's latest unresolved
@@ -741,10 +743,14 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
 - Function 0's, 6's, and 7's own preconditions; notably start-session itself validates
   that an unresolved `step-resolution` entry correlating to this session exists in the
   parent session's log — the adapter has no log access of its own to pre-check this.
-- A `SubagentStart` for a framework agent with **no** correlatable unresolved
-  `step-resolution` entry is a `state-error`: reported via `systemMessage`, exit 0 (the host
-  offers no way to abort a subagent from this hook's structured output — a session that
-  starts uninstructed is observable in the journal and fails at its postconditions).
+- A `SubagentStart` with **no** correlatable unresolved
+  `step-resolution` entry gets `not-applicable` from function 0 (core failure-mode rule 2 —
+  foreign and framework dispatches alike: for a step session the correlation IS the gate, so
+  the two cases converge on the same outcome even though the core could now tell them apart
+  via its own membership lookup, I15): rendered as pass-through, exit 0, empty
+  output, optionally a stderr diagnostic. An uninstructed framework subagent is bounded: its
+  step never journals executed (function 10 finds no in-flight step either), so the workflow
+  makes no progress and re-resolution recovers.
 
 **Postconditions**
 
@@ -900,7 +906,8 @@ the call:
 ```
 
 - `action` maps from `tool_name` via `tools.yaml` (`writeTools` verb map; `deleteTools` →
-  `delete`).
+  `delete` — this binding declares none, and the core denies every `delete` unconditionally
+  in v1 anyway: an explicit non-goal, see function 8's failure modes).
 - Path extraction probes `tool_input` per `pathKeys` (`filePath`, `dirPath`, `path`);
   `multi_replace_string_in_file` yields `replacements[].filePath` — **one function-8
   invocation per distinct path** (see I8). Absolute host paths are relativized to the
@@ -992,7 +999,12 @@ harness command entry point.
 **Mechanics**
 
 1. Classify: the command string matches the harness invocation pattern
-   (`harness.py <function> …`); otherwise fall through to the terminal guard (I9) or pass
+   (`harness.py <function> …`); otherwise fall through to the **guarded-shell check**: a
+   non-harness command on a `guardedShellTools` tool (`tools.yaml`) that textually references
+   a workspace artifact-layout path or the workspace logs path is **denied** with the offending
+   path named — an advisory-grade guard (textual matching is bypassable; C6's
+   detect-and-remediate plane remains the guarantee) closing the routine write escape hatch
+   (I9); anything else passes
    through. **Deny** a harness invocation whose function is not `resolve-step` or
    `resolve-step-model`: functions 3–4 are the only agent-invoked surface — every other
    function belongs to a hook boundary, and a model-authored call to one is never legitimate.
@@ -1072,20 +1084,22 @@ into workspace state or reverts it, feeding the failure back to the writing agen
 }
 ```
 
-**Harness invocation** — function 9 `check-step-artifact`, once per artifact path (same path
-extraction as H3):
+**Harness invocation** — function 9 `check-step-artifact`, **once per tool call**, carrying
+the call's whole artifact-path set (same path extraction as H3; the set is the atomic unit —
+call-level atomicity is the core's, not assembled here):
 
 ```json
 {
   "in": {
     "sessionId": "<current agent session of session_id>",
     "parentSessionId": "<parent when applicable>",
-    "artifactPath": "portfolio/payments/features/feature-refunds.md"
+    "artifactPaths": ["portfolio/payments/features/feature-refunds.md"]
   }
 }
 ```
 
-Non-artifact paths and non-write tools pass through (exit 0, empty output).
+Non-artifact paths are excluded from the set; a call whose every path is non-artifact passes
+through (exit 0, empty output), as do non-write tools.
 
 **Out** (stdout, exit 0)
 
@@ -1108,11 +1122,16 @@ Non-artifact paths and non-write tools pass through (exit 0, empty output).
 }
 ```
 
-**Output construction** — `outcome: valid` → plain success (the commit already happened
+**Output construction** — `outcome: valid` → plain success (the whole set's commit already
+happened
 harness-side; nothing to tell the model). `outcome: reverted` → `decision: "block"` with
-`reason` carrying `artifactCheck.failureMessage` verbatim plus the revert record — the host
+`reason` concatenating each `artifactChecks[]` entry's path and `failureMessage` verbatim
+plus its revert record — the host
 feeds a blocked `PostToolUse` reason back to the model, which is exactly function 9's caller
-usage ("the agent receives the failure message and rewrites the artifact"). Harness errors →
+usage ("the agent receives the failure message(s) and rewrites the artifacts"). A mixed
+multi-path result does not exist at this surface: any invalid path reverted the whole set
+(function 9, invariant 2), so the decision is always uniformly valid or uniformly discarded.
+Harness errors →
 `decision: "block"` + error detail.
 
 **Preconditions** — function 9's own: the path resolves to an artifact schema; function 8
@@ -1128,7 +1147,9 @@ established the clean staging baseline at H3.
 1. The revert is the HARNESS's git action (restore from `HEAD` / delete the new path) — the
    host cannot undo a tool call and is never asked to; `decision: block` only carries the
    message.
-2. Per-path invocations as H3, invariant 2.
+2. ONE function-9 invocation per tool call, carrying the whole path set — unlike H3's per-path
+   function-8 fan-out: authorization is per-path, the commit gate is per-call (the set is the
+   transaction).
 3. The hook never returns `valid` without the commit having succeeded — commit failure is a
    `system-error` → block.
 
@@ -1165,9 +1186,10 @@ ended relies on function 3, invariant 9 (one in-flight step per orchestrator ses
 Runs in the dispatching (orchestrator) session — the step session is already closed. Same
 in-flight-step deduction as H2 (function 3, invariant 9) — no ACL check, no extra field: a
 target with no matching in-flight step is already not-applicable, rendered as pass-through.
-This assumes the host fires `SubagentStop` (H7 — the step's `end-session` + tracker pop)
-**before** this `PostToolUse` — unverified, see I13(e); if the order were reversed,
-`resolve_current` here would still return the step session. Defensively, this hook resolves
+The host fires `SubagentStop` (H7 — the step's `end-session` + tracker pop)
+**before** this `PostToolUse` — verified: the `SubagentStop` hook is awaited inside the
+subagent's own tool-calling loop, hence inside the parent's dispatch tool call (I13(e)).
+Defensively, this hook still resolves
 the **stack base** (the orchestrator's turn session), not the raw top — correct under either
 ordering.
 
@@ -1429,30 +1451,17 @@ Three render targets, all from this adapter's sources at bundle render time,
 
 ## Inconsistencies with the harness spec
 
-Findings surfaced by rooting the harness in this concrete host. *Update (adapter-plane
-revision):* I5's rendering surface, I11's adapter layout, and I14's
-design are now integrated here and in [`adapter-src-classes.puml`](adapter-src-classes.puml); the remaining findings
-still await the next harness-core-spec revision.
+Findings surfaced by rooting the harness in this concrete host. *Status:* all findings are
+now **resolved or integrated** except the permanently tracked items in I4 (host-native
+attribution surface) and I13(a)/(d) (host verifications only live experimentation can close).
 
-- **I1 — RESOLVED at the diagram level: the SD now shows this host's real hooks.**
-  [`harness.sd.puml`](../../harness.sd.puml) now carries a distinct **Adapter** participant,
-  separate from the host-agnostic **Harness** core, and labels every Host→Adapter crossing
-  with this host's actual event: `UserPromptSubmit` (agent-scoped, session-started) for the
-  orchestrator, `SubagentStart` for the step, `PreToolUse` classified by dispatch/write/
-  harness-command class, `PostToolUse` classified by write/dispatch class, and
-  `SubagentStop`/`Stop` — matching H0–H7 exactly; no `SessionStart` mention remains. The
-  residual gap is in the CORE SPEC's own prose (not the diagram): on this host a subagent
-  session never fires `SessionStart` — it fires `SubagentStart` — and top-level `SessionStart` fires once per
-  whole conversation without naming the active agent, so the orchestrator boundary binds to
-  agent-scoped `UserPromptSubmit` instead (H0). Boundary classification (session-started vs
-  step-started) is therefore **structural** — distinct host events — not correlation-derived. The
-  step-resolution correlation remains needed to resolve *which step*, now validated INSIDE
-  start-session itself (see I15) rather than by an adapter-side correlator; but the
-  spec's framing ("Session-open event with/without a correlated
-  unresolved step-resolution entry" as the classifier) and its actor-heuristic *fallback*
-  should be demoted to hosts that genuinely lack distinct events. Bonus: the host hands the
-  step session the actor (`agent_type`) directly — the spec's correlation presumes the actor
-  must be derived.
+- **I1 — RESOLVED.** The SD carries a distinct **Adapter** participant labeled with this
+  host's actual events (H0–H7, no `SessionStart`), and the core spec's Boundary
+  Normalization now states that the correlation classifier is the **fallback** for hosts
+  without structurally distinct session-open events — a host with distinct events (this one)
+  classifies by them directly, the correlation resolving only *which step*, validated inside
+  function 0 (see I15); the actor-heuristic fallback is likewise demoted to hosts that lack a
+  direct actor field.
 - **I2 — RESOLVED: the spec's session nouns no longer conflate the conversation with the
   agent session.** This
   adapter binds sessions per the framework definition: **1 agent session = 1 execution of 1
@@ -1468,17 +1477,13 @@ still await the next harness-core-spec revision.
   latest-open-instance deduction + the single-driver invariant already carry this), and no
   session's log ever carries entries of two instances — the instance view spans sessions,
   never the converse.
-- **I3 — Session-started context injection is request-scoped on this host.** Functions 1–2's
-  postcondition "the session context contains …" holds per request: `additionalContext`
-  renders into the current request's prompt only and does not persist (verified — see
-  [Context-injection semantics](#context-injection-semantics)). With per-turn agent sessions
-  (I2) this is exact — one injection per session — but the spec should state that a HOST may
-  scope injected context to the request, making re-resolution per session-started boundary
-  mandatory rather than an optimization. Also: the refs-to-content rendering burden is the
-  adapter's (the functions return refs; the host consumes plain text — no host
-  instructions/skills machinery is engaged), which the spec's "the adapter renders the refs
-  into the host's session context" already implies but should make normative, including the
-  skills-as-load-directives rule (inlining SKILL.md bodies defeats lazy loading).
+- **I3 — RESOLVED: the core now states the injection semantics normatively.** Boundary
+  Normalization carries the rule: functions 1–2/6–7 return refs; the embedding mechanism
+  renders them (instructions inlined, skills as load directives — never an inline dump); a
+  host MAY scope injected context to the current request, so re-resolution at every
+  session-started / step-started boundary is **mandatory**, not an optimization. This
+  adapter's H0/H1 output construction realizes exactly that rule under the verified
+  [context-injection semantics](#context-injection-semantics).
 - **I4 — RESOLVED: the core now names an explicit, narrow exception for this class of host.**
   Functions 3–4 require host-observed session attribution "outside the tool arguments visible
   to the agent"; a tool-boundary rewrite of a model-authored argument is insufficient by the
@@ -1494,41 +1499,40 @@ still await the next harness-core-spec revision.
   and [`../../core/spec.md`](../../core/spec.md), Invocation surfaces. The real fix — a
   host-native surface that passes attribution outside model-visible arguments — remains
   tracked, not scheduled.
-- **I5 — The exit-2-centric dispatch contract is too narrow.** `adapters/README.md` and
-  `dispatch.sh` frame the harness decision as "exit 2 = deny/fail". On this host exit 2 is a
-  crude blocking error (raw stderr to the model); the canonical control surface is
-  **structured stdout JSON on exit 0** — `permissionDecision` (H2/H3), `decision: block`
-  (H5/H6), `additionalContext` (H1), `updatedInput` (H4). The adapter's renderer
-  (`HookRenderer`) emits host-format JSON per event; exit 2 remains only the hard-failure
-  fallback. The
-  harness-functions I/O contracts are unaffected; the hook-plane rendering contract is.
-  *Integrated: the renderer is now named in the harness def + CD.*
-- **I6 — The host fails open; the spec's enforcement language assumes fail-closed.** Hook
-  timeout (default 30 s), spawn failure, and any exit other than 0/2 are *non-blocking
-  warnings*: the tool call **proceeds**. So functions 5 and 8 — "THE enforcement point",
-  "a denied tool call never executes" — enforce only while the adapter completes in time.
-  Residual risk is bounded by the internal workspace sweep behind CI's required C6 status
-  check (C6's graded guarantee), but the
-  spec's enforcement claims should be scoped per plane the way C6's are.
-- **I7 — Step-ended correlation is thinner than specified.** Function 10: "The step key is
-  resolved by the hook plane from the returning dispatch and session ids." This host's
-  `PostToolUse` payload does not echo the subagent's `agent_id` — only the orchestrator's
-  `session_id`, `tool_input`, and `tool_use_id`. Correlation rests entirely on function 3,
-  invariant 9 (single in-flight step). Adequate today, but the spec should name that reliance
-  (or the adapter must persist a `tool_use_id → agent_id` pairing observed at H1/H2).
-- **I8 — One write ≠ one path.** Functions 8–9 take exactly one `artifactPath`, and
-  `tools.yaml`'s `pathKeys` model is single-path/first-hit-wins. This host's
-  `multi_replace_string_in_file` carries `replacements[].filePath` — an **array** of target
-  paths in one tool call. The adapter fans out one function invocation per distinct path
-  (1 invocation = 1 entry preserved), but the adapter-binding contract
-  (`tools.conf.schema.json`) has no vocabulary for nested/array path extraction and needs
-  extension.
-- **I9 — The terminal is a write escape hatch.** `run_in_terminal` (and tasks) can mutate
-  artifact paths without hitting any write-classified tool, so the write boundary (8–9) never
-  sees those bytes. C6's graded guarantee covers it (detect-and-remediate + CI gate), but the
-  adapter binding should be allowed to declare a *guarded shell tool* class (deny a terminal
-  command that textually targets workspace artifact paths) — currently no binding vocabulary
-  exists for it.
+- **I5 — RESOLVED: the exit-2-centric dispatch contract is gone.** `dispatch.sh` and
+  `adapters/README.md` now state the real control surface — **structured stdout JSON on exit
+  0** (`permissionDecision` for H2/H3, `decision: block` for H5/H6, `additionalContext` for
+  H0/H1, `updatedInput` for H4), rendered by this adapter's `HookRenderer`; exit 2 remains
+  only the hard-failure fallback — and the shim forwards to this adapter's own hook entry
+  (the core has no `hook` command, I14), with the optional third scoping-agent argument H0
+  needs (I13(c)).
+- **I6 — RESOLVED: enforcement claims are scoped per plane.** The core's functions 5 and 8
+  each carry an explicit **Enforcement scope** paragraph: "THE enforcement point" holds while
+  the boundary fires; a fail-open host (timeout, spawn failure — this host's documented
+  behavior) can bypass the function, and the bypass is bounded — unmediated writes never
+  commit (fn 8) and an ungated step never journals executed (fn 5) — with C6's
+  detect-and-remediate plane owning residual cleanup, exactly as C6's own graded guarantee.
+- **I7 — RESOLVED: the core names the correlation reliance.** Function 10's In now states
+  that step-ended correlation **normatively relies on function 3, invariant 9** (one
+  in-flight step per orchestrator session): a host payload need not echo the step session's
+  id — this host's `PostToolUse` (no `agent_id` echo) is fully supported without a
+  `tool_use_id → agent_id` pairing.
+- **I8 — RESOLVED: one write ≠ one path, modeled end to end.** Function 8 takes exactly one
+  `artifactPath` (authorization is per-path — the adapter fans out one invocation per distinct
+  path, 1 invocation = 1 entry preserved); function 9 is **set-based** (`artifactPaths`):
+  ONE invocation per tool call carries the whole set, which validates and commits (or is
+  discarded) atomically. The adapter-binding contract (`tools.conf.schema.json`) now carries
+  `nestedPathKeys` — dotted path expressions with `[]` array fan-out
+  (`replacements[].filePath`) — plus the previously undeclared binding keys
+  (`hostStepSessionKeys`, `hostStepActorKeys`, `mediatedCommandTools`, `mediatedCommandKeys`),
+  and the shipped `tools.yaml` validates against it.
+- **I9 — RESOLVED: the guarded-shell class exists.** The binding vocabulary now carries
+  `guardedShellTools` (contract + this binding's `tools.yaml`: `run_in_terminal`,
+  `create_and_run_task`): a non-harness command on a guarded tool that textually references a
+  workspace artifact-layout path or the logs path is **denied** at the pre-tool boundary (H4
+  mechanics, rule 1). Advisory-grade by declaration — textual matching is bypassable, so C6's
+  graded guarantee (detect-and-remediate + CI gate) remains the integrity claim; the guard
+  closes the routine escape, not the adversarial one.
 - **I10 — The previous registration set was baggage for this host.** The old adapter
   registered camelCase CLI-style events (`sessionStart`, `userPromptSubmit`, `preToolUse`,
   `postToolUse`, `stop`, `sessionEnd`) rendered to `.copilot/hooks.json` — the Copilot **CLI**
@@ -1536,13 +1540,12 @@ still await the next harness-core-spec revision.
   names, has no documented native `SessionEnd`, and its 8-event set includes `SubagentStart`/
   `SubagentStop` (absent from the old registration entirely — the step-started boundary was
   unreachable). Replaced wholesale here.
-- **I11 — Stale references to the old adapter name** (left untouched per scope):
-  `Makefile` (`adapters/github-copilot/hooks.yaml`, and its render target
-  `.copilot/hooks.json` — not a VS Code discovery location, see I10),
-  `README.md`, `adapters/README.md`, and the embedding framework's `conf/model-profiles.conf.yaml`
-  comments. *Integrated:* this adapter's own definition ([`spec.md`](spec.md),
-  [`adapter-src-classes.puml`](adapter-src-classes.puml)) now names this adapter and
-  its own code. `builds/github-copilot/` is a
+- **I11 — RESOLVED: the stale references are gone.** `Makefile` now renders THIS adapter's
+  `hooks.yaml` to `.github/hooks/safe-harness.json` (the host's real discovery location, I10);
+  `adapters/README.md` names `vscode-github-copilot-chat/`, the structured-stdout control
+  surface, and the three-argument dispatch contract. The embedding framework's
+  `conf/model-profiles.conf.yaml` comments live in the framework repository — tracked there,
+  not here. `builds/github-copilot/` is a
   different artifact (the plugin bundle), not this adapter — unaffected.
 - **I12 — `models.yaml` verified compatible.** `runSubagent`'s `model` argument on this host
   is the exact string `"Model Name (copilot)"` — the existing binding shape is correct and
@@ -1572,16 +1575,17 @@ still await the next harness-core-spec revision.
   branch the resolution rule used to hedge for — see the corrected
   [Session identity binding](#session-identity-binding) below (`SessionTracker` is now a
   stack, not a flat pointer, precisely because `session_id` repeats across nesting). (c)
-  `dispatch.sh` (shared, not edited here) declares a 2-argument contract;
-  H0 requires forwarding a third optional argument (the scoping agent slug) to the adapter's
-  hook entry. (d) Hooks are a preview feature — the setting names (`chat.useHooks`,
+  **RESOLVED** — `dispatch.sh` now declares the three-argument contract
+  (`<event> <env> [<agent>]`), forwarding the optional scoping-agent slug H0 passes.
+  (d) Hooks are a preview feature — the setting names (`chat.useHooks`,
   `chat.hookFilesLocations`) and event set may drift; the harness's fail-fast adapter-binding
-  validation at instantiation is the intended drift detector. (e) The host's relative ordering
-  of `SubagentStop` (H7) versus the dispatch tool's `PostToolUse` (H6) at step close is
-  **unverified**. H6's contract assumes H7 ran first (step session closed, tracker popped);
-  the SD draws that order, and H6 additionally resolves the stack base rather than the raw
-  top so a reversed ordering cannot misattribute function 10 — but the assumption should be
-  verified against the host and this note resolved.
+  validation at instantiation is the intended drift detector. (e) **RESOLVED** — verified
+  against `microsoft/vscode`: the `SubagentStop` hook is executed and awaited **inside the
+  subagent's own tool-calling loop** (`toolCallingLoop.ts` —
+  `executeHook('SubagentStop', …)` runs as the loop concludes), i.e. inside the parent's
+  dispatch tool call — so it necessarily completes before the parent's `PostToolUse` for that
+  tool fires. H7-before-H6 holds by host construction; H6's stack-base resolution stays as
+  defense in depth.
 - **I14 — INTEGRATED: this adapter owns host-event orchestration and rendering.**
   H0–H6's **output
   construction** — report `outcome` → `permissionDecision` mapping, `conditionChecks[]`
@@ -1608,10 +1612,12 @@ still await the next harness-core-spec revision.
   Two things this forces, now integrated in the harness def and the CD: (a) session
   identification (H0/H1) uses only host-observed event data (the envelope's own `timestamp`)
   plus the adapter's own private `SessionTracker` record — never a log read; (b)
-  framework-agent gating (C7, at H0/H1/H2/H6) needs no `AccessControlList` dependency
-  anywhere: it already holds for free — structurally for H0 (agent-scoped hooks only ever
-  fire for a real framework orchestrator) and via the existing step-resolution / in-flight-
-  step correlation for H1/H2/H6 (only a configured, ACL-validated workflow actor is ever
-  resolved there in the first place). No extra field, no extra ACL dependency anywhere except
-  `StepAuthorizationChecker` (function 8), which already needed `AccessControlList` for its
-  own, distinct purpose — privilege/grant checking on writes, not framework-agent membership.
+  framework-agent gating (C7) needs no `AccessControlList` dependency **adapter-side**:
+  the CORE owns it — `SessionLifecycle` checks a root session's `agent` against the ACL's
+  declared actors (function 0's membership gate, the session plane's one ACL lookup), and a
+  step session's gate is its step-resolution correlation (only a configured, ACL-validated
+  workflow actor is ever
+  resolved there in the first place). The adapter itself never touches the access control
+  list; core-side, the ACL serves two distinct purposes in two services — membership at
+  `SessionLifecycle` (function 0) and privilege/grant checking at
+  `StepAuthorizationChecker` (function 8).

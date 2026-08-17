@@ -36,3 +36,7 @@ dispatchModelKeys: [model]
 # actually be stronger — no host-native channel passes trustworthy session identity to it either.
 mediatedCommandTools: [run_in_terminal]
 mediatedCommandKeys: [command]
+# Guarded shell class (I9): a terminal/task command that is NOT a harness invocation but
+# textually references a workspace artifact-layout path or the logs path is denied —
+# advisory-grade (textual match is bypassable; C6 detect-and-remediate remains the guarantee).
+guardedShellTools: [run_in_terminal, create_and_run_task]

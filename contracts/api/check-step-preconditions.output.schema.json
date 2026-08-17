@@ -15,6 +15,19 @@
   },
   "oneOf": [
     {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "not-applicable",
+              "description": "The invoking session has no in-flight step. Returned, never journaled; hook planes render it as pass-through."
+            }
+          },
+          "description": "The function outcome."
+        }
+      }
+    },
+    {
       "required": [
         "conditionChecks"
       ],

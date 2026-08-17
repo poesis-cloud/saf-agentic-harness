@@ -15,7 +15,7 @@ HARNESS := PYTHONDONTWRITEBYTECODE=1 python3 harness.py
 # override with `make full WORKSPACE=/path/to/workspace` for other methodologies.
 WORKSPACE ?= $(REPO)/portfolio
 
-.PHONY: verify test check-catalog full install-copilot-hooks
+.PHONY: verify test check-catalog full install-hooks
 
 ## verify: workflow-constitution gate — the full pytest suite (workflow contracts + the two
 ## structural invariants + cross-workflow integrity + the ACL plane + the hook funnel + the
@@ -35,8 +35,10 @@ test: verify
 full: verify
 	$(HARNESS) --workspace-root $(WORKSPACE) check-artifact
 
-## install-copilot-hooks: render the Copilot CLI hook map into the repo's .copilot/ (review/merge first)
-install-copilot-hooks:
-	@mkdir -p $(REPO)/.copilot
-	python3 -c "import json,yaml; json.dump(yaml.safe_load(open('adapters/github-copilot/hooks.yaml')), open('$(REPO)/.copilot/hooks.json','w'), indent=2)"
-	@echo "installed: $(REPO)/.copilot/hooks.json (rendered from adapters/github-copilot/hooks.yaml — the YAML map is the source of truth)"
+## install-hooks: render the VS Code hook map into the repo's .github/hooks/ (review/merge first).
+## The workspace hooks file only — the per-orchestrator agent-scoped UserPromptSubmit blocks render
+## into each orchestrator's .agent.md frontmatter at bundle render time, not here.
+install-hooks:
+	@mkdir -p $(REPO)/.github/hooks
+	python3 -c "import json,yaml; json.dump(yaml.safe_load(open('adapters/vscode-github-copilot-chat/hooks.yaml')), open('$(REPO)/.github/hooks/safe-harness.json','w'), indent=2)"
+	@echo "installed: $(REPO)/.github/hooks/safe-harness.json (rendered from adapters/vscode-github-copilot-chat/hooks.yaml — the YAML map is the source of truth)"

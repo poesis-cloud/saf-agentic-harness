@@ -29,7 +29,7 @@
     },
     {
       "required": [
-        "artifactCheck"
+        "artifactChecks"
       ],
       "properties": {
         "outcome": {
@@ -39,44 +39,54 @@
             }
           }
         },
-        "artifactCheck": {
-          "type": "object",
-          "required": [
-            "failureMessage",
-            "revert"
-          ],
-          "properties": {
-            "failureMessage": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Why the artifact failed schema validation."
-            },
-            "revert": {
-              "type": "object",
-              "required": [
-                "action"
-              ],
-              "properties": {
-                "action": {
-                  "type": "string",
-                  "enum": [
-                    "restored",
-                    "deleted"
-                  ],
-                  "description": "Whether the file was restored from HEAD or deleted."
-                },
-                "from": {
-                  "type": "string",
-                  "minLength": 1,
-                  "description": "Source path restored from, when applicable."
-                }
+        "artifactChecks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "artifactPath",
+              "failureMessage",
+              "revert"
+            ],
+            "properties": {
+              "artifactPath": {
+                "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath",
+                "description": "The failing path within the staged set."
               },
-              "unevaluatedProperties": false,
-              "description": "The revert action taken on the invalid staged write."
-            }
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Why the artifact failed schema validation."
+              },
+              "revert": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "restored",
+                      "deleted"
+                    ],
+                    "description": "Whether the file was restored from HEAD or deleted."
+                  },
+                  "from": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Source path restored from, when applicable."
+                  }
+                },
+                "unevaluatedProperties": false,
+                "description": "The revert action taken on this path."
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One failing path's check and revert record."
           },
-          "unevaluatedProperties": false,
-          "description": "Details of the failed schema check and the revert action taken."
+          "description": "One entry per path that failed validation. The whole staged set is discarded when any path fails — call-level atomicity — so entries for valid siblings never appear: their revert is implied by set membership, recorded here only for the failing paths that caused it."
         }
       }
     },

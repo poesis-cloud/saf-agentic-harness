@@ -15,6 +15,19 @@
   },
   "oneOf": [
     {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "not-applicable",
+              "description": "The invoking session has no in-flight step — including a duplicate step-ended delivery: after the first outcome journals, the step is no longer in flight. Returned, never journaled; hook planes render it as pass-through."
+            }
+          },
+          "description": "The function outcome."
+        }
+      }
+    },
+    {
       "required": [
         "conditionChecks"
       ],
