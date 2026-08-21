@@ -6,21 +6,25 @@ lives outside `src/`), so its own directory is put on `sys.path` here — the sa
 
 Adapter spec I15: the adapter's only dependency is the command API, so every test drives
 it through a FAKE command runner returning contract-shaped report objects — never a real
-harness service, store, or configuration object.
+harness service, store, or configuration object. "Contract-shaped" is enforced, not
+asserted by eye: `build_report` validates against the function's own output contract.
 """
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
 import pytest
-from jsonschema import validators
-from referencing import Registry, Resource
-from referencing.jsonschema import DRAFT202012
+
+from contract_assertions import (
+    assert_inquiry_matches_contract,
+    assert_report_matches_contract,
+    assert_stdin_matches_contract,
+    assert_stdout_matches_contract,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ADAPTER_ENV = "vscode-github-copilot-chat"
@@ -28,10 +32,6 @@ ADAPTER_DIR = REPO_ROOT / "adapters" / ADAPTER_ENV
 
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="session")
@@ -45,84 +45,21 @@ def adapter_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def hook_stdin_schema() -> dict[str, Any]:
-    return _load_json(ADAPTER_DIR / "contracts" / "hook-stdin.schema.json")
-
-
-@pytest.fixture(scope="session")
-def hook_stdout_schema() -> dict[str, Any]:
-    return _load_json(ADAPTER_DIR / "contracts" / "hook-stdout.schema.json")
-
-
-def _resource_from_schema(schema: Mapping[str, Any]) -> Resource:
-    try:
-        return Resource.from_contents(schema, default_specification=DRAFT202012)
-    except TypeError:
-        return Resource.from_contents(schema)
-
-
-@pytest.fixture(scope="session")
-def contract_registry() -> Registry:
-    registry = Registry()
-    schema_paths = [
-        *REPO_ROOT.glob("contracts/**/*.schema.json"),
-        *REPO_ROOT.glob("adapters/*/contracts/*.schema.json"),
-    ]
-    for schema_path in schema_paths:
-        schema = _load_json(schema_path)
-        schema_id = schema.get("$id")
-        if schema_id:
-            registry = registry.with_resource(schema_id, _resource_from_schema(schema))
-    return registry
-
-
-@pytest.fixture(scope="session")
-def make_validator(contract_registry: Registry):
-    def _make_validator(schema: Mapping[str, Any]):
-        validator_cls = validators.validator_for(schema)
-        validator_cls.check_schema(schema)
-        return validator_cls(schema, registry=contract_registry)
-
-    return _make_validator
-
-
-@pytest.fixture
-def assert_valid_stdin(make_validator, hook_stdin_schema: dict[str, Any]):
+def assert_valid_stdin():
     """Assert a stdin fixture is a payload the host could really have written."""
-    validator = make_validator(hook_stdin_schema)
-
-    def _assert(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        validator.validate(dict(payload))
-        return payload
-
-    return _assert
+    return assert_stdin_matches_contract
 
 
-@pytest.fixture
-def assert_valid_stdout(make_validator, hook_stdout_schema: dict[str, Any]):
+@pytest.fixture(scope="session")
+def assert_valid_stdout():
     """Assert a rendered decision's stdout validates against the seam-4 contract."""
-    validator = make_validator(hook_stdout_schema)
-
-    def _assert(stdout: str) -> dict[str, Any]:
-        rendered = json.loads(stdout)
-        validator.validate(rendered)
-        return rendered
-
-    return _assert
+    return assert_stdout_matches_contract
 
 
-@pytest.fixture
-def assert_valid_inquiry(make_validator, repo_root: Path):
+@pytest.fixture(scope="session")
+def assert_valid_inquiry():
     """Assert an inquiry the adapter built validates against the function's contract."""
-
-    def _assert(function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any]:
-        schema = _load_json(
-            repo_root / "contracts" / "api" / f"{function}.input.schema.json"
-        )
-        make_validator(schema).validate(dict(inquiry))
-        return inquiry
-
-    return _assert
+    return assert_inquiry_matches_contract
 
 
 def build_report(
@@ -132,11 +69,18 @@ def build_report(
     parent_session_id: str | None = None,
     **payload: Any,
 ) -> dict[str, Any]:
-    """Build one contract-shaped report object — the harness command API's `out`."""
+    """Build one report the real function could return — validated against its contract.
+
+    Architect finding M3: a fake report is only a stand-in for the harness if the harness
+    could have produced it, so construction itself is the checkpoint — a fixture the
+    output contract rejects fails here rather than surviving to assert something false.
+    """
     context: dict[str, Any] = {"function": function, "sessionId": session_id}
     if parent_session_id is not None:
         context["parentSessionId"] = parent_session_id
-    return {"context": context, "outcome": {"status": status}, **payload}
+    report = {"context": context, "outcome": {"status": status}, **payload}
+    assert_report_matches_contract(function, report)
+    return report
 
 
 def build_error_report(
@@ -146,14 +90,16 @@ def build_error_report(
     message: str = "No session log exists.",
     session_id: str = "session-a",
 ) -> dict[str, Any]:
-    """Build one contract-shaped ERROR report — the deny-by-default driver."""
-    return {
+    """Build one ERROR report — the deny-by-default driver, held to the same contract."""
+    report = {
         "context": {"function": function, "sessionId": session_id},
         "outcome": {
             "status": status,
             "error": {"code": code, "message": message, "retryable": False},
         },
     }
+    assert_report_matches_contract(function, report)
+    return report
 
 
 @dataclass(frozen=True)
@@ -185,7 +131,8 @@ class FakeCommandRunner:
             raise self.failure
         queue = self.reports.get(function)
         if not queue:
-            return build_report(function, _DEFAULT_SUCCESS_STATUS[function])
+            status, payload = _DEFAULT_SUCCESS[function]
+            return build_report(function, status, **payload)
         return queue.pop(0) if len(queue) > 1 else queue[0]
 
     def list_functions(self) -> list[str]:
@@ -195,17 +142,29 @@ class FakeCommandRunner:
         return [call for call in self.calls if call.function == function]
 
 
-_DEFAULT_SUCCESS_STATUS: Mapping[str, str] = {
-    "start-session": "started",
-    "end-session": "ended",
-    "resolve-workflow-instructions": "resolved",
-    "resolve-workflow-skills": "resolved",
-    "resolve-step-instructions": "resolved",
-    "resolve-step-skills": "resolved",
-    "check-step-preconditions": "pass",
-    "check-step-postconditions": "pass",
-    "check-step-authorization": "allowed",
-    "check-step-artifact": "valid",
+_DEFAULT_AUTHORIZATION: Mapping[str, str] = {
+    "actor": "product-manager",
+    "artifactPath": "portfolio/a.md",
+    "action": "update",
+    "resource": "epic",
+}
+
+# Each default carries the result its success branch REQUIRES: a status alone is a report
+# the real harness never returns, and the output contracts reject it (finding M3).
+_DEFAULT_SUCCESS: Mapping[str, tuple[str, Mapping[str, Any]]] = {
+    "start-session": (
+        "started",
+        {"session": {"sessionId": "session-a", "agent": "qa-engineer"}},
+    ),
+    "end-session": ("ended", {}),
+    "resolve-workflow-instructions": ("resolved", {"instructions": ["reports-handling"]}),
+    "resolve-workflow-skills": ("resolved", {"skills": ["code-review"]}),
+    "resolve-step-instructions": ("resolved", {"instructions": ["reports-handling"]}),
+    "resolve-step-skills": ("resolved", {"skills": ["code-review"]}),
+    "check-step-preconditions": ("pass", {"conditionChecks": []}),
+    "check-step-postconditions": ("pass", {"conditionChecks": []}),
+    "check-step-authorization": ("allowed", {"authorization": _DEFAULT_AUTHORIZATION}),
+    "check-step-artifact": ("valid", {}),
 }
 
 

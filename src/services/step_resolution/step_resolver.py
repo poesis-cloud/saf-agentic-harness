@@ -223,14 +223,23 @@ class StepResolver:
             )
 
     def _journal_report(self, report: StepResolutionReport) -> StepResolutionReport:
-        """Append this invocation's single entry; a failing append surfaces `system-error`."""
+        """Append this invocation's single entry; a failing append surfaces `system-error`.
+
+        Spec (rule 4): a completed invocation whose log append fails "still returns its
+        report" — the entry is lost, never the step the caller was promised.
+        """
         entry = LogEntry(timestamp=self._clock(), report=report)
         try:
             self._session_log_store.append_log_entry(report.context.session_id, entry)
         except (OSError, HarnessError) as failure:
-            return _render_error_report(
-                report.context,
-                SystemFailureError("log-append-failed", str(failure), True),
+            lost = SystemFailureError("log-append-failed", str(failure), True)
+            return StepResolutionReport(
+                context=report.context,
+                outcome=Outcome(
+                    status=lost.status,
+                    error=Error(code=lost.code, message=lost.message, retryable=lost.retryable),
+                ),
+                step=report.step,
             )
         return report
 

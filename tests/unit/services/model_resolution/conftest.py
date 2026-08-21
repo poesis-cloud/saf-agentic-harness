@@ -164,7 +164,7 @@ def append_resolution(
     timestamp: str = "2026-08-17T13:01:00Z",
     step_slug: str = STEP_SLUG,
     session_id: str = ORCHESTRATOR_SESSION,
-    workflow_instance_id: str = INSTANCE_ID,
+    workflow_instance_id: str | None = INSTANCE_ID,
     actor: str = STEP_ACTOR,
     weights: Mapping[str, float] | None = None,
 ) -> None:
@@ -194,10 +194,15 @@ def append_outcome(
     store: SessionLogStore,
     timestamp: str = "2026-08-17T13:02:00Z",
     status: str = "pass",
-    session_id: str = STEP_SESSION,
+    session_id: str = ORCHESTRATOR_SESSION,
     workflow_instance_id: str = INSTANCE_ID,
 ) -> None:
-    """Journal a function 10 postcondition outcome, concluding the in-flight step."""
+    """Journal a function 10 postcondition outcome, concluding the in-flight step.
+
+    Spec (function 10, Postconditions): the outcome entry is "appended to the
+    dispatching (orchestrator) session's log" — the same log the resolution it
+    concludes lives in, never the step session's.
+    """
     store.append_log_entry(
         session_id,
         build_entry(

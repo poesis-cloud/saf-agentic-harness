@@ -25,6 +25,7 @@ _END_FUNCTION = "end-session"
 _ENDED_STATUS = "ended"
 _RESOLVE_STEP_FUNCTION = "resolve-step"
 _STEP_RESOLUTION_STATUS = "step-resolution"
+_POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 _NOT_APPLICABLE_STATUS = "not-applicable"
 _RESOLVED_STATUS = "resolved"
 
@@ -54,18 +55,6 @@ def _has_ending_entry(log: Log) -> bool:
         and entry.report.outcome.status == _ENDED_STATUS
         for entry in log.entries
     )
-
-
-def _find_latest_resolution(log: Log) -> LogEntry | None:
-    """Find the session's latest journaled step resolution."""
-    latest: LogEntry | None = None
-    for entry in log.entries:
-        if (
-            entry.report.context.function == _RESOLVE_STEP_FUNCTION
-            and entry.report.outcome.status == _STEP_RESOLUTION_STATUS
-        ):
-            latest = entry
-    return latest
 
 
 def _render_error_report(context: Context, failure: HarnessError) -> ModelProfileReport:
@@ -155,21 +144,24 @@ class StepModelResolver:
         return log
 
     def _find_in_flight_resolution(self, log: Log) -> LogEntry | None:
-        """Find the resolved step whose function 10 outcome has not journaled yet.
+        """Find the session's in-flight step resolution — resolved, no outcome yet.
 
-        Spec (rule 2): after the first function 10 outcome the step is no longer in
-        flight — the outcome journals to the STEP session's log, so the instance view,
-        never this session's log alone, decides whether a target still exists.
+        Spec (function 4, precondition E): the target is an in-flight step "in the
+        invoking session". Function 10's outcome is "appended to the dispatching
+        (orchestrator) session's log" — the same log this resolution lives in — so this
+        log alone decides, and a sibling session's pending step is never ours.
         """
-        resolution = _find_latest_resolution(log)
-        if resolution is None:
-            return None
-        instance_id = resolution.report.context.workflow_instance_id
-        if instance_id is None:
-            return resolution
-        view = self._session_log_store.load_workflow_instance_view(instance_id)
-        actor = resolution.report.payload["step"]["actor"]
-        return view.find_unresolved_step_resolution(actor)
+        pending: LogEntry | None = None
+        for entry in log.entries:
+            function = entry.report.context.function
+            if (
+                function == _RESOLVE_STEP_FUNCTION
+                and entry.report.outcome.status == _STEP_RESOLUTION_STATUS
+            ):
+                pending = entry
+            elif function == _POSTCONDITIONS_FUNCTION:
+                pending = None
+        return pending
 
     def _find_step(self, workflow_instance_id: str | None, resolution: LogEntry) -> Step:
         """Read the in-flight step's declaration from the workflow configuration.
@@ -179,7 +171,7 @@ class StepModelResolver:
         """
         step_slug = resolution.report.payload["step"]["slug"]
         if workflow_instance_id is None:
-            raise ConfigurationError(
+            raise StateError(
                 "step-correlation-missing",
                 "The in-flight step resolution names no workflow instance.",
                 False,
@@ -228,14 +220,23 @@ class StepModelResolver:
         )
 
     def _journal_report(self, report: ModelProfileReport) -> ModelProfileReport:
-        """Append this invocation's single entry; a failing append surfaces `system-error`."""
+        """Append this invocation's single entry; a failing append surfaces `system-error`.
+
+        Spec (rule 4): a completed invocation whose log append fails "still returns its
+        report" — the entry is lost, never the profile the caller was promised.
+        """
         entry = LogEntry(timestamp=self._clock(), report=report)
         try:
             self._session_log_store.append_log_entry(report.context.session_id, entry)
         except (OSError, HarnessError) as failure:
-            return _render_error_report(
-                report.context,
-                SystemFailureError("log-append-failed", str(failure), True),
+            lost = SystemFailureError("log-append-failed", str(failure), True)
+            return ModelProfileReport(
+                context=report.context,
+                outcome=Outcome(
+                    status=lost.status,
+                    error=Error(code=lost.code, message=lost.message, retryable=lost.retryable),
+                ),
+                profile=report.profile,
             )
         return report
 

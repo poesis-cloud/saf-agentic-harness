@@ -74,7 +74,8 @@ class TestStepResolver:
     def test_reports_system_error_when_the_journal_append_fails(
         self, log_store: SessionLogStore, workspace_dir: Path
     ) -> None:
-        """Rule 1: a failing environment surfaces `system-error`; the entry is lost, not the report."""
+        """Rule 4: a completed invocation whose log append fails STILL RETURNS ITS REPORT and
+        surfaces `system-error` — the entry is lost, the resolved step is not."""
         start_session_log(log_store)
         failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
         resolver = _build_resolver(failing_store, build_step("review"))
@@ -84,6 +85,9 @@ class TestStepResolver:
         assert report.outcome.status == "system-error"
         assert report.outcome.error is not None
         assert report.outcome.error.message
+        assert report.step is not None
+        assert report.step.slug == "review"
+        assert report.to_dict()["step"]["slug"] == "review"
         assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 1
 
     def test_refuses_an_unknown_workflow_slug(

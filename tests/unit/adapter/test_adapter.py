@@ -13,7 +13,7 @@ from adapter import Adapter, run_hook_entry
 from conftest import FakeCommandRunner, build_error_report, build_report, queue_reports
 from hook_binding import load_hook_binding
 from hook_classifier import HookClassifier
-from hook_event import HookDecision, HookEvent
+from hook_event import HookEvent
 from hook_renderer import HookRenderer
 from session_tracker import SessionTracker
 
@@ -111,10 +111,6 @@ def _post_tool_payload(tool_name: str, tool_input: Mapping[str, Any]) -> dict[st
         "tool_response": "…",
         "tool_use_id": "call_abc123",
     }
-
-
-def _rendered(decision: HookDecision) -> dict[str, Any]:
-    return json.loads(decision.stdout)
 
 
 class TestAdapter:
@@ -331,7 +327,14 @@ class TestAdapter:
                         "fail",
                         conditionChecks=[
                             {
-                                "condition": {"kind": "precondition", "slug": "report_exists"},
+                                "condition": {
+                                    "kind": "precondition",
+                                    "slug": "report-exists",
+                                    "setSelector": {
+                                        "setQuery": "artifacts['review-report']"
+                                    },
+                                    "setPredicate": "selected.size() > 0",
+                                },
                                 "outcome": "fail",
                                 "failureMessage": "no artifact matches 'review-report'",
                             }
@@ -349,7 +352,7 @@ class TestAdapter:
 
         rendered = assert_valid_stdout(decision.stdout)
         assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert "report_exists" in rendered["hookSpecificOutput"]["permissionDecisionReason"]
+        assert "report-exists" in rendered["hookSpecificOutput"]["permissionDecisionReason"]
 
     def test_passes_through_a_dispatch_with_no_in_flight_step(
         self, make_adapter, tracker: SessionTracker
@@ -841,7 +844,14 @@ class TestAdapter:
                         "fail",
                         conditionChecks=[
                             {
-                                "condition": {"kind": "postcondition", "slug": "report_exists"},
+                                "condition": {
+                                    "kind": "postcondition",
+                                    "slug": "report-exists",
+                                    "setSelector": {
+                                        "setQuery": "artifacts['review-report']"
+                                    },
+                                    "setPredicate": "selected.size() > 0",
+                                },
                                 "outcome": "fail",
                                 "failureMessage": "no artifact matches 'review-report'",
                             }
@@ -1081,7 +1091,7 @@ class TestHookEntryPoint:
     """Adapter spec — Invocation plumbing, seam 2/3: `dispatch.sh` execs this entry."""
 
     def test_forwards_the_event_and_scoping_agent_to_the_adapter(
-        self, make_adapter, tracker: SessionTracker
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
         """Adapter spec H0, Registration: the scoping agent slug arrives as a trailing
         dispatch ARGUMENT (host-fixed), never in the payload.
@@ -1100,7 +1110,8 @@ class TestHookEntryPoint:
 
         assert exit_code == 0
         assert runner.calls[0].inquiry["agent"] == "value-management-officer"
-        assert json.loads(stdout[0])["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+        rendered = assert_valid_stdout(stdout[0])
+        assert rendered["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
 
     def test_writes_nothing_for_a_pass_through(self, make_adapter) -> None:
         """Adapter spec — Boundary binding (C7): pass-through is exit 0 with EMPTY stdout,

@@ -6,7 +6,7 @@ from abc import ABC
 from typing import Callable, ClassVar
 
 from config import Step, WorkflowCatalog
-from errors import ConfigurationError
+from errors import ConfigurationError, StateError
 from services.checking.checking_service import CheckingService
 from services.checking.condition_check import ConditionCheck
 from services.checking.condition_check_report import ConditionCheckReport
@@ -140,7 +140,7 @@ class StepConditionChecker(CheckingService, ABC):
         so it names the workflow whose configuration declares the resolved step.
         """
         if workflow_instance_id is None:
-            raise ConfigurationError(
+            raise StateError(
                 "step-correlation-missing",
                 "The in-flight step resolution names no workflow instance.",
                 False,

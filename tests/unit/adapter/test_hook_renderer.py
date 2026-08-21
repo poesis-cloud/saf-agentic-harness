@@ -62,7 +62,7 @@ class TestHookRenderer:
                     "resolved",
                     instructions=["reports-handling", "assent"],
                 ),
-                build_report("resolve-workflow-skills", "resolved", skills=[]),
+                build_report("resolve-workflow-skills", "resolved", skills=["code-review"]),
             ),
         )
 
@@ -85,7 +85,11 @@ class TestHookRenderer:
         decision = renderer.render_context_injection(
             EventClass.SESSION_STARTED,
             (
-                build_report("resolve-workflow-instructions", "resolved", instructions=[]),
+                build_report(
+                    "resolve-workflow-instructions",
+                    "resolved",
+                    instructions=["reports-handling"],
+                ),
                 build_report("resolve-workflow-skills", "resolved", skills=["code-review"]),
             ),
         )
@@ -142,7 +146,7 @@ class TestHookRenderer:
             EventClass.SESSION_STARTED,
             (
                 build_error_report("resolve-workflow-instructions", "state-error"),
-                build_report("resolve-workflow-skills", "resolved", skills=[]),
+                build_report("resolve-workflow-skills", "resolved", skills=["code-review"]),
             ),
         )
 
@@ -175,7 +179,14 @@ class TestHookRenderer:
                     "check-step-preconditions",
                     "pass",
                     conditionChecks=[
-                        {"condition": {"kind": "precondition", "slug": "after_build"}, "outcome": "pass"}
+                        {
+                            "condition": {
+                                "kind": "precondition",
+                                "slug": "after-build",
+                                "step": "build",
+                            },
+                            "outcome": "pass",
+                        }
                     ],
                 ),
             )
@@ -200,9 +211,21 @@ class TestHookRenderer:
                     "check-step-preconditions",
                     "fail",
                     conditionChecks=[
-                        {"condition": {"kind": "precondition", "slug": "after_build"}, "outcome": "pass"},
                         {
-                            "condition": {"kind": "precondition", "slug": "report_exists"},
+                            "condition": {
+                                "kind": "precondition",
+                                "slug": "after-build",
+                                "step": "build",
+                            },
+                            "outcome": "pass",
+                        },
+                        {
+                            "condition": {
+                                "kind": "precondition",
+                                "slug": "report-exists",
+                                "setSelector": {"setQuery": "artifacts['review-report']"},
+                                "setPredicate": "selected.size() > 0",
+                            },
                             "outcome": "fail",
                             "failureMessage": "no artifact matches 'review-report'",
                         },
@@ -215,8 +238,8 @@ class TestHookRenderer:
         reason = rendered["hookSpecificOutput"]["permissionDecisionReason"]
         assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert reason == (
-            "check-step-preconditions fail: [after_build] pass; "
-            "[report_exists] fail — no artifact matches 'review-report'"
+            "check-step-preconditions fail: [after-build] pass; "
+            "[report-exists] fail — no artifact matches 'review-report'"
         )
 
     def test_renders_every_allowed_path_as_one_allow(
@@ -415,7 +438,12 @@ class TestHookRenderer:
                 "fail",
                 conditionChecks=[
                     {
-                        "condition": {"kind": "postcondition", "slug": "report_exists"},
+                        "condition": {
+                            "kind": "postcondition",
+                            "slug": "report-exists",
+                            "setSelector": {"setQuery": "artifacts['review-report']"},
+                            "setPredicate": "selected.size() > 0",
+                        },
                         "outcome": "fail",
                         "failureMessage": "no artifact matches 'review-report'",
                     }
@@ -426,7 +454,7 @@ class TestHookRenderer:
         rendered = assert_valid_stdout(decision.stdout)
         assert rendered["decision"] == "block"
         assert rendered["reason"] == (
-            "check-step-postconditions fail: [report_exists] fail — "
+            "check-step-postconditions fail: [report-exists] fail — "
             "no artifact matches 'review-report'"
         )
         assert "re-resolve" in rendered["hookSpecificOutput"]["additionalContext"]

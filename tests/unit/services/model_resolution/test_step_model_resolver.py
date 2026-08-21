@@ -6,13 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from errors import ConfigurationError, InquiryError
+from errors import ConfigurationError, InquiryError, SystemFailureError
 from services.model_resolution import ModelProfileBinding, ModelProfileReport, StepModelResolver
 from stores.session_log_store import Context, LogEntry, Outcome, SessionLogStore
 from tests.unit.services.model_resolution.conftest import (
     INSTANCE_ID,
     ORCHESTRATOR_SESSION,
-    STEP_SESSION,
     STEP_SLUG,
     FailingAppendJsonlStore,
     SequenceClock,
@@ -30,6 +29,17 @@ from tests.unit.services.model_resolution.conftest import (
 
 _DEEP_NINE = build_capabilities(deep_reasoning=9.0)
 _DEEP_SEVEN = build_capabilities(deep_reasoning=7.0)
+_SECOND_ORCHESTRATOR_SESSION = "orchestrator-2"
+
+
+class FailingInstanceViewSessionLogStore(SessionLogStore):
+    """Fake a store whose cross-log instance view cannot be assembled."""
+
+    def load_workflow_instance_view(self, workflow_instance_id: str):
+        """Fail the derived read the way an unreadable sibling log does."""
+        raise SystemFailureError(
+            "instance-view-unreadable", "The instance view cannot be assembled.", True
+        )
 
 
 def _build_resolver(
@@ -83,7 +93,8 @@ class TestStepModelResolver:
     def test_reports_system_error_when_the_journal_append_fails(
         self, log_store: SessionLogStore, workspace_dir: Path
     ) -> None:
-        """Rule 1: a failing environment surfaces `system-error`; the entry is lost, not the report."""
+        """Rule 4: a completed invocation whose log append fails STILL RETURNS ITS REPORT and
+        surfaces `system-error` — the entry is lost, the resolved profile is not."""
         start_session_log(log_store)
         append_resolution(log_store)
         failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
@@ -94,6 +105,9 @@ class TestStepModelResolver:
         assert report.outcome.status == "system-error"
         assert report.outcome.error is not None
         assert report.outcome.error.message
+        assert report.profile is not None
+        assert report.profile.slug == "model-a"
+        assert report.to_dict()["profile"]["slug"] == "model-a"
         assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 2
 
     def test_answers_not_applicable_when_no_step_is_in_flight(
@@ -113,9 +127,10 @@ class TestStepModelResolver:
     def test_answers_not_applicable_after_the_step_outcome_journaled(
         self, log_store: SessionLogStore, workspace_dir: Path
     ) -> None:
-        """Rule 2: after the first function 10 outcome the step is no longer in flight — re-delivery finds no target."""
+        """Rule 2: after the first function 10 outcome the step is no longer in flight — re-delivery
+        finds no target. Function 10, Postconditions: that outcome is "appended to the dispatching
+        (orchestrator) session's log", so THIS session's own log concludes the step."""
         start_session_log(log_store)
-        start_session_log(log_store, session_id=STEP_SESSION, agent="qa-engineer")
         append_resolution(log_store)
         append_outcome(log_store)
         resolver = _build_resolver(log_store)
@@ -123,7 +138,110 @@ class TestStepModelResolver:
         report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
 
         assert report.outcome.status == "not-applicable"
-        assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 2
+        assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 3
+
+    def test_ignores_a_pending_resolution_another_session_holds_in_the_same_instance(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Precondition (E): the in-flight step is one "in the INVOKING session" — this session's
+        step concluded, so a sibling session's still-pending resolution in the same instance is no
+        target of ours: `not-applicable` (rule 2)."""
+        start_session_log(log_store)
+        append_resolution(log_store, timestamp="2026-08-17T13:01:00Z")
+        append_outcome(log_store, timestamp="2026-08-17T13:02:00Z")
+        start_session_log(
+            log_store, session_id=_SECOND_ORCHESTRATOR_SESSION, timestamp="2026-08-17T13:03:00Z"
+        )
+        append_resolution(
+            log_store,
+            timestamp="2026-08-17T13:04:00Z",
+            session_id=_SECOND_ORCHESTRATOR_SESSION,
+        )
+        resolver = _build_resolver(log_store)
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "not-applicable"
+        assert report.profile is None
+        assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 3
+
+    def test_resolves_this_session_s_step_though_another_actor_holds_the_instance_s_latest(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Precondition (E): an in-flight step "in the invoking session" is the target — the
+        deduction reads this session's logs (Interface), never an instance-wide, actor-filtered
+        query that a later sibling resolution would answer for."""
+        start_session_log(log_store)
+        append_resolution(log_store, timestamp="2026-08-17T13:01:00Z")
+        start_session_log(
+            log_store, session_id=_SECOND_ORCHESTRATOR_SESSION, timestamp="2026-08-17T13:02:00Z"
+        )
+        append_resolution(
+            log_store,
+            timestamp="2026-08-17T13:03:00Z",
+            session_id=_SECOND_ORCHESTRATOR_SESSION,
+            actor="developer",
+        )
+        resolver = _build_resolver(log_store)
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "resolved"
+        assert report.profile is not None
+        assert report.context.workflow_instance_id == INSTANCE_ID
+
+    def test_never_lets_an_instance_view_failure_cross_the_public_method(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Classes: "no exception ever crosses the command boundary" — and function 4 deduces its
+        step "from its own logs" (Interface), so an unreadable cross-log instance view cannot even
+        reach it."""
+        start_session_log(log_store)
+        append_resolution(log_store)
+        resolver = _build_resolver(
+            FailingInstanceViewSessionLogStore(workspace_dir),
+        )
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert isinstance(report, ModelProfileReport)
+        assert report.outcome.status == "resolved"
+        assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 3
+
+    def test_reports_state_error_when_the_in_flight_resolution_names_no_instance(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Rule 1: `step-correlation-missing` is `state-error` — "a step correlation is missing or of
+        the wrong kind" — and the assignment is "fixed by kind, never per-function taste"; journaled."""
+        start_session_log(log_store)
+        append_resolution(log_store, workflow_instance_id=None)
+        resolver = _build_resolver(log_store)
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error is not None
+        assert report.outcome.error.code == "step-correlation-missing"
+        journaled = read_entries(workspace_dir, ORCHESTRATOR_SESSION)
+        assert len(journaled) == 3
+        assert journaled[-1]["report"]["outcome"]["status"] == "state-error"
+
+    def test_reports_configuration_error_when_the_model_catalog_is_empty(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Rule 1: an empty catalog reaching runtime is "configuration invalid at use time" —
+        `configuration-error`, journaled; invariant 4's load-time rejection is not enforced by the
+        `model-profiles.conf` contract, so the branch stays reachable."""
+        start_session_log(log_store)
+        append_resolution(log_store)
+        resolver = _build_resolver(log_store, profiles=build_profiles())
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "configuration-error"
+        assert report.outcome.error is not None
+        assert report.outcome.error.code == "empty-model-catalog"
+        assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 3
 
     def test_refuses_an_unregistered_session_with_a_report_it_cannot_journal(
         self, log_store: SessionLogStore, workspace_dir: Path

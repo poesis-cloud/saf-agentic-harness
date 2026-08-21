@@ -9,6 +9,7 @@ from checking_fixtures import (
     ORCHESTRATOR_SESSION,
     build_catalog,
     build_ending_entry,
+    build_entry,
     build_registration_entry,
     build_step,
     build_step_resolution_entry,
@@ -98,6 +99,38 @@ class TestStepPostconditionChecker:
             for entry in read_entries(workspace, ORCHESTRATOR_SESSION)
         ]
         assert journaled.count("check-step-postconditions") == 1
+
+    def test_reports_state_error_when_the_in_flight_resolution_names_no_instance(
+        self,
+        artifact_store: ArtifactStore,
+        log_store: SessionLogStore,
+        workspace: Path,
+    ) -> None:
+        """Spec Outcomes rule 1: `step-correlation-missing` is `state-error` — "a step
+        correlation is missing or of the wrong kind" — an assignment "fixed by kind,
+        never per-function taste"; journaled."""
+        log_store.create_session_log(
+            build_registration_entry(ORCHESTRATOR_SESSION, "orchestrator")
+        )
+        log_store.append_log_entry(
+            ORCHESTRATOR_SESSION,
+            build_entry(
+                "resolve-step",
+                "step-resolution",
+                session_id=ORCHESTRATOR_SESSION,
+                payload={"step": build_step()},
+                timestamp="2026-01-01T00:01:00Z",
+            ),
+        )
+        checker = _build_checker(artifact_store, log_store, build_catalog())
+
+        report = checker.check_step_postconditions(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error is not None
+        assert report.outcome.error.code == "step-correlation-missing"
+        journaled = read_entries(workspace, ORCHESTRATOR_SESSION)
+        assert journaled[-1]["report"]["outcome"]["status"] == "state-error"
 
     def test_reports_one_check_per_declared_postcondition_with_an_aggregate_pass(
         self,
