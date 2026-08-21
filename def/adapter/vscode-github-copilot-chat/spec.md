@@ -546,8 +546,9 @@ persist across requests; see [Context-injection semantics](#context-injection-se
 
 **Registration** — NOT in the workspace hooks file: it belongs in each orchestrator's
 `.agent.md` frontmatter, the scoping agent's slug passed as a trailing argument (host-fixed,
-not model-authored). **No orchestrator carries this block today** — see
-[Rendered registration](#rendered-registration); until one does, H0 never fires:
+not model-authored). Rendered per orchestrator by `make install-hooks` into a generated agent
+file — see [Rendered registration](#rendered-registration); the committed agent sources stay
+untouched:
 
 ```json
 {
@@ -555,7 +556,7 @@ not model-authored). **No orchestrator carries this block today** — see
     "UserPromptSubmit": [
       {
         "type": "command",
-        "command": "adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat value-management-officer",
+        "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat value-management-officer",
         "cwd": "{{FRAMEWORK_DIR}}",
         "timeout": 30
       }
@@ -1417,20 +1418,20 @@ must forward a third optional argument (H0's scoping agent slug), which its curr
 
 ## Rendered registration
 
-Three render targets, all from this adapter's sources. Only the first is rendered by this
-repo today; see [Rendering guarantees](#rendering-guarantees-decision-c) and the H0 gap
-below.
+Three render targets, all from this adapter's sources. The first two are rendered by this
+repo, in ONE installation run; see [Rendering guarantees](#rendering-guarantees-decision-c).
 
-Two placeholders are substituted at install time:
+Three placeholders are substituted at install time:
 
 | Placeholder | Substituted with | Derived from |
 | --- | --- | --- |
 | `{{ADAPTERS_DIR}}` | this harness checkout's `adapters/` directory | the renderer's OWN location (`Path(__file__).parent`) |
 | `{{FRAMEWORK_DIR}}` | the absolute framework root | the `--framework-dir` argument, required and required to exist |
+| `{{AGENT_SLUG}}` | the scoping orchestrator's slug (H0 target only) | the framework's own workflow catalog — every `orchestrator:` it names |
 
-Both must be absolute in the installed file: the host resolves a hook `cwd` against `$HOME`
-by default, and `adapters/` ships in the HARNESS repo, so a command relative to the framework
-root names nothing (see host facts).
+Both paths must be absolute in the installed artifacts: the host resolves a hook `cwd`
+against `$HOME` by default, and `adapters/` ships in the HARNESS repo, so a command relative
+to the framework root names nothing (see host facts).
 
 1. **Workspace hooks file** — `hooks.yaml` in this folder is the YAML source of truth,
    rendered by `adapters/render_hooks.py` to ONE workspace file `.github/hooks/safe-harness.json`:
@@ -1449,35 +1450,55 @@ root names nothing (see host facts).
 
    Installed with `make install-hooks FRAMEWORK_DIR=<framework root> [HOOKS_DEST=<dir>]`.
 
-1. **Per-orchestrator agent-scoped block** (H0) — belongs in each framework orchestrator's
-   `.agent.md` frontmatter (`hooks:` block), the orchestrator's own slug as the trailing
-   dispatch argument:
+1. **Per-orchestrator agent-scoped block** (H0) — `agent-hooks.yaml` in this folder is the
+   YAML source of truth for the session-started boundary, rendered by the SAME stage into
+   the frontmatter of one agent file per framework orchestrator, the orchestrator's own slug
+   as the trailing dispatch argument:
 
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat <orchestrator-slug>", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
+    "UserPromptSubmit": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat {{AGENT_SLUG}}", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
   }
 }
 ```
 
-   **Not rendered anywhere today.** No orchestrator `.agent.md` in the framework repo carries
-   a `hooks:` key, and `UserPromptSubmit` appears nowhere in it — the H0 boundary therefore
-   never fires. The blocks live in the framework repo (agent definitions), so rendering them
-   is a framework-side stage, not this repo's; recorded here as the remaining half of the
-   registration gap.
+   **Who is an orchestrator is the framework's own statement**, not a roster this adapter
+   carries: the renderer reads `<framework>/conf/workflows/*.workflow.conf.yaml` and takes
+   every `orchestrator:` it names (`--workflows-dir` overrides). A catalog naming none is a
+   refusal — without a registration H0 never fires and no session is ever opened.
+
+   **Where it is written — a generated agent file, never the committed source.** The block
+   pins one machine's absolute paths, and the framework's `agents/*.agent.md` are committed,
+   host-agnostic sources (the framework's own bundle stage already injects host-specific
+   frontmatter — `tools:` — into a rendered COPY, never into them). So the renderer reads
+   `<framework>/agents/<slug>.agent.md` and writes `<framework>/.github/agents/<slug>.agent.md`
+   — the host's verified workspace agent location, generated and ignored exactly like the
+   workspace hooks file. `AGENTS_DIR` / `AGENTS_DEST` override both ends: point them at an
+   already-rendered agent bundle and the block is injected there instead, in place and
+   idempotently, on top of that bundle's own `tools:` injection.
+
+   Everything outside the managed block — `name`, `description`, every other frontmatter key
+   and the whole body — is carried across byte for byte and re-verified after rendering. The
+   block is delimited by `# >>> safe-harness H0 … >>>` / `# <<< safe-harness H0 <<<` and is
+   stripped before re-injection, so re-running replaces it rather than appending a second
+   `hooks:` key; a damaged delimiter pair, or an agent declaring its own unmanaged `hooks:`,
+   is a refusal rather than a file the renderer patches around.
+
+   Installed by the same `make install-hooks` run.
 
 1. **Workspace settings** — `.vscode/settings.json` in the workspace carries the
    [required settings](#required-vs-code-settings) (`chat.useHooks: true`).
 
 ### Installation destination
 
-`HOOKS_DEST` is explicit, defaulting to `<framework root>/.github/hooks`. The host collects
-`.github/hooks/*.json` from **the workspace folder it has open** — which is the framework
-workspace the agents run in, not this harness checkout. Installing into the harness repo
-registers hooks for sessions editing the harness and for no other, which is precisely
-backwards; the default therefore points at the framework root, and any other destination must
-be a folder VS Code actually opens.
+`HOOKS_DEST` is explicit, defaulting to `<framework root>/.github/hooks`; `AGENTS_DEST` is
+explicit, defaulting to `<framework root>/.github/agents`. The host collects
+`.github/hooks/*.json` and `.github/agents/*.agent.md` from **the workspace folder it has
+open** — which is the framework workspace the agents run in, not this harness checkout.
+Installing into the harness repo registers hooks for sessions editing the harness and for no
+other, which is precisely backwards; the defaults therefore point at the framework root, and
+any other destination must be a folder VS Code actually reads that framework's agents from.
 
 ### Rendering guarantees (decision C)
 
@@ -1492,23 +1513,30 @@ Options A (a second harness-root anchor, growing the anchor set every embedder m
 and B (vendoring `adapters/` into each framework, forking the adapter per framework) were
 rejected. C needs no new anchor and keeps one copy of the adapter.
 
-`adapters/render_hooks.py` is the rendering stage. It sits beside `dispatch.sh` as shared,
-environment-neutral plumbing: it names no host, takes the environment as `--env`, and imports
-nothing from `src/` (I15). It guarantees:
+`adapters/render_hooks.py` is the rendering stage for BOTH targets. It sits beside
+`dispatch.sh` as shared, environment-neutral plumbing: it names no host, takes the
+environment as `--env`, and imports nothing from `src/` (I15). It guarantees:
 
 - the `command` is absolutized from the RENDERER'S own location — never from `FRAMEWORK_DIR`,
   the wrong anchor that this whole section exists to correct;
 - `{{FRAMEWORK_DIR}}` resolves to an absolute framework root that exists on disk;
-- **rendering is all-or-nothing.** The output is validated in memory and written only if it
-  passes: no `{{…}}` survives anywhere, every entry carries `type`/`command`/`cwd`, `cwd` is
-  an absolute existing directory, and the command's program is an absolute existing file.
-  Any refusal prints a diagnostic to stderr and exits nonzero having written nothing — a
-  half-rendered registration is the failure mode being fixed, so it is never emitted.
+- **rendering is all-or-nothing, across both targets.** Every output is validated in memory
+  and files are written only once all of them pass: no `{{…}}` survives anywhere, every entry
+  carries `type`/`command`/`cwd`, `cwd` is an absolute existing directory, the command's
+  program is an absolute existing file and is emitted unfolded on one line, and each rendered
+  agent re-parses to its source's own frontmatter keys plus exactly the managed block, over a
+  byte-identical body. Any refusal prints a diagnostic to stderr and exits nonzero having
+  written nothing — not for the failing agent, and not for the ones that rendered before it;
+- **re-running changes nothing but what moved.** The managed block is delimited and stripped
+  before re-injection, so installation is idempotent even when source and destination are the
+  same file.
 
 Pinned by [`tests/adapter/test_hook_render.py`](../../../tests/adapter/test_hook_render.py)
-(rendering, anchoring, failure paths) and
-[`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) (the source of
-truth keeps the placeholders and is not installable verbatim).
+(workspace rendering, anchoring, failure paths),
+[`tests/adapter/test_agent_hook_render.py`](../../../tests/adapter/test_agent_hook_render.py)
+(H0: per-orchestrator scoping, preservation, idempotency, refusals) and
+[`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) (the sources of
+truth keep the placeholders and are not installable verbatim).
 
 | Option | Registration | Cost |
 | --- | --- | --- |

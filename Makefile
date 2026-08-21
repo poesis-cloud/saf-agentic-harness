@@ -38,16 +38,23 @@ adapter:
 test: verify
 
 ## install-hooks: render the VS Code hook registration and install it where the host will read
-## it. The rendered file is MACHINE-SPECIFIC (absolute dispatch path + absolute framework root)
-## and is never committed — re-run this after moving either checkout.
+## it. BOTH targets in one run: the workspace hooks file, and the per-orchestrator agent-scoped
+## UserPromptSubmit block (H0) that opens the session. Everything rendered is MACHINE-SPECIFIC
+## (absolute dispatch path + absolute framework root) and is never committed — re-run this after
+## moving either checkout.
 ##   FRAMEWORK_DIR  required — the framework root; becomes every hook's cwd.
 ##   HOOKS_DEST     defaults to $(FRAMEWORK_DIR)/.github/hooks — the host collects
 ##                  .github/hooks/*.json from the workspace folder it has OPEN, which is the
 ##                  framework workspace the agents run in, not this harness checkout.
-## The workspace hooks file only — the per-orchestrator agent-scoped UserPromptSubmit blocks
-## belong in each orchestrator's .agent.md frontmatter and are not rendered here.
+##   AGENTS_DIR     defaults to $(FRAMEWORK_DIR)/agents — the framework's committed, host-agnostic
+##                  agent sources, read and never written.
+##   AGENTS_DEST    defaults to $(FRAMEWORK_DIR)/.github/agents — the host's workspace agent
+##                  location. Point it (with AGENTS_DIR) at an already-rendered agent bundle to
+##                  inject the block into that instead; the injection is idempotent in place.
 install-hooks:
 	python3 adapters/render_hooks.py \
 		--env vscode-github-copilot-chat \
 		--framework-dir "$(FRAMEWORK_DIR)" \
-		--dest "$(HOOKS_DEST)"
+		--dest "$(HOOKS_DEST)" \
+		--agents-dir "$(AGENTS_DIR)" \
+		--agents-dest "$(AGENTS_DEST)"

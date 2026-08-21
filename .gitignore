@@ -10,3 +10,7 @@ __pycache__/
 # (absolute dispatch path + absolute framework root). The source of truth is
 # adapters/<env>/hooks.yaml.
 .github/hooks/safe-harness.json
+
+# Rendered H0 agent-scoped registration — same stage, same machine-specificity. The
+# sources of truth are adapters/<env>/agent-hooks.yaml and the framework's own agents.
+.github/agents/

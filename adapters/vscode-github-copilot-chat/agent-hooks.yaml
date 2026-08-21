@@ -1,0 +1,26 @@
+# H0 agent-scoped hook registration (env-specific) — the source of truth in YAML for the
+# session-started boundary, which is NOT part of the workspace hooks file.
+#
+# On this host a `hooks:` block in a custom agent's `.agent.md` FRONTMATTER registers hook
+# commands scoped to that agent — the only mechanism that ties an event to an agent identity,
+# since no top-level payload names the active agent. `adapters/render_hooks.py` renders this
+# template once per framework ORCHESTRATOR (derived from the framework's own workflow
+# catalog), substituting {{AGENT_SLUG}} with that orchestrator's slug, {{ADAPTERS_DIR}} with
+# this harness checkout's adapters/ directory and {{FRAMEWORK_DIR}} with the absolute
+# framework root — same substitution stage as hooks.yaml, same guarantees.
+#
+# The rendered result is machine-specific, so it is written to a GENERATED agent file
+# (default: <framework>/.github/agents/<slug>.agent.md, the host's workspace agent location);
+# the framework's committed agent sources stay byte-for-byte host-agnostic.
+#
+# Full spec: def/spec.md H0 + Rendered registration.
+agentHooks:
+  UserPromptSubmit:
+    [
+      {
+        type: command,
+        command: "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat {{AGENT_SLUG}}",
+        cwd: "{{FRAMEWORK_DIR}}",
+        timeout: 30,
+      },
+    ]

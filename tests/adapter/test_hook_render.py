@@ -35,8 +35,18 @@ def _render(repo_root: Path, *args: str, env_overrides: dict | None = None):
 
 @pytest.fixture
 def framework_root(tmp_path: Path) -> Path:
+    """A minimal but COMPLETE framework: one installation renders both targets, so a
+    framework the renderer can serve must also name an orchestrator and carry its agent."""
     root = tmp_path / "framework"
-    (root / "conf").mkdir(parents=True)
+    (root / "conf" / "workflows").mkdir(parents=True)
+    (root / "conf" / "workflows" / "w0.workflow.conf.yaml").write_text(
+        "slug: w0\norchestrator: scrum-master\n", encoding="utf-8"
+    )
+    (root / "agents").mkdir()
+    (root / "agents" / "scrum-master.agent.md").write_text(
+        "---\nname: scrum-master\ndescription: 'orchestrator'\n---\n\n# body\n",
+        encoding="utf-8",
+    )
     return root
 
 
