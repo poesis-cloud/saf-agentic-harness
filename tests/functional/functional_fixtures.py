@@ -537,6 +537,11 @@ def _initialize_workspace_repository(workspace_dir: Path) -> None:
     """
     run_git(workspace_dir, "init", "-q")
     run_git(workspace_dir, "config", "commit.gpgsign", "false")
+    # Function 9 commits with the workspace's OWN identity, and the entry shim runs with a
+    # stripped environment: without a repository-local committer the commit gate would
+    # depend on the developer's global Git configuration.
+    run_git(workspace_dir, "config", "user.name", "Harness Fixture")
+    run_git(workspace_dir, "config", "user.email", "fixture@example.test")
     (workspace_dir / ".gitignore").write_text("logs/\n", encoding="utf-8")
     run_git(workspace_dir, "add", "--", ".gitignore")
     run_git(workspace_dir, *_GIT_AUTHOR, "commit", "-q", "-m", "chore: workspace baseline")
