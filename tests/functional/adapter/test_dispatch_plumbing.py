@@ -89,7 +89,10 @@ class TestDispatchArgumentContract:
         """
         shipped_dispatch = REPO_ADAPTERS_DIR / "dispatch.sh"
         tracker_record = (
-            REPO_ADAPTERS_DIR / "vscode-github-copilot-chat" / ".session-tracker.json"
+            Path(framework.environment["XDG_STATE_HOME"])
+            / "saf-agentic-harness"
+            / "vscode-github-copilot-chat"
+            / "session-tracker.json"
         )
         recorded_before = tracker_record.exists()
 

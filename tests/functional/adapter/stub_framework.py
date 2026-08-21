@@ -71,6 +71,10 @@ def build_framework(root: Path, script_path: Path, journal_path: Path) -> Framew
             # Built from scratch — an exported FRAMEWORK_* of the developer's own must not
             # reach the hook process.
             "PATH": os.environ.get("PATH", ""),
+            # The adapter keeps its session record under the per-user state home, so each
+            # framework needs its own or the record leaks between tests.
+            "XDG_STATE_HOME": str(root.parent / "state"),
+            "HOME": str(root.parent / "home"),
             "FRAMEWORK_DIR": str(root),
             "FRAMEWORK_WORKSPACE_DIR": "workspace",
             "FRAMEWORK_INSTRUCTIONS_DIR": "instructions",
