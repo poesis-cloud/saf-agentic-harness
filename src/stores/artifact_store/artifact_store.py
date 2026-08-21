@@ -182,7 +182,7 @@ class ArtifactStore:
         artifact schema is `state-error` (`artifact-schema-unresolved`).
         """
         try:
-            return self._workspace_layout.resolve_resource(ref, None)
+            return self._workspace_layout.resolve_resource(ref)
         except ConfigurationError as failure:
             raise StateError(
                 "artifact-schema-unresolved",

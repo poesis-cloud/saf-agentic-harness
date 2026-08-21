@@ -47,8 +47,9 @@ class TestCheckStepAuthorizationCommand:
     ) -> None:
         """Spec (Outcomes rule 1): a non-vocabulary action fails the input contract as
         `invalid-inquiry` — the ACL contract's action vocabulary is create, update, delete,
-        reads are never modeled (C3). The contract rejects `read` at the command boundary,
-        BEFORE function 8's own `unknown-action` branch could be reached.
+        reads are never modeled (C3). The contract is the ONLY guard: an out-of-vocabulary
+        action means the adapter's tool mapping is wrong, so function 8 carries no branch
+        of its own for it.
         """
         command = CheckStepAuthorizationCommand(
             RecordingService("check-step-authorization"), schema_validator

@@ -581,36 +581,6 @@ class TestStepAuthorizationChecker:
         assert not (workspace / ARTIFACT_REF).exists()
         assert run_git(workspace, "status", "--porcelain", "--", ARTIFACT_KIND) == ""
 
-    def test_reports_an_unmapped_action_as_a_journaled_inquiry_error(
-        self,
-        log_store: SessionLogStore,
-        access_control_list: AccessControlList,
-        workspace_layout: WorkspaceLayout,
-        artifact_store: ArtifactStore,
-        workspace: Path,
-    ) -> None:
-        """Function 8, precondition (E): the host write tool has been mapped to an
-        `action` in the contract vocabulary — violation: `inquiry-error`
-        (`unknown-action`), journaled."""
-        _open_session(log_store)
-        checker = _build_checker(
-            log_store, access_control_list, workspace_layout, artifact_store
-        )
-
-        report = checker.check_step_authorization(
-            session_id=SESSION,
-            parent_session_id=None,
-            artifact_path=Path(ARTIFACT_REF),
-            action="read",
-        )
-
-        assert report.outcome.status == "inquiry-error"
-        assert report.outcome.error.code == "unknown-action"
-        assert report.authorization is None
-        assert list_contract_violations(report) == ()
-        journaled = read_entries(workspace, SESSION)[-1]["report"]
-        assert journaled["outcome"]["error"]["code"] == "unknown-action"
-
     def test_refuses_an_ended_session_without_journaling(
         self,
         log_store: SessionLogStore,

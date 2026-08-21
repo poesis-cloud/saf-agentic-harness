@@ -148,7 +148,29 @@ roles:
 
 
 def workspace_yaml() -> str:
-    """Return a workspace tree fixture with ambiguous artifact path patterns."""
+    """Return a workspace tree fixture whose leaves are separated by literal suffixes."""
+    return """nodes:
+  - slug: portfolio
+    description: Portfolio folder
+    children:
+      - slug: epics
+        description: Epic folder
+        children:
+          - slug: <item-slug>.epic.md
+            description: Epic artifact
+            cardinality: 0..*
+            artifact: epic
+            template: epic
+          - slug: <item-slug>.feature.md
+            description: Feature artifact under its own literal suffix
+            cardinality: 0..*
+            artifact: feature
+            template: feature
+"""
+
+
+def ambiguous_workspace_yaml() -> str:
+    """Return a workspace tree fixture whose two leaves claim the same path."""
     return """nodes:
   - slug: portfolio
     description: Portfolio folder
@@ -162,7 +184,7 @@ def workspace_yaml() -> str:
             artifact: epic
             template: epic
           - slug: <item-slug>.md
-            description: Feature artifact sharing a path pattern
+            description: Feature artifact claiming the same path pattern
             cardinality: 0..*
             artifact: feature
             template: feature

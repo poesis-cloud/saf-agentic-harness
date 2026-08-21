@@ -61,10 +61,10 @@ class TestAuthorizationReport:
         report = AuthorizationReport(
             context=CONTEXT,
             outcome=Outcome(
-                status="inquiry-error",
+                status="state-error",
                 error=Error(
-                    code="unknown-action",
-                    message="Action 'read' is outside the contract vocabulary.",
+                    code="session-unregistered",
+                    message="Session 's1' carries no registration naming its agent.",
                     retryable=False,
                 ),
             ),

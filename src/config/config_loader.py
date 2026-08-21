@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 import celpy
 
@@ -23,7 +23,7 @@ from config.step import Step
 from config.step_condition import StepCondition
 from config.workflow import Workflow
 from config.workflow_catalog import WorkflowCatalog
-from config.workspace_layout import WorkspaceLayout
+from config.workspace_layout import WorkspaceLayout, paths_can_collide
 from errors import ConfigurationError
 from utils.env_loader import EnvLoader
 from utils.schema_validator import SchemaValidator
@@ -238,7 +238,9 @@ class ConfigLoader:
         """Load the workspace blueprint as a tree of artifact and folder nodes."""
         conf_dir = self._resolve_conf_dir(framework_root)
         data = self._load_source(conf_dir / _WORKSPACE_FILENAME, _WORKSPACE_CONTRACT)
-        return WorkspaceLayout(nodes=tuple(self._build_node(node) for node in data["nodes"]))
+        nodes = tuple(self._build_node(node) for node in data["nodes"])
+        self._require_unambiguous_artifact_paths(nodes)
+        return WorkspaceLayout(nodes=nodes)
 
     def load_workflow_catalog(self, framework_root: str | Path) -> WorkflowCatalog:
         """Load every workflow configuration and validate the catalog's advisory graph."""
@@ -535,6 +537,41 @@ class ConfigLoader:
                 f"{', '.join(sorted(edges))}.",
                 False,
             )
+
+    def _require_unambiguous_artifact_paths(
+        self, nodes: Sequence[ArtifactNode | FolderNode]
+    ) -> None:
+        """Spec: no workspace path may resolve to two artifact kinds.
+
+        Decidable statically: a slug's language is literals plus `[^/]+` placeholders and
+        `/` occurs in neither, so two root-to-leaf paths collide exactly when they hold the
+        same number of segments and every segment pair accepts a common string.
+        """
+        leaves = tuple(self._walk_artifact_paths(nodes, ()))
+        for index, (path, artifact) in enumerate(leaves):
+            for other_path, other_artifact in leaves[index + 1 :]:
+                if artifact == other_artifact or not paths_can_collide(path, other_path):
+                    continue
+                raise ConfigurationError(
+                    "ambiguous-workspace-path",
+                    f"Workspace layout resolves one path to both '{artifact}' "
+                    f"('{'/'.join(path)}') and '{other_artifact}' "
+                    f"('{'/'.join(other_path)}').",
+                    False,
+                )
+
+    def _walk_artifact_paths(
+        self,
+        nodes: Sequence[ArtifactNode | FolderNode],
+        prefix: tuple[str, ...],
+    ) -> Iterator[tuple[tuple[str, ...], str]]:
+        """Yield every root-to-leaf slug path with the artifact kind it binds."""
+        for node in nodes:
+            path = (*prefix, node.slug)
+            if isinstance(node, FolderNode):
+                yield from self._walk_artifact_paths(node.children, path)
+            else:
+                yield path, node.artifact
 
     def _build_node(self, data: Mapping[str, Any]) -> ArtifactNode | FolderNode:
         """Build one workspace node: a container of children, or an artifact binding."""

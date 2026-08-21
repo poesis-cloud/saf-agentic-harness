@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from config import AccessControlList, Privilege, WorkspaceLayout
-from errors import ConfigurationError, InquiryError, StateError
+from errors import ConfigurationError, StateError
 from services.checking.authorization import Authorization
 from services.checking.authorization_report import AuthorizationReport
 from services.checking.checking_service import CheckingService
@@ -18,7 +18,6 @@ _FUNCTION = "check-step-authorization"
 _START_FUNCTION = "start-session"
 _ALLOWED = "allowed"
 _DENIED = "denied"
-_ACTIONS = frozenset({"create", "update", "delete"})
 
 # `delete` is a forward declaration: roles may grant it, this function denies it
 # until delete enforcement downstream of authorization is modelled (ACL principles).
@@ -86,7 +85,6 @@ class StepAuthorizationChecker(CheckingService):
         """
         artifact_path: Path = request["artifact_path"]
         action: str = request["action"]
-        self._require_known_action(action)
         actor = self._find_registered_actor(log)
         resource, failure_message = self._decide_authorization(
             actor, artifact_path, action
@@ -124,20 +122,6 @@ class StepAuthorizationChecker(CheckingService):
             outcome=outcome,
         )
 
-    def _require_known_action(self, action: str) -> None:
-        """Enforce that the host write tool mapped onto the contract vocabulary.
-
-        Spec (function 8, precondition (E)): violation is `inquiry-error`
-        (`unknown-action`), journaled.
-        """
-        if action not in _ACTIONS:
-            raise InquiryError(
-                "unknown-action",
-                f"Action '{action}' is outside the contract vocabulary "
-                f"({', '.join(sorted(_ACTIONS))}).",
-                False,
-            )
-
     def _find_registered_actor(self, log: Log) -> str:
         """Read the acting agent off the session's own registration entry.
 
@@ -174,7 +158,7 @@ class StepAuthorizationChecker(CheckingService):
                 f"so no privilege can grant authorship of the journal"
             )
         try:
-            resource = self._workspace_layout.resolve_resource(target, None)
+            resource = self._workspace_layout.resolve_resource(target)
         except ConfigurationError as failure:
             return None, f"unresolvable resource: {failure.message}"
         if action in _UNSUPPORTED_ACTIONS:
