@@ -35,7 +35,7 @@
               "type": "string",
               "minLength": 1,
               "pattern": "^[a-z0-9-]+$",
-              "description": "Stable slug-form error code for programmatic handling. The core specification's named codes (invalid-inquiry, session-ended, session-unregistered, session-conflict, not-facilitator, unknown-workflow, unknown-action, step-in-flight, step-correlation-missing, condition-evaluation-failed, artifact-schema-unresolved) are normative."
+              "description": "Stable slug-form error code for programmatic handling. The core specification's named codes (invalid-inquiry, session-ended, session-unregistered, session-conflict, not-facilitator, unknown-workflow, step-in-flight, step-correlation-missing, condition-evaluation-failed, artifact-schema-unresolved) are normative."
             },
             "message": {
               "type": "string",

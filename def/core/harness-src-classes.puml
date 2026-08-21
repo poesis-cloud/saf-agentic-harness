@@ -159,6 +159,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class SessionLifecycle {
         -_session_log_store : SessionLogStore
         -_acl : AccessControlList
+        -_clock : Clock
         +start_session(agent: str, session_id: str, parent_session_id: str | None) : SessionStartReport
         +end_session(session_id: str) : SessionEndReport
       }
@@ -191,6 +192,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class StepResolver {
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
+        -_clock : Clock
         +resolve_step(session_id: str, parent_session_id: str | None, workflow_slug: str) : StepResolutionReport
       }
       class StepResolutionReport <<dataclass>> {
@@ -203,6 +205,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_session_log_store : SessionLogStore
         -_catalog : WorkflowCatalog
         -_profiles : ModelProfiles
+        -_clock : Clock
         +resolve_step_model(session_id: str, parent_session_id: str | None) : ModelProfileReport
       }
       class ModelProfileReport <<dataclass>> {
@@ -217,30 +220,39 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     }
 
     package "checking" {
-      class StepPreconditionChecker {
-        -_evaluator : ConditionEvaluator
+      abstract class CheckingService {
         -_session_log_store : SessionLogStore
+        -_clock : Clock
+        #_execute_check(session_id: str, parent_session_id: str | None, **request: Any) : Report
+        #{abstract} _build_report(session_id: str, parent_session_id: str | None, workflow_instance_id: str | None, outcome: Outcome) : Report
+      }
+      abstract class StepConditionChecker {
+        -_evaluator : ConditionEvaluator
         -_catalog : WorkflowCatalog
+        +{static} CONDITION_KIND : str
+        +{static} REPORT_TYPE : type[ConditionCheckReport]
+      }
+      class StepPreconditionChecker {
         +check_step_preconditions(session_id: str, parent_session_id: str | None) : CheckStepPreconditionsReport
       }
       class StepPostconditionChecker {
-        -_evaluator : ConditionEvaluator
-        -_session_log_store : SessionLogStore
-        -_catalog : WorkflowCatalog
         +check_step_postconditions(session_id: str, parent_session_id: str | None) : CheckStepPostconditionsReport
       }
       class StepAuthorizationChecker {
         -_acl : AccessControlList
         -_workspace_layout : WorkspaceLayout
         -_artifact_store : ArtifactStore
-        -_session_log_store : SessionLogStore
         +check_step_authorization(session_id: str, parent_session_id: str | None, artifact_path: Path, action: str) : AuthorizationReport
       }
       class StepArtifactChecker {
         -_artifact_store : ArtifactStore
-        -_session_log_store : SessionLogStore
         +check_step_artifact(session_id: str, parent_session_id: str | None, artifact_paths: tuple[Path, ...]) : ArtifactCheckReport
       }
+      CheckingService <|-- StepConditionChecker
+      CheckingService <|-- StepAuthorizationChecker
+      CheckingService <|-- StepArtifactChecker
+      StepConditionChecker <|-- StepPreconditionChecker
+      StepConditionChecker <|-- StepPostconditionChecker
       class ConditionEvaluator {
         -_artifact_store : ArtifactStore
         +evaluate_conditions(conditions: tuple[StepCondition | StateCondition, ...], view: WorkflowInstanceView) : tuple[ConditionCheck, ...]
@@ -295,29 +307,42 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         a given report is read from ""context.function"",
         never inferred from the type.
       end note
+      note bottom of CheckingService
+        The checking functions' shared spine: the C8 refusal,
+        the ONE error seam (exception in, error report out),
+        and the journaling of the rendered report. Each leaf
+        supplies only what differs - its own report type
+        (""_build_report"") and its own check. ""StepConditionChecker""
+        interposes the condition machinery functions 5 and 10
+        share, parameterized by ""CONDITION_KIND"" and
+        ""REPORT_TYPE"" - so the two leaves carry no logic of
+        their own, only their identity.
+      end note
     }
 
     package "context_resolution" {
-      class WorkflowInstructionResolver {
+      abstract class ContextResolver {
         -_catalog : WorkflowCatalog
         -_session_log_store : SessionLogStore
+        -_clock : Clock
+        #{abstract} _correlate_step_resolution(session_ref: Mapping[str, Any]) : LogEntry | None
+      }
+      class WorkflowInstructionResolver {
         +resolve_workflow_instructions(session_id: str, parent_session_id: str | None) : WorkflowInstructionsReport
       }
       class WorkflowSkillResolver {
-        -_catalog : WorkflowCatalog
-        -_session_log_store : SessionLogStore
         +resolve_workflow_skills(session_id: str, parent_session_id: str | None) : WorkflowSkillsReport
       }
       class StepInstructionResolver {
-        -_catalog : WorkflowCatalog
-        -_session_log_store : SessionLogStore
         +resolve_step_instructions(session_id: str, parent_session_id: str | None) : StepInstructionsReport
       }
       class StepSkillResolver {
-        -_catalog : WorkflowCatalog
-        -_session_log_store : SessionLogStore
         +resolve_step_skills(session_id: str, parent_session_id: str | None) : StepSkillsReport
       }
+      ContextResolver <|-- WorkflowInstructionResolver
+      ContextResolver <|-- WorkflowSkillResolver
+      ContextResolver <|-- StepInstructionResolver
+      ContextResolver <|-- StepSkillResolver
       class WorkflowInstructionsReport <<dataclass>> {
         +instructions : tuple[str, ...]
       }
@@ -351,7 +376,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +scan_raw_paths(scope: Path) : Iterator[Path]
         +validate_artifact(artifact_path: Path) : tuple[Finding, ...]
         +is_staging_clean(artifact_path: Path) : bool
-        +commit_artifacts(artifact_paths: tuple[Path, ...]) : None
+        +commit_artifacts(artifact_paths: Sequence[Path], *, session_id: str) : None
         +revert_artifact(artifact_path: Path) : Finding
       }
       class Artifact <<dataclass>> {
@@ -579,6 +604,10 @@ package "CD - Harness core classes (src/)" <<Frame>> {
     class SchemaValidator {
       -_json : JsonLoader
       +validate_instance(instance: Any, contract: Path) : tuple[str, ...]
+    }
+    class Clock {
+      +{static} TIMESTAMP_FORMAT : str
+      +read_timestamp() : str
     }
   }
 

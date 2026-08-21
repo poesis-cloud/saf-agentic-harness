@@ -254,7 +254,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
-| `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`; `unknown-action`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
+| `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
 | `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log, log creation or append failing (the report is still returned; the entry is lost — best-effort) | Yes, when the log is writable |
@@ -267,7 +267,7 @@ refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-er
 the codes named in this specification
 (`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
 `session-kind-mismatch`, `not-facilitator`,
-`unknown-workflow`, `unknown-action`, `step-in-flight`, `step-correlation-missing`,
+`unknown-workflow`, `step-in-flight`, `step-correlation-missing`,
 `condition-evaluation-failed`, `artifact-schema-unresolved`) are normative; implementations
 may add codes but never repurpose these. Statuses, codes, and structured fields are the
 normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
@@ -959,8 +959,7 @@ Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json]
 - (E) An unresolved `resolve-step` entry correlating to this session exists in the logs — matched
   exactly via the registration's `parentSessionId` to the parent session's latest
   `step-resolution` entry whose actor is the session's agent and whose step has no later
-  function-10 outcome. Hosts without parent-session payloads may fall back to the most recent
-  unresolved `step-resolution` entry whose actor is the session's agent. A session with no such
+  function-10 outcome. A session with no such
   correlation is the orchestrator's and loads functions 1–2 instead — violation (the
   correlation concluded, or the invocation is out of order): `state-error`
   (`step-correlation-missing`), journaled. An uncorrelatable dispatch never reaches this
@@ -983,10 +982,9 @@ Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json]
 
 1. Instruction refs are declared per step in the workflow configuration
    (`instructions:` — contract/repo-relative refs).
-2. At session open, the hook plane correlates the new session to its step — exact match first
+2. At session open, the hook plane correlates the new session to its step by exact match
    (the parent session's latest unresolved `step-resolution` entry whose actor matches the
-   session's agent), then the most recent unresolved `step-resolution` entry for that actor as
-   fallback for hosts without parent-session payloads — and calls this function with THAT step
+   session's agent), and calls this function with THAT step
    resolved from the session ids; the resolution itself is a pure configuration lookup. No
    separate dispatch-open marker is required.
 3. Resolution is deterministic and step-scoped: the workflow configuration decides, never the
@@ -1119,8 +1117,9 @@ Contract schemas — [contracts/api/check-step-authorization.input.schema.json](
 
 - (C) The ACL, workspace layout, and the framework's artifact schemas are loaded (path → resource
   resolution needs them).
-- (E) The host write tool has been mapped to an `action` in the contract vocabulary —
-  violation: `inquiry-error` (`unknown-action`), journaled.
+- (C) The host write tool has been mapped to an `action` in the contract vocabulary — the input
+  contract's `action` enum is the enforcement point (a value outside it fails contract
+  validation, rule 4), and the mapping itself is the embedding mechanism's.
 - Trigger — the write-starting boundary, once per pending write.
 
 **Postconditions**
@@ -1142,8 +1141,9 @@ detect-and-remediate plane.
   session, never the skill and never a function input.
 2. The resource is the artifact's schema identity, resolved from the write path — via the
    workspace layout's singleton map for well-known single-instance files, else via the
-   artifact schemas' own path patterns (disambiguated by the artifact's `type` when several
-   match).
+   artifact schemas' own path patterns. The layout must resolve a path to exactly one
+   artifact kind; a layout in which two kinds claim one path is rejected at configuration
+   load ([Internal validation](#internal-validation--not-functions)).
 3. Authorization is whole-resource: any `#property` suffix on an artifact path is ignored.
 4. A write nobody granted is denied at the boundary — denial is the enforcement. Every deny
    is an ordinary `denied` outcome, journaled, its `failureMessage` naming the cause: the
@@ -1233,8 +1233,8 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
 
 **Invariants**
 
-1. Every artifact write is validated against its matched artifact schema (path patterns + `type`
-   disambiguation; schemas extend the harness base contract via `$ref`).
+1. Every artifact write is validated against its matched artifact schema (path patterns;
+   schemas extend the harness base contract via `$ref`).
 2. Any invalid path reverts the **whole set** — call-level atomicity: every staged path of the
    call is discarded (restore tracked paths from `HEAD`, delete newly created ones) and the
    failure messages name each failing path so the
@@ -1429,7 +1429,8 @@ contract-validates every source as ONE act — an unvalidated parse never escape
 the semantic rules JSON Schema cannot express (non-empty steps, unique step slugs, resolvable
 `stepCondition` references, unique condition slugs per step, acyclic step DAGs, at least one
 positive capability weight per step, an acyclic advisory workflow graph, every orchestrator
-agent facilitating at least one workflow), the
+agent facilitating at least one workflow, no two artifact kinds claiming the same layout
+path), the
 cross-configuration coherence rules (workflow actors exist in the ACL, capability tags belong
 to the model catalog's vocabulary, step `artifact` slugs resolve to artifact schemas,
 instruction/skill refs resolve to files in the framework layout), and the layout environment
@@ -1939,9 +1940,9 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
   together: `FrameworkLayout`, `AccessControlList`/`Privilege` (a privilege is the modeled
   `artifact` + `action` pair the contract declares, never a flattened string),
   `ModelProfiles`/`ModelProfile`,
-  `WorkspaceLayout`/`ArtifactNode`/`FolderNode` (`resolve_resource(path, artifact_type)` — the
-  `artifact_type` disambiguates when several artifact schemas' path patterns match, function 8
-  invariant 2; `is_logs_path(path)` backs invariant 6),
+  `WorkspaceLayout`/`ArtifactNode`/`FolderNode` (`resolve_resource(path)` — a write path
+  resolves to exactly one artifact kind, the load-time rule above making that unambiguous,
+  function 8 invariant 2; `is_logs_path(path)` backs invariant 6),
   `WorkflowCatalog`/`Workflow`/`Step`/`StepCondition`/`StateCondition`.
   Each `load_*` method performs parse + contract-validation + semantic rules
   - dataclass construction as ONE act; there is **no aggregate `FrameworkConfig`**: each

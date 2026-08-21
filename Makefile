@@ -1,39 +1,41 @@
 # Reusable orchestration-harness verification core.
 #
 # ONE entry point, reused everywhere:
-#   - the agent's fast inner loop runs `check-step` per step;
-#   - CI runs the SAME `make verify` target.
+#   - the agent's fast inner loop runs a single slice (`unit`, `functional`, `adapter`);
+#   - CI runs the SAME `make verify` target over the whole tree.
 #
-# `verify` runs the pytest workflow-constitution suite; it exits non-zero on any failure. Runtime
-# workspace-artifact validation lives in the CLI (`check-artifact` / `check-step`), invoked per-unit
-# by the orchestrator — never in the verification gate.
+# `verify` runs the pytest suite; it exits non-zero on any failure. Runtime workspace-artifact
+# validation lives in the harness functions themselves (`check-step-artifact`,
+# `check-step-preconditions`, …), invoked per-boundary by whatever embeds the harness — never in
+# the verification gate.
 
 REPO := $(shell git rev-parse --show-toplevel)
 PYTEST := PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider
-HARNESS := PYTHONDONTWRITEBYTECODE=1 python3 harness.py
-# The on-disk workspace folder name is framework-specific. This framework uses `portfolio/`;
-# override with `make full WORKSPACE=/path/to/workspace` for other methodologies.
-WORKSPACE ?= $(REPO)/portfolio
 
-.PHONY: verify test check-catalog full install-hooks
+.PHONY: verify test unit functional adapter install-hooks
 
-## verify: workflow-constitution gate — the full pytest suite (workflow contracts + the two
-## structural invariants + cross-workflow integrity + the ACL plane + the hook funnel + the
-## artifact schema/template catalog). Blocks the push on any failure. Workspace artifact CONTENT is
-## validated per-unit via the runtime `check-artifact` / `check-step` commands, not here.
+## verify: the full pytest suite in one invocation — the unit plane (src/ units + the adapter's
+## own units), the functional plane (every harness function end to end through the composition
+## root), and the adapter plane (hook map, hook contracts, dispatch funnel). Blocks the push on
+## any failure.
 verify:
-	$(PYTEST) tests/ -q
+	$(PYTEST) tests -q
 
-## check-catalog: run just the artifact schema/template catalog check (also part of verify).
-check-catalog:
-	$(PYTEST) tests/integration/test_catalog.py -q
+## unit: the unit plane only (src/ units + adapters/ units) — the fastest inner loop.
+unit:
+	$(PYTEST) tests/unit -q
 
-## test: alias for the constitution gate (same pytest suite as verify).
+## functional: the functional plane only — every harness function driven through the real
+## composition root over a real framework and workspace.
+functional:
+	$(PYTEST) tests/functional -q
+
+## adapter: the adapter conformance plane only — hooks map, hook contracts, dispatch funnel.
+adapter:
+	$(PYTEST) tests/adapter -q
+
+## test: alias for the gate (same pytest suite as verify).
 test: verify
-
-## full: the constitution suite + the full workspace artifact/derived-field sweep (opt-in)
-full: verify
-	$(HARNESS) --workspace-root $(WORKSPACE) check-artifact
 
 ## install-hooks: render the VS Code hook map into the repo's .github/hooks/ (review/merge first).
 ## The workspace hooks file only — the per-orchestrator agent-scoped UserPromptSubmit blocks render
