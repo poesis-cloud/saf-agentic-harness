@@ -107,9 +107,11 @@ class Adapter:
                 self._command_runner.run_function("resolve-workflow-instructions", inquiry),
                 self._command_runner.run_function("resolve-workflow-skills", inquiry),
             )
+            return self._renderer.render_context_injection(
+                EventClass.SESSION_STARTED, reports
+            )
         except Exception as failure:
             return self._renderer.render_system_message(str(failure))
-        return self._renderer.render_context_injection(EventClass.SESSION_STARTED, reports)
 
     def _handle_step_started(self, event: HookEvent) -> HookDecision:
         """H1 — register the step session under its dispatcher and inject its context."""
@@ -141,9 +143,11 @@ class Adapter:
                 self._command_runner.run_function("resolve-step-instructions", inquiry),
                 self._command_runner.run_function("resolve-step-skills", inquiry),
             )
+            return self._renderer.render_context_injection(
+                EventClass.STEP_STARTED, reports
+            )
         except Exception as failure:
             return self._renderer.render_system_message(str(failure))
-        return self._renderer.render_context_injection(EventClass.STEP_STARTED, reports)
 
     def _handle_step_starting(self, event: HookEvent) -> HookDecision:
         """H2 — enforce the step's preconditions before the dispatch executes."""
