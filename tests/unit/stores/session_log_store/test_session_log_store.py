@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from errors import StateError
+from errors import InquiryError, StateError
 from stores.session_log_store import (
     Context,
     Error,
@@ -281,3 +281,68 @@ class TestSessionLogStore:
         store.append_log_entry("sess-1", _resolution("2026-08-17T13:00:03Z", "flow-01AB", "alpha"))
         store.append_log_entry("sess-1", _resolution("2026-08-17T13:00:04Z", "flow-01AC", "alpha"))
         assert store.find_latest_open_instance("flow", workflow_steps=("alpha",)) == "flow-01AC"
+
+
+class TestSessionLogStoreSlugConstraint:
+    """The store owns the safe-slug constraint because the store owns the filename."""
+
+    @pytest.mark.parametrize(
+        "session_id",
+        ["../escape", "/tmp/escape", "nested/id", "..", "", "Sess-1", "sess_1"],
+    )
+    def test_load_refuses_every_session_id_the_slug_form_rejects(
+        self, tmp_path: Path, session_id: str
+    ) -> None:
+        """Spec (Logging, Sanitization): `sessionId` becomes a log filename, so only the safe
+        slug form `[a-z0-9-]+` may name one; anything else is a path-traversal vector.
+        Spec (Outcomes, rule 1): a non-slug `sessionId` is `invalid-inquiry`."""
+        store = SessionLogStore(tmp_path)
+
+        with pytest.raises(InquiryError) as raised:
+            store.load_session_log(session_id)
+
+        assert raised.value.code == "invalid-inquiry"
+
+    def test_load_refuses_to_read_a_log_outside_the_workspace_logs_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """Spec (Logging): logs live under `<workspace>/logs/` — a crafted `sessionId` must not
+        let a caller read a file the store does not own."""
+        outside = tmp_path / "escape.log.jsonl"
+        outside.write_text(
+            json.dumps(_start_entry().to_dict(), ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        store = SessionLogStore(tmp_path)
+
+        with pytest.raises(InquiryError):
+            store.load_session_log("../escape")
+
+    def test_append_refuses_to_write_to_a_log_outside_the_workspace_logs_directory(
+        self, tmp_path: Path
+    ) -> None:
+        """Spec (Logging): the journal is append-only INSIDE `<workspace>/logs/` — a crafted
+        `sessionId` must not append a line to a file outside it."""
+        outside = tmp_path / "escape.log.jsonl"
+        outside.write_text("", encoding="utf-8")
+        store = SessionLogStore(tmp_path)
+
+        with pytest.raises(InquiryError):
+            store.append_log_entry("../escape", _start_entry())
+
+        assert outside.read_text(encoding="utf-8") == ""
+
+    def test_create_refuses_the_unsafe_slug_before_it_validates_the_entry(
+        self, tmp_path: Path
+    ) -> None:
+        """Spec (Logging, Sanitization): the store cannot name a file for an unsafe id, so the
+        filename constraint precedes any entry-shape concern — the refusal is `invalid-inquiry`,
+        not the `invalid-log-entry` the contract check would otherwise report."""
+        store = SessionLogStore(tmp_path)
+
+        with pytest.raises(InquiryError) as raised:
+            store.create_session_log(_start_entry("../escape"))
+
+        assert raised.value.code == "invalid-inquiry"
+        assert not (tmp_path / "escape.log.jsonl").exists()
+

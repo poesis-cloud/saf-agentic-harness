@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import secrets
 from pathlib import Path
 from typing import Iterator, Sequence
 
-from errors import StateError
+from errors import InquiryError, StateError
 from stores.session_log_store.log import Log
 from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.workflow_instance_view import WorkflowInstanceView
@@ -18,6 +19,7 @@ _LOG_ENTRY_CONTRACT_ID = "gsmarc://saf/contracts/log-entry/v1"
 _LOG_FILE_SUFFIX = ".log.jsonl"
 _CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _INSTANCE_MINT_LENGTH = 6
+_SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
 _default_validator: SchemaValidator | None = None
 
@@ -48,9 +50,11 @@ class SessionLogStore:
 
     def create_session_log(self, entry: LogEntry) -> Log:
         """Write function 0's registration entry as a new log's first line."""
-        self._require_valid_entry(entry)
         session_id = entry.report.context.session_id
+        # The store cannot name a file for an unsafe id, so the filename
+        # constraint is settled before any entry-shape concern.
         path = self._resolve_log_path(session_id)
+        self._require_valid_entry(entry)
         if path.exists():
             raise StateError(
                 "session-conflict",
@@ -143,7 +147,19 @@ class SessionLogStore:
         return open_candidates[0][1]
 
     def _resolve_log_path(self, session_id: str) -> Path:
-        """Resolve one session's log file path under the workspace logs dir."""
+        """Resolve one session's log file path under the workspace logs dir.
+
+        Spec (Logging, Sanitization): `sessionId` becomes a log filename, so the safe-slug
+        constraint is the store's — this is the one choke point every read and write funnels
+        through, which is what makes it structural rather than bypassable. The callers'
+        own `_require_inquiry_slugs` stays as fast-fail at the inquiry boundary.
+        """
+        if not isinstance(session_id, str) or _SESSION_ID_PATTERN.match(session_id) is None:
+            raise InquiryError(
+                "invalid-inquiry",
+                f"Session id '{session_id}' is not a safe slug and cannot name a log file.",
+                False,
+            )
         return self._workspace_dir / "logs" / f"{session_id}{_LOG_FILE_SUFFIX}"
 
     def _iter_all_entries(self) -> Iterator[LogEntry]:
