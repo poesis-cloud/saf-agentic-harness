@@ -95,7 +95,7 @@ class SchemaValidator:
 
         validator = Draft202012Validator(self._schemas[schema_id], registry=self._registry)
         errors = sorted(
-            validator.iter_errors(instance),
+            validator.iter_errors(_thaw_data(instance)),
             key=lambda error: tuple(str(part) for part in error.path),
         )
         return tuple(

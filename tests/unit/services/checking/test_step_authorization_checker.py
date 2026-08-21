@@ -293,6 +293,87 @@ class TestStepAuthorizationChecker:
         assert OUTSIDE_REF in report.authorization.failure_message
         assert list_contract_violations(report) == ()
 
+    def test_names_no_resource_on_a_deny_whose_cause_is_that_none_resolves(
+        self,
+        log_store: SessionLogStore,
+        access_control_list: AccessControlList,
+        workspace_layout: WorkspaceLayout,
+        artifact_store: ArtifactStore,
+    ) -> None:
+        """Function 8, invariant 2: "the resource is the artifact's schema identity,
+        resolved from the write path" — when nothing resolves, invariant 4 admits the
+        deny for "the unresolvable resource", so the decision carries NO resource. A
+        sentinel would be a syntactically valid `artifactSlug`, indistinguishable from a
+        real answer."""
+        _open_session(log_store)
+        checker = _build_checker(
+            log_store, access_control_list, workspace_layout, artifact_store
+        )
+
+        report = checker.check_step_authorization(
+            session_id=SESSION,
+            parent_session_id=None,
+            artifact_path=Path(OUTSIDE_REF),
+            action="create",
+        )
+
+        assert report.authorization.resource is None
+        assert "resource" not in report.to_dict()["authorization"]
+        assert list_contract_violations(report) == ()
+
+    def test_names_no_resource_on_the_logs_path_deny(
+        self,
+        log_store: SessionLogStore,
+        access_control_list: AccessControlList,
+        workspace_layout: WorkspaceLayout,
+        artifact_store: ArtifactStore,
+    ) -> None:
+        """Function 8, invariant 6: a write to the logs path is denied for every actor
+        because "the ACL vocabulary has no resource for it" — so the decision names
+        none."""
+        _open_session(log_store)
+        checker = _build_checker(
+            log_store, access_control_list, workspace_layout, artifact_store
+        )
+
+        report = checker.check_step_authorization(
+            session_id=SESSION,
+            parent_session_id=None,
+            artifact_path=Path(ABSENT_LOGS_REF),
+            action="create",
+        )
+
+        assert report.outcome.status == "denied"
+        assert report.authorization.resource is None
+        assert "resource" not in report.to_dict()["authorization"]
+        assert list_contract_violations(report) == ()
+
+    def test_an_allow_always_names_the_resource_it_was_granted_over(
+        self,
+        log_store: SessionLogStore,
+        access_control_list: AccessControlList,
+        workspace_layout: WorkspaceLayout,
+        artifact_store: ArtifactStore,
+    ) -> None:
+        """Function 8, invariant 2: an ALLOW is a decision about a resolved resource, so
+        the `allowed` branch still requires it — moving `resource` off the shared
+        definition must not weaken the branch that has an answer."""
+        _open_session(log_store)
+        checker = _build_checker(
+            log_store, access_control_list, workspace_layout, artifact_store
+        )
+
+        report = checker.check_step_authorization(
+            session_id=SESSION,
+            parent_session_id=None,
+            artifact_path=Path(ARTIFACT_REF),
+            action="create",
+        )
+
+        assert report.outcome.status == "allowed"
+        assert report.authorization.resource == ARTIFACT_KIND
+        assert list_contract_violations(report) == ()
+
     def test_denies_a_path_several_artifact_kinds_claim(
         self,
         log_store: SessionLogStore,

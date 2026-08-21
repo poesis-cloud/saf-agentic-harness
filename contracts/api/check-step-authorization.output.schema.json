@@ -30,12 +30,15 @@
         },
         "authorization": {
           "$ref": "#/$defs/authorization",
+          "required": [
+            "resource"
+          ],
           "not": {
             "required": [
               "failureMessage"
             ]
           },
-          "description": "The authorization decision details."
+          "description": "The authorization decision details. An allow is always a decision about a RESOLVED resource (invariant 2), so this branch requires it."
         }
       }
     },
@@ -83,8 +86,7 @@
       "required": [
         "actor",
         "artifactPath",
-        "action",
-        "resource"
+        "action"
       ],
       "properties": {
         "actor": {
@@ -101,7 +103,7 @@
         },
         "resource": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
-          "description": "The artifact schema slug the privilege applies to — the resource under test, resolved from the write path (function 8, invariant 2)."
+          "description": "The artifact schema slug the privilege applies to — the resource under test, resolved from the write path (function 8, invariant 2). Absent on the denies whose very cause is that no resource resolves: the unresolvable path (invariant 4) and the logs path, for which the ACL vocabulary has no resource at all (invariant 6)."
         },
         "failureMessage": {
           "type": "string",

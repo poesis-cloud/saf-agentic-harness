@@ -9,13 +9,16 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping, Sequence
 
+from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, StateError, SystemFailureError
 from stores.artifact_store.artifact import Artifact
 from stores.artifact_store.finding import Finding
 from utils.json_loader import JsonLoader
+from utils.markdown_loader import MarkdownLoader
 from utils.schema_validator import SchemaValidator, ValidationErrorRecord
 
 _CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "contracts"
+_MARKDOWN_SUFFIX = ".md"
 
 
 class ArtifactStore:
@@ -30,16 +33,20 @@ class ArtifactStore:
         self,
         workspace_dir: str | Path,
         artifact_schemas: Mapping[str, Path],
+        workspace_layout: WorkspaceLayout,
         schema_validator: SchemaValidator | None = None,
         json_loader: JsonLoader | None = None,
+        markdown_loader: MarkdownLoader | None = None,
     ) -> None:
         """Create the store over a workspace repository, compiling contracts once.
 
-        `artifact_schemas` maps an artifact kind to its schema file; the kind
-        also names the workspace path scope that kind owns.
+        `artifact_schemas` maps an artifact slug to its schema file; which slug a
+        given workspace path is bound to is the `workspace_layout`'s answer.
         """
         self._workspace_dir = Path(workspace_dir)
+        self._workspace_layout = workspace_layout
         self._json_loader = json_loader or JsonLoader()
+        self._markdown_loader = markdown_loader or MarkdownLoader()
         schema_paths = tuple(Path(path) for path in artifact_schemas.values())
         self._schema_ids: Mapping[str, str] = MappingProxyType(
             {
@@ -167,31 +174,29 @@ class ArtifactStore:
         return schema_id
 
     def _resolve_kind(self, ref: str) -> str:
-        """Match one workspace path to the artifact kind whose scope owns it.
+        """Match one workspace path to the artifact kind whose path pattern binds it.
 
-        Function 9 precondition (E): a path resolving to no artifact schema is
-        `state-error` (`artifact-schema-unresolved`).
+        Function 8 invariant 2 / function 9 invariant 1: the artifact's schema
+        identity is resolved from the write path through the workspace layout's
+        path patterns. Function 9 precondition (E): a path resolving to no
+        artifact schema is `state-error` (`artifact-schema-unresolved`).
         """
-        scopes = tuple(
-            kind
-            for kind in self._schema_ids
-            if ref == kind or ref.startswith(f"{kind}/")
-        )
-        if not scopes:
+        try:
+            return self._workspace_layout.resolve_resource(ref, None)
+        except ConfigurationError as failure:
             raise StateError(
                 "artifact-schema-unresolved",
-                f"No artifact schema resolves the path '{ref}'.",
+                f"No artifact schema resolves the path '{ref}': {failure.message}",
                 False,
-            )
-        return max(scopes, key=len)
+            ) from failure
 
     def _validate_document(
         self, ref: str, kind: str, document: str
     ) -> tuple[tuple[Finding, ...], Any]:
         """Validate one artifact's raw bytes, returning its findings and its data."""
         try:
-            data = json.loads(document)
-        except json.JSONDecodeError as error:
+            data = self._read_document(ref, document)
+        except (json.JSONDecodeError, ValueError) as error:
             return (
                 (Finding(source=ref, rule="parse", message=f"{error}"),),
                 None,
@@ -202,6 +207,17 @@ class ArtifactStore:
             for record in records
         )
         return findings, data
+
+    def _read_document(self, ref: str, document: str) -> Any:
+        """Read one artifact's bytes in the format its own file extension declares.
+
+        A markdown artifact's schema binds its FRONTMATTER (function 9's worked
+        example reports `frontmatter.status: ...`); the body is prose no contract
+        describes.
+        """
+        if ref.endswith(_MARKDOWN_SUFFIX):
+            return self._markdown_loader.parse_markdown(document).frontmatter
+        return json.loads(document)
 
     def _render_message(self, record: ValidationErrorRecord) -> str:
         """Render one validation record as a path-prefixed failure message."""

@@ -21,6 +21,7 @@ from write_boundary_fixtures import (
     OUTSIDE_REF,
     SIBLING_REF,
     build_report_document,
+    build_workspace_layout,
     list_contract_violations,
     read_document,
     stage_artifact,
@@ -166,7 +167,7 @@ class TestStepArtifactChecker:
         )
 
         reverts = {
-            check.artifact_path: (check.revert_action, check.revert_from)
+            check.artifact_path: (check.revert.action, check.revert.from_ref)
             for check in report.artifact_checks
         }
         assert reverts[ARTIFACT_REF] == ("restored", "HEAD")
@@ -316,7 +317,9 @@ class TestStepArtifactChecker:
         stage_artifact(workspace, ARTIFACT_REF, VALID)
         checker = StepArtifactChecker(
             log_store,
-            _FailingCommitArtifactStore(workspace, {"review-report": artifact_schema}),
+            _FailingCommitArtifactStore(
+                workspace, {"review-report": artifact_schema}, build_workspace_layout()
+            ),
         )
 
         report = checker.check_step_artifact(

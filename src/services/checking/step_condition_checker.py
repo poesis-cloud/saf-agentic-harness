@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Callable, ClassVar
+from typing import ClassVar
 
 from config import Step, WorkflowCatalog
 from errors import ConfigurationError, StateError
@@ -12,6 +12,7 @@ from services.checking.condition_check import ConditionCheck
 from services.checking.condition_check_report import ConditionCheckReport
 from services.checking.condition_evaluator import ConditionEvaluator
 from stores.session_log_store import Log, LogEntry, Outcome, Report, SessionLogStore
+from utils.clock import Clock
 
 _RESOLVE_STEP_FUNCTION = "resolve-step"
 _STEP_RESOLUTION_STATUS = "step-resolution"
@@ -38,7 +39,7 @@ class StepConditionChecker(CheckingService, ABC):
         evaluator: ConditionEvaluator,
         session_log_store: SessionLogStore,
         catalog: WorkflowCatalog,
-        clock: Callable[[], str] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the checker over its evaluator, its log store, and the catalog."""
         super().__init__(session_log_store, clock)

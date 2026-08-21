@@ -17,6 +17,7 @@ from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import SessionLogStore
+from write_boundary_fixtures import build_workspace_layout
 
 
 @pytest.fixture()
@@ -50,7 +51,9 @@ def artifact_schema(tmp_path: Path) -> Path:
 @pytest.fixture()
 def artifact_store(workspace: Path, artifact_schema: Path) -> ArtifactStore:
     """Build the real store over the tmp workspace — the injected Git plane."""
-    return ArtifactStore(workspace, {"review-report": artifact_schema})
+    return ArtifactStore(
+        workspace, {"review-report": artifact_schema}, build_workspace_layout()
+    )
 
 
 @pytest.fixture()

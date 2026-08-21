@@ -51,6 +51,7 @@ from services.session_lifecycle.session_lifecycle import SessionLifecycle
 from services.step_resolution.step_resolver import StepResolver
 from stores.artifact_store.artifact_store import ArtifactStore
 from stores.session_log_store.session_log_store import SessionLogStore
+from utils.clock import Clock
 from utils.env_loader import EnvLoader
 from utils.schema_validator import SchemaValidator
 from utils.yaml_loader import YamlLoader
@@ -63,6 +64,7 @@ _INSTRUCTION_SUFFIX = ".instructions.md"
 _EXIT_OK = 0
 _EXIT_INVALID_INQUIRY = 1
 _EXIT_USAGE = 2
+_EXIT_CONFIGURATION = 3
 
 # The function-specific flags each command's `in` object carries, beside the shared
 # session attribution pair: (flag spellings, contract property, set-valued).
@@ -70,7 +72,7 @@ _FUNCTION_ARGUMENTS: Mapping[str, tuple[tuple[tuple[str, ...], str, bool], ...]]
     MappingProxyType(
         {
             "start-session": ((("--agent",), "agent", False),),
-            "resolve-step": ((("--workflow-slug", "--workflow"), "workflowSlug", False),),
+            "resolve-step": ((("--workflow-slug",), "workflowSlug", False),),
             "check-step-authorization": (
                 (("--artifact-path",), "artifactPath", False),
                 (("--action",), "action", False),
@@ -96,7 +98,11 @@ class _InquiryArgumentParser(argparse.ArgumentParser):
 
 def _parse_inquiry_arguments(function: str, flags: Sequence[str]) -> dict[str, Any]:
     """Read one invocation's flags into the function's JSON `in` object."""
-    parser = _InquiryArgumentParser(prog=f"harness.py {function}", add_help=False)
+    # No abbreviation: a prefix of a flag is an undeclared second spelling of a
+    # contract property, and the contracts declare exactly one name for each.
+    parser = _InquiryArgumentParser(
+        prog=f"harness.py {function}", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--session-id", dest="sessionId")
     parser.add_argument("--parent-session-id", dest="parentSessionId")
     for spellings, property_name, set_valued in _FUNCTION_ARGUMENTS.get(function, ()):
@@ -234,43 +240,54 @@ class Application:
         session_log_store = SessionLogStore(
             layout.workspace_dir, schema_validator=validator
         )
-        artifact_store = ArtifactStore(layout.workspace_dir, artifact_schemas)
-        lifecycle = SessionLifecycle(session_log_store, acl)
+        artifact_store = ArtifactStore(
+            layout.workspace_dir, artifact_schemas, workspace_layout
+        )
+        clock = Clock()
+        lifecycle = SessionLifecycle(session_log_store, acl, clock)
         evaluator = ConditionEvaluator(artifact_store)
 
         commands: tuple[Command, ...] = (
             StartSessionCommand(lifecycle, validator),
             EndSessionCommand(lifecycle, validator),
             ResolveWorkflowInstructionsCommand(
-                WorkflowInstructionResolver(catalog, session_log_store), validator
+                WorkflowInstructionResolver(catalog, session_log_store, clock), validator
             ),
             ResolveWorkflowSkillsCommand(
-                WorkflowSkillResolver(catalog, session_log_store), validator
+                WorkflowSkillResolver(catalog, session_log_store, clock), validator
             ),
-            ResolveStepCommand(StepResolver(session_log_store, catalog), validator),
+            ResolveStepCommand(
+                StepResolver(session_log_store, catalog, clock), validator
+            ),
             ResolveStepModelCommand(
-                StepModelResolver(session_log_store, catalog, profiles), validator
+                StepModelResolver(session_log_store, catalog, profiles, clock), validator
             ),
             CheckStepPreconditionsCommand(
-                StepPreconditionChecker(evaluator, session_log_store, catalog), validator
+                StepPreconditionChecker(
+                    evaluator, session_log_store, catalog, clock
+                ),
+                validator,
             ),
             CheckStepAuthorizationCommand(
                 StepAuthorizationChecker(
-                    session_log_store, acl, workspace_layout, artifact_store
+                    session_log_store, acl, workspace_layout, artifact_store, clock
                 ),
                 validator,
             ),
             CheckStepArtifactCommand(
-                StepArtifactChecker(session_log_store, artifact_store), validator
+                StepArtifactChecker(session_log_store, artifact_store, clock), validator
             ),
             ResolveStepInstructionsCommand(
-                StepInstructionResolver(catalog, session_log_store), validator
+                StepInstructionResolver(catalog, session_log_store, clock), validator
             ),
             ResolveStepSkillsCommand(
-                StepSkillResolver(catalog, session_log_store), validator
+                StepSkillResolver(catalog, session_log_store, clock), validator
             ),
             CheckStepPostconditionsCommand(
-                StepPostconditionChecker(evaluator, session_log_store, catalog), validator
+                StepPostconditionChecker(
+                    evaluator, session_log_store, catalog, clock
+                ),
+                validator,
             ),
         )
         self._commands: Mapping[str, Command] = MappingProxyType(
@@ -328,7 +345,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"harness: {_FRAMEWORK_ANCHOR} is unset; it anchors the framework layout.",
             _EXIT_USAGE,
         )
-    return Application(framework_root).dispatch_command(arguments)
+    try:
+        application = Application(framework_root)
+    except ConfigurationError as failure:
+        return _refuse(
+            f"harness: {failure.status}: {failure.code}: {failure.message}",
+            _EXIT_CONFIGURATION,
+        )
+    return application.dispatch_command(arguments)
 
 
 __all__ = ["Application", "main"]

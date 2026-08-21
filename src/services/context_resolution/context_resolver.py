@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
 from itertools import chain
 from typing import Any, ClassVar, Iterable, Mapping
 
@@ -18,6 +17,7 @@ from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.outcome import Outcome
 from stores.session_log_store.report import Report
 from stores.session_log_store.session_log_store import SessionLogStore
+from utils.clock import Clock
 
 _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
@@ -43,11 +43,6 @@ def _require_valid_inquiry(session_id: str, parent_session_id: str | None) -> No
             f"Parent session id '{parent_session_id}' is not a safe slug.",
             False,
         )
-
-
-def _utc_now() -> str:
-    """Stamp an entry with the wall-clock time it is appended."""
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _error_outcome(error: HarnessError) -> Outcome:
@@ -116,10 +111,12 @@ class ContextResolver(ABC):
         self,
         workflow_catalog: WorkflowCatalog,
         session_log_store: SessionLogStore,
+        clock: Clock | None = None,
     ) -> None:
-        """Create the resolver over its injected catalog and log store."""
+        """Create the resolver over its injected catalog, log store, and entry clock."""
         self._catalog = workflow_catalog
         self._session_log_store = session_log_store
+        self._clock = clock or Clock()
 
     @abstractmethod
     def _correlate_step_resolution(self, session_ref: Mapping[str, Any]) -> LogEntry | None:
@@ -271,7 +268,7 @@ class ContextResolver(ABC):
         """Journal one entry, answering the failure that lost it instead of raising."""
         try:
             self._session_log_store.append_log_entry(
-                session_id, LogEntry(timestamp=_utc_now(), report=report)
+                session_id, LogEntry(timestamp=self._clock.read_timestamp(), report=report)
             )
         except HarnessError as error:
             return error

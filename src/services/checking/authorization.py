@@ -19,20 +19,22 @@ class Authorization:
     actor: str
     artifact_path: str
     action: str
-    resource: str
+    resource: str | None = None
     failure_message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Render the contract `authorization` object with its camelCase keys.
 
-        The `allowed` branch forbids `failureMessage`, so an allow renders none.
+        The `allowed` branch forbids `failureMessage` and requires `resource`; a
+        deny whose cause is that no resource resolves renders none.
         """
         rendered: dict[str, Any] = {
             "actor": self.actor,
             "artifactPath": self.artifact_path,
             "action": self.action,
-            "resource": self.resource,
         }
+        if self.resource is not None:
+            rendered["resource"] = self.resource
         if self.failure_message is not None:
             rendered["failureMessage"] = self.failure_message
         return rendered

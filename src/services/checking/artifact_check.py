@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from services.checking.revert import Revert
+
 
 @dataclass(frozen=True)
 class ArtifactCheck:
@@ -16,19 +18,17 @@ class ArtifactCheck:
 
     artifact_path: str
     failure_message: str
-    revert_action: str
-    revert_from: str | None = None
+    revert: Revert | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Render the contract `artifactChecks` item with its nested revert record."""
-        revert: dict[str, Any] = {"action": self.revert_action}
-        if self.revert_from is not None:
-            revert["from"] = self.revert_from
-        return {
+        rendered: dict[str, Any] = {
             "artifactPath": self.artifact_path,
             "failureMessage": self.failure_message,
-            "revert": revert,
         }
+        if self.revert is not None:
+            rendered["revert"] = self.revert.to_dict()
+        return rendered
 
 
 __all__ = ["ArtifactCheck"]

@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from errors import HarnessError, StateError
 from stores.session_log_store import (
@@ -16,6 +15,7 @@ from stores.session_log_store import (
     Report,
     SessionLogStore,
 )
+from utils.clock import Clock
 
 _END_SESSION_FUNCTION = "end-session"
 _SESSION_ENDED_CODE = "session-ended"
@@ -29,11 +29,6 @@ _NON_JOURNALABLE_CODES = frozenset({_SESSION_ENDED_CODE, _SESSION_UNREGISTERED_C
 _STATUS_BY_CODE = {_SESSION_UNREGISTERED_CODE: "inquiry-error"}
 
 
-def _utc_now() -> str:
-    """Read the wall-clock write time of a log entry."""
-    return datetime.now(timezone.utc).isoformat()
-
-
 class CheckingService(ABC):
     """Run one session-bound checking function behind the shared outcome rules.
 
@@ -45,11 +40,11 @@ class CheckingService(ABC):
     def __init__(
         self,
         session_log_store: SessionLogStore,
-        clock: Callable[[], str] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the service over its log store and its wall clock."""
         self._session_log_store = session_log_store
-        self._clock = clock or _utc_now
+        self._clock = clock or Clock()
 
     @abstractmethod
     def _build_report(
@@ -153,7 +148,7 @@ class CheckingService(ABC):
         Rule 1: a failing append loses the entry but never the report, so the error
         seam's own journaling is best-effort and cannot recurse.
         """
-        entry = LogEntry(timestamp=self._clock(), report=report)
+        entry = LogEntry(timestamp=self._clock.read_timestamp(), report=report)
         try:
             self._session_log_store.append_log_entry(session_id, entry)
         except HarnessError:

@@ -420,8 +420,9 @@ class TestApplication:
         — the validated set is promoted into committed state by the wired service's
         own Git transaction (function 9, invariant 3).
 
-        The path sits under the artifact kind's own scope, which is how
-        `ArtifactStore` matches a path to its schema.
+        The path is the one the framework's own workspace layout binds to the `epic`
+        artifact, which is how `ArtifactStore` matches a path to its schema (function 9,
+        invariant 1).
         """
         workspace = _workspace_dir(framework_root)
         _init_git_workspace(workspace)
@@ -430,19 +431,27 @@ class TestApplication:
             ["start-session", "--session-id", "s1", "--agent", "planner"]
         )
         capsys.readouterr()
-        staged = workspace / "epic" / "one.md"
+        staged = workspace / "portfolio" / "epics" / "one.md"
         staged.parent.mkdir(parents=True)
-        staged.write_text('{"slug": "one"}', encoding="utf-8")
+        staged.write_text("---\nslug: one\n---\n\n# One\n", encoding="utf-8")
 
         exit_code = application.dispatch_command(
-            ["check-step-artifact", "--session-id", "s1", "--artifact-path", "epic/one.md"]
+            [
+                "check-step-artifact",
+                "--session-id",
+                "s1",
+                "--artifact-path",
+                "portfolio/epics/one.md",
+            ]
         )
 
         report = json.loads(capsys.readouterr().out)
         assert exit_code == 0
         assert report["context"]["function"] == "check-step-artifact"
         assert report["outcome"]["status"] == "valid"
-        assert "epic/one.md" in _git(workspace, "ls-tree", "-r", "--name-only", "HEAD")
+        assert "portfolio/epics/one.md" in _git(
+            workspace, "ls-tree", "-r", "--name-only", "HEAD"
+        )
         assert "s1" in _git(workspace, "log", "-1", "--format=%B")
 
     def test_surfaces_an_invalid_inquiry_at_the_exit_plane_without_a_report(
@@ -553,9 +562,9 @@ class TestApplication:
     def test_dispatches_the_workflow_slug_of_a_mediated_resolution(
         self, framework_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """Spec (function 3 / adapter H4): the mediated surface invokes
-        `harness.py resolve-step --workflow <slug>`; the runner's own flag rendering
-        emits `--workflow-slug`, so the command surface honors both spellings.
+        """Spec (function 3, Interface): the `in` object's property is `workflowSlug`, so
+        the command surface spells it `--workflow-slug` and nothing else — an alias no
+        contract declares would be a second, unspecified surface.
         """
         application = Application(framework_root)
         application.dispatch_command(
@@ -564,13 +573,31 @@ class TestApplication:
         capsys.readouterr()
 
         exit_code = application.dispatch_command(
-            ["resolve-step", "--session-id", "p1", "--workflow", "planning"]
+            ["resolve-step", "--session-id", "p1", "--workflow-slug", "planning"]
         )
 
         report = json.loads(capsys.readouterr().out)
         assert exit_code == 0
         assert report["context"]["function"] == "resolve-step"
         assert report["outcome"]["status"] == "step-resolution"
+
+    def test_refuses_a_flag_spelling_no_contract_property_declares(
+        self, framework_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Spec (Outcomes rule 4): "arguments that never reach an inquiry can produce no
+        contract-valid report" — `--workflow` names no contract property, so it is
+        refused at the command exit plane rather than silently accepted.
+        """
+        application = Application(framework_root)
+
+        exit_code = application.dispatch_command(
+            ["resolve-step", "--session-id", "p1", "--workflow", "planning"]
+        )
+
+        captured = capsys.readouterr()
+        assert exit_code != 0
+        assert captured.out == ""
+        assert "--workflow" in captured.err
 
 
 class TestMain:
@@ -607,3 +634,24 @@ class TestMain:
         assert exit_code != 0
         assert captured.out == ""
         assert "FRAMEWORK_DIR" in captured.err
+
+    def test_surfaces_an_invalid_framework_at_the_process_boundary(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Spec (`application`): "Only `ConfigurationError` escapes: no function exists
+        yet to report through" — and the trigger plane is a hook reading stdout, so the
+        escape surfaces as one stderr line and a distinct nonzero exit, never a Python
+        traceback the host would read as the harness's answer.
+        """
+        monkeypatch.setenv("FRAMEWORK_DIR", str(tmp_path))
+
+        exit_code = main(["start-session", "--session-id", "s1", "--agent", "planner"])
+
+        captured = capsys.readouterr()
+        assert exit_code == 3
+        assert captured.out == ""
+        assert captured.err.count("\n") == 1
+        assert "configuration-error" in captured.err

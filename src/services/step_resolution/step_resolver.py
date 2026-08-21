@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
-from typing import Callable
 
 from config import Step, StepCondition, Workflow, WorkflowCatalog
 from errors import HarnessError, InquiryError, StateError, SystemFailureError
@@ -18,6 +16,7 @@ from stores.session_log_store import (
     SessionLogStore,
     WorkflowInstanceView,
 )
+from utils.clock import Clock
 
 _FUNCTION = "resolve-step"
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]+$")
@@ -26,11 +25,6 @@ _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
 _ENDED_STATUS = "ended"
 _STEP_RESOLUTION_STATUS = "step-resolution"
-
-
-def _utc_timestamp() -> str:
-    """Read the wall-clock time a log entry is appended."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _require_inquiry_slugs(session_id: str, parent_session_id: str | None) -> None:
@@ -120,12 +114,12 @@ class StepResolver:
         self,
         session_log_store: SessionLogStore,
         workflow_catalog: WorkflowCatalog,
-        clock: Callable[[], str] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the resolver over its injected store, catalog, and entry clock."""
         self._session_log_store = session_log_store
         self._catalog = workflow_catalog
-        self._clock = clock or _utc_timestamp
+        self._clock = clock or Clock()
 
     def resolve_step(
         self,
@@ -228,7 +222,7 @@ class StepResolver:
         Spec (rule 4): a completed invocation whose log append fails "still returns its
         report" — the entry is lost, never the step the caller was promised.
         """
-        entry = LogEntry(timestamp=self._clock(), report=report)
+        entry = LogEntry(timestamp=self._clock.read_timestamp(), report=report)
         try:
             self._session_log_store.append_log_entry(report.context.session_id, entry)
         except (OSError, HarnessError) as failure:

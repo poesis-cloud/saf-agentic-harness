@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 from errors import StateError
 from services.checking.artifact_check import ArtifactCheck
 from services.checking.artifact_check_report import ArtifactCheckReport
 from services.checking.checking_service import CheckingService
+from services.checking.revert import Revert
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import Log, Outcome, Report, SessionLogStore
+from utils.clock import Clock
 
 _FUNCTION = "check-step-artifact"
 _VALID = "valid"
@@ -31,7 +33,7 @@ class StepArtifactChecker(CheckingService):
         self,
         session_log_store: SessionLogStore,
         artifact_store: ArtifactStore,
-        clock: Callable[[], str] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the checker over its log store and the Git plane it transacts on."""
         super().__init__(session_log_store, clock)
@@ -131,8 +133,10 @@ class StepArtifactChecker(CheckingService):
             ArtifactCheck(
                 artifact_path=ref,
                 failure_message=message,
-                revert_action=reverts[ref],
-                revert_from=_HEAD if reverts[ref] == _RESTORED else None,
+                revert=Revert(
+                    action=reverts[ref],
+                    from_ref=_HEAD if reverts[ref] == _RESTORED else None,
+                ),
             )
             for ref, message in failures.items()
         )

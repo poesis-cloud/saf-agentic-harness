@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from config.access_control_list import AccessControlList
@@ -18,6 +17,7 @@ from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.outcome import Outcome
 from stores.session_log_store.report import Report
 from stores.session_log_store.session_log_store import SessionLogStore
+from utils.clock import Clock
 
 _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
@@ -52,11 +52,6 @@ def _require_agent(agent: str) -> None:
             f"Framework agent '{agent}' is missing or not a safe slug.",
             False,
         )
-
-
-def _utc_now() -> str:
-    """Stamp an entry with the wall-clock time it is appended."""
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _error_outcome(error: HarnessError) -> Outcome:
@@ -104,10 +99,12 @@ class SessionLifecycle:
         self,
         session_log_store: SessionLogStore,
         access_control_list: AccessControlList,
+        clock: Clock | None = None,
     ) -> None:
-        """Create the service over its injected log store and access control list."""
+        """Create the service over its injected log store, access control list, and clock."""
         self._session_log_store = session_log_store
         self._acl = access_control_list
+        self._clock = clock or Clock()
 
     def start_session(
         self,
@@ -232,7 +229,7 @@ class SessionLifecycle:
         )
         try:
             self._session_log_store.create_session_log(
-                LogEntry(timestamp=_utc_now(), report=report)
+                LogEntry(timestamp=self._clock.read_timestamp(), report=report)
             )
         except HarnessError as error:
             return SessionStartReport(context=context, outcome=_error_outcome(error))
@@ -242,7 +239,7 @@ class SessionLifecycle:
         """Journal one entry, answering the failure that lost it instead of raising."""
         try:
             self._session_log_store.append_log_entry(
-                session_id, LogEntry(timestamp=_utc_now(), report=report)
+                session_id, LogEntry(timestamp=self._clock.read_timestamp(), report=report)
             )
         except HarnessError as error:
             return error

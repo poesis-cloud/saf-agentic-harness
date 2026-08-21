@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.checking import ArtifactCheck, ArtifactCheckReport
+from services.checking import ArtifactCheck, ArtifactCheckReport, Revert
 from stores.session_log_store import Context, Error, Outcome
 from write_boundary_fixtures import list_contract_violations
 
@@ -15,8 +15,7 @@ CONTEXT = Context(
 FAILING_CHECK = ArtifactCheck(
     artifact_path="portfolio/payments/features/feature-refunds.md",
     failure_message="frontmatter.status: 'shipped' is not one of the enum values",
-    revert_action="restored",
-    revert_from="HEAD",
+    revert=Revert(action="restored", from_ref="HEAD"),
 )
 
 

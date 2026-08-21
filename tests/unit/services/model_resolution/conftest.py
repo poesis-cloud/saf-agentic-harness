@@ -10,6 +10,7 @@ import pytest
 from config import ModelProfile, ModelProfiles, Step, StepCondition, Workflow, WorkflowCatalog
 from stores.session_log_store import Context, LogEntry, Outcome, Report, SessionLogStore
 from utils import EnvLoader, SchemaValidator, YamlLoader
+from utils.clock import Clock
 from utils.jsonl_store import JsonlStore
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -52,14 +53,14 @@ def build_capabilities(**weights: float) -> dict[str, float]:
     return capabilities
 
 
-class SequenceClock:
+class SequenceClock(Clock):
     """Emit fixed timestamps so journaled entries order deterministically."""
 
     def __init__(self, *timestamps: str) -> None:
         """Create a clock over the timestamps to emit, repeating the last one."""
         self._timestamps = list(timestamps) or ["2026-08-17T15:00:00Z"]
 
-    def __call__(self) -> str:
+    def read_timestamp(self) -> str:
         """Emit the next timestamp."""
         if len(self._timestamps) > 1:
             return self._timestamps.pop(0)

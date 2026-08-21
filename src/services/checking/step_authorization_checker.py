@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from config import AccessControlList, Privilege, WorkspaceLayout
 from errors import ConfigurationError, InquiryError, StateError
@@ -12,6 +12,7 @@ from services.checking.authorization_report import AuthorizationReport
 from services.checking.checking_service import CheckingService
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import Log, Outcome, Report, SessionLogStore
+from utils.clock import Clock
 
 _FUNCTION = "check-step-authorization"
 _START_FUNCTION = "start-session"
@@ -22,10 +23,6 @@ _ACTIONS = frozenset({"create", "update", "delete"})
 # `delete` is a forward declaration: roles may grant it, this function denies it
 # until delete enforcement downstream of authorization is modelled (ACL principles).
 _UNSUPPORTED_ACTIONS = frozenset({"delete"})
-
-# The contract requires a `resource` slug on every decision branch, including the
-# denies whose very cause is that no artifact schema resolves the path.
-_UNRESOLVED_RESOURCE = "unresolved"
 
 
 def _strip_fragment(artifact_path: Path) -> Path:
@@ -48,7 +45,7 @@ class StepAuthorizationChecker(CheckingService):
         access_control_list: AccessControlList,
         workspace_layout: WorkspaceLayout,
         artifact_store: ArtifactStore,
-        clock: Callable[[], str] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create the checker over its log store, its grants, its layout, and Git."""
         super().__init__(session_log_store, clock)
@@ -160,25 +157,26 @@ class StepAuthorizationChecker(CheckingService):
 
     def _decide_authorization(
         self, actor: str, artifact_path: Path, action: str
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str | None, str | None]:
         """Answer the resource under test plus the denial cause, if there is one.
 
         Spec (function 8, invariant 4): the `failureMessage` names the cause —
         the missing privilege, the unsupported `delete`, the unresolvable
         resource, the logs path (invariant 6), or the unclean baseline
-        (invariant 5).
+        (invariant 5). The two causes that ARE the absence of a resource answer
+        none: naming one would be indistinguishable from a real answer.
         """
         target = _strip_fragment(artifact_path)
         ref = target.as_posix()
         if self._workspace_layout.is_logs_path(target):
-            return _UNRESOLVED_RESOURCE, (
+            return None, (
                 f"logs path: '{ref}' is harness-authored and single-writer (C0), "
                 f"so no privilege can grant authorship of the journal"
             )
         try:
             resource = self._workspace_layout.resolve_resource(target, None)
         except ConfigurationError as failure:
-            return _UNRESOLVED_RESOURCE, f"unresolvable resource: {failure.message}"
+            return None, f"unresolvable resource: {failure.message}"
         if action in _UNSUPPORTED_ACTIONS:
             return resource, (
                 f"unsupported action: {action} {resource} is a forward declaration "

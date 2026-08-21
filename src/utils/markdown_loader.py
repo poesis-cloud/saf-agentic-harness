@@ -31,8 +31,11 @@ class MarkdownLoader:
     """Load markdown files with optional YAML frontmatter."""
 
     def load_markdown(self, path: str | Path) -> MarkdownDocument:
-        """Split YAML frontmatter from the markdown body."""
-        content = Path(path).read_text(encoding="utf-8")
+        """Split YAML frontmatter from the markdown body of a file."""
+        return self.parse_markdown(Path(path).read_text(encoding="utf-8"))
+
+    def parse_markdown(self, content: str) -> MarkdownDocument:
+        """Split YAML frontmatter from the markdown body of raw content."""
         if not content.startswith("---\n"):
             return MarkdownDocument(frontmatter=MappingProxyType({}), body=content)
 
