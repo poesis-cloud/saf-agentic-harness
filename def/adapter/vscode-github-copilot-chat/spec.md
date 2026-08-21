@@ -52,8 +52,9 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
   the host → dispatch → harness → host chain, which contract governs each seam, and the
   dispatch-as-CLI verdict
 - [Rendered registration](#rendered-registration) — the workspace `.github/hooks/*.json` file
-  plus the orchestrator `.agent.md` frontmatter block, and the
-  [open decision](#open-decision--which-root-the-registration-resolves-adapters-against) on
+  plus the orchestrator `.agent.md` frontmatter block, the
+  [installation destination](#installation-destination), and the
+  [rendering guarantees](#rendering-guarantees-decision-c) of the renderer that resolves
   which root the registration resolves `adapters/` against
 - [Inconsistencies with the harness spec](#inconsistencies-with-the-harness-spec) — findings
   fed back into [`../../core/spec.md`](../../core/spec.md); all are now **resolved or
@@ -543,9 +544,10 @@ every agent session is not overhead — it is
 **required** by the host's turn-scoped injection semantics (`additionalContext` does not
 persist across requests; see [Context-injection semantics](#context-injection-semantics)).
 
-**Registration** — NOT in the workspace hooks file: rendered into each orchestrator's
-`.agent.md` frontmatter at bundle render time, the scoping agent's slug passed as a trailing
-argument (host-fixed, not model-authored):
+**Registration** — NOT in the workspace hooks file: it belongs in each orchestrator's
+`.agent.md` frontmatter, the scoping agent's slug passed as a trailing argument (host-fixed,
+not model-authored). **No orchestrator carries this block today** — see
+[Rendered registration](#rendered-registration); until one does, H0 never fires:
 
 ```json
 {
@@ -1415,73 +1417,104 @@ must forward a third optional argument (H0's scoping agent slug), which its curr
 
 ## Rendered registration
 
-Three render targets, all from this adapter's sources at bundle render time,
-`{{FRAMEWORK_DIR}}` substituted with the absolute framework root (the host resolves hook
-`cwd` against `$HOME` by default — a relative command path would break; see host facts):
+Three render targets, all from this adapter's sources. Only the first is rendered by this
+repo today; see [Rendering guarantees](#rendering-guarantees-decision-c) and the H0 gap
+below.
+
+Two placeholders are substituted at install time:
+
+| Placeholder | Substituted with | Derived from |
+| --- | --- | --- |
+| `{{ADAPTERS_DIR}}` | this harness checkout's `adapters/` directory | the renderer's OWN location (`Path(__file__).parent`) |
+| `{{FRAMEWORK_DIR}}` | the absolute framework root | the `--framework-dir` argument, required and required to exist |
+
+Both must be absolute in the installed file: the host resolves a hook `cwd` against `$HOME`
+by default, and `adapters/` ships in the HARNESS repo, so a command relative to the framework
+root names nothing (see host facts).
 
 1. **Workspace hooks file** — `hooks.yaml` in this folder is the YAML source of truth,
-   rendered to ONE workspace file `.github/hooks/safe-harness.json`:
+   rendered by `adapters/render_hooks.py` to ONE workspace file `.github/hooks/safe-harness.json`:
 
 ```json
 {
   "hooks": {
-    "SubagentStart": [ { "type": "command", "command": "adapters/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PreToolUse":    [ { "type": "command", "command": "adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PostToolUse":   [ { "type": "command", "command": "adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "SubagentStop":  [ { "type": "command", "command": "adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ],
-    "Stop":          [ { "type": "command", "command": "adapters/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ]
+    "SubagentStart": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "PreToolUse":    [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "PostToolUse":   [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
+    "SubagentStop":  [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ],
+    "Stop":          [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ]
   }
 }
 ```
 
-1. **Per-orchestrator agent-scoped block** (H0) — rendered into each framework
-   orchestrator's `.agent.md` frontmatter (`hooks:` block), the orchestrator's own slug as
-   the trailing dispatch argument:
+   Installed with `make install-hooks FRAMEWORK_DIR=<framework root> [HOOKS_DEST=<dir>]`.
+
+1. **Per-orchestrator agent-scoped block** (H0) — belongs in each framework orchestrator's
+   `.agent.md` frontmatter (`hooks:` block), the orchestrator's own slug as the trailing
+   dispatch argument:
 
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [ { "type": "command", "command": "adapters/dispatch.sh UserPromptSubmit vscode-github-copilot-chat <orchestrator-slug>", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
+    "UserPromptSubmit": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat <orchestrator-slug>", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
   }
 }
 ```
+
+   **Not rendered anywhere today.** No orchestrator `.agent.md` in the framework repo carries
+   a `hooks:` key, and `UserPromptSubmit` appears nowhere in it — the H0 boundary therefore
+   never fires. The blocks live in the framework repo (agent definitions), so rendering them
+   is a framework-side stage, not this repo's; recorded here as the remaining half of the
+   registration gap.
 
 1. **Workspace settings** — `.vscode/settings.json` in the workspace carries the
    [required settings](#required-vs-code-settings) (`chat.useHooks: true`).
 
-### OPEN DECISION — which root the registration resolves `adapters/` against
+### Installation destination
 
-Both render targets pair a **relative** `command` (`adapters/dispatch.sh …`) with
-`cwd: {{FRAMEWORK_DIR}}`, so the registration asserts that `adapters/` sits under the
-FRAMEWORK root. It does not: `adapters/` ships in the HARNESS repo. This is the layout
-half of the same two-repo confusion that produced the `harness_entrypoint` defect one
-layer down; the code half is settled and immune — `build_default_adapter()` derives the
-harness root from the adapter's own location (`adapter_dir.parents[1]`) and reads
-`FRAMEWORK_DIR` as a *separate* environment anchor, so whichever copy of `adapters/` the
-host execs finds its own `harness.py`. The registration is what still asserts a layout.
+`HOOKS_DEST` is explicit, defaulting to `<framework root>/.github/hooks`. The host collects
+`.github/hooks/*.json` from **the workspace folder it has open** — which is the framework
+workspace the agents run in, not this harness checkout. Installing into the harness repo
+registers hooks for sessions editing the harness and for no other, which is precisely
+backwards; the default therefore points at the framework root, and any other destination must
+be a folder VS Code actually opens.
 
-Unconditionally broken today, whichever way the layout lands: **nothing substitutes the
-placeholder**. `make install-hooks` dumps `hooks.yaml` to
-`.github/hooks/safe-harness.json` verbatim, so the installed file carries the literal
-string `{{FRAMEWORK_DIR}}` as its `cwd`. The "bundle render time" this section names is a
-stage that does not exist in this repo. That defect is real independently of the decision
-below — but its fix IS the renderer, and the renderer cannot be written before the
-decision, so both are deferred to one deliberate change.
+### Rendering guarantees (decision C)
 
-The options, and what each costs:
+Decision taken: **render an absolute `command`** (option C below). `cwd` remains pinned to the
+framework root, but only as the process working directory — `build_default_adapter()` reads
+`FRAMEWORK_DIR` from the ENVIRONMENT, not from `cwd`, and `dispatch.sh` resolves its own
+directory, so an absolute `command` is sufficient to locate the harness. The cost accepted is
+that the installed file is machine-specific: it is generated by `make install-hooks`,
+`.gitignore`d, and must be re-rendered whenever either checkout moves.
+
+Options A (a second harness-root anchor, growing the anchor set every embedder must supply)
+and B (vendoring `adapters/` into each framework, forking the adapter per framework) were
+rejected. C needs no new anchor and keeps one copy of the adapter.
+
+`adapters/render_hooks.py` is the rendering stage. It sits beside `dispatch.sh` as shared,
+environment-neutral plumbing: it names no host, takes the environment as `--env`, and imports
+nothing from `src/` (I15). It guarantees:
+
+- the `command` is absolutized from the RENDERER'S own location — never from `FRAMEWORK_DIR`,
+  the wrong anchor that this whole section exists to correct;
+- `{{FRAMEWORK_DIR}}` resolves to an absolute framework root that exists on disk;
+- **rendering is all-or-nothing.** The output is validated in memory and written only if it
+  passes: no `{{…}}` survives anywhere, every entry carries `type`/`command`/`cwd`, `cwd` is
+  an absolute existing directory, and the command's program is an absolute existing file.
+  Any refusal prints a diagnostic to stderr and exits nonzero having written nothing — a
+  half-rendered registration is the failure mode being fixed, so it is never emitted.
+
+Pinned by [`tests/adapter/test_hook_render.py`](../../../tests/adapter/test_hook_render.py)
+(rendering, anchoring, failure paths) and
+[`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) (the source of
+truth keeps the placeholders and is not installable verbatim).
 
 | Option | Registration | Cost |
 | --- | --- | --- |
-| **A — anchor on the harness root** | `cwd` becomes a harness-root placeholder | Needs a second deployment anchor; `FRAMEWORK_DIR` is today the ONLY root `src/application.py` knows, so the anchor set grows and every embedder must supply both. |
-| **B — vendor `adapters/` into the framework** | unchanged; `cwd: {{FRAMEWORK_DIR}}` becomes true | Forks the adapter source per framework: the copy drifts from the harness it binds, and the harness repo stops being the single place the adapter is fixed. |
-| **C — render an absolute `command`** | `command` is absolutized at render time; `cwd` only sets the process working directory | Registration is no longer relocatable — moving either checkout invalidates every installed hook file until re-rendered. |
-
-Not decided here, deliberately: the answer is a deployment-topology choice (one repo or
-two, vendored or referenced), not something derivable from the adapter's own code, and
-guessing one into `hooks.yaml` would harden a layout nobody has chosen. Until it is
-chosen, `hooks.yaml` keeps the placeholder and
-[`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) pins it —
-pinning the unresolved shape, not endorsing it.
+| A — anchor on the harness root | `cwd` becomes a harness-root placeholder | Needs a second deployment anchor; `FRAMEWORK_DIR` is today the ONLY root `src/application.py` knows, so the anchor set grows and every embedder must supply both. |
+| B — vendor `adapters/` into the framework | unchanged; `cwd: {{FRAMEWORK_DIR}}` becomes true | Forks the adapter source per framework: the copy drifts from the harness it binds, and the harness repo stops being the single place the adapter is fixed. |
+| **C — render an absolute `command` (TAKEN)** | `command` is absolutized at render time; `cwd` only sets the process working directory | Registration is no longer relocatable — moving either checkout invalidates every installed hook file until re-rendered. |
 
 ---
 

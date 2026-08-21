@@ -9,8 +9,8 @@
 # `check-step-preconditions`, …), invoked per-boundary by whatever embeds the harness — never in
 # the verification gate.
 
-REPO := $(shell git rev-parse --show-toplevel)
 PYTEST := PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider
+HOOKS_DEST ?= $(FRAMEWORK_DIR)/.github/hooks
 
 .PHONY: verify test unit functional adapter install-hooks
 
@@ -37,10 +37,17 @@ adapter:
 ## test: alias for the gate (same pytest suite as verify).
 test: verify
 
-## install-hooks: render the VS Code hook map into the repo's .github/hooks/ (review/merge first).
-## The workspace hooks file only — the per-orchestrator agent-scoped UserPromptSubmit blocks render
-## into each orchestrator's .agent.md frontmatter at bundle render time, not here.
+## install-hooks: render the VS Code hook registration and install it where the host will read
+## it. The rendered file is MACHINE-SPECIFIC (absolute dispatch path + absolute framework root)
+## and is never committed — re-run this after moving either checkout.
+##   FRAMEWORK_DIR  required — the framework root; becomes every hook's cwd.
+##   HOOKS_DEST     defaults to $(FRAMEWORK_DIR)/.github/hooks — the host collects
+##                  .github/hooks/*.json from the workspace folder it has OPEN, which is the
+##                  framework workspace the agents run in, not this harness checkout.
+## The workspace hooks file only — the per-orchestrator agent-scoped UserPromptSubmit blocks
+## belong in each orchestrator's .agent.md frontmatter and are not rendered here.
 install-hooks:
-	@mkdir -p $(REPO)/.github/hooks
-	python3 -c "import json,yaml; json.dump(yaml.safe_load(open('adapters/vscode-github-copilot-chat/hooks.yaml')), open('$(REPO)/.github/hooks/safe-harness.json','w'), indent=2)"
-	@echo "installed: $(REPO)/.github/hooks/safe-harness.json (rendered from adapters/vscode-github-copilot-chat/hooks.yaml — the YAML map is the source of truth)"
+	python3 adapters/render_hooks.py \
+		--env vscode-github-copilot-chat \
+		--framework-dir "$(FRAMEWORK_DIR)" \
+		--dest "$(HOOKS_DEST)"

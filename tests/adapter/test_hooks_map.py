@@ -24,14 +24,16 @@ class TestHooksMap:
         assert isinstance(hooks_yaml, dict)
         assert isinstance(hooks_yaml.get("hooks"), dict)
 
-    def test_hooks_yaml_renders_like_makefile_install_hooks(self, hooks_yaml):
-        """Adapter spec (Hook registration): the installed map is this file rendered as JSON
-        — installation is a pure re-serialization, so the source of truth cannot drift from
-        what the host is given."""
+    def test_hooks_yaml_is_a_render_source_not_an_installable_file(self, hooks_yaml):
+        """Adapter spec (Rendered registration): this file is the source of truth, not the
+        installed artifact — it carries deployment placeholders no checkout can resolve, so
+        installing it verbatim would hand the host a command and a cwd that do not exist."""
         rendered = json.dumps(hooks_yaml, indent=2)
 
         assert json.loads(rendered) == hooks_yaml
         assert rendered.startswith('{\n  "hooks":')
+        assert "{{ADAPTERS_DIR}}" in rendered
+        assert "{{FRAMEWORK_DIR}}" in rendered
 
     def test_workspace_hooks_match_h1_through_h7_registrations(self, hooks_yaml):
         """Adapter spec H1–H7: exactly the events those hooks declare are registered at
@@ -48,12 +50,12 @@ class TestHooksMap:
             entry = entries[0]
             assert entry == {
                 "type": "command",
-                "command": f"adapters/dispatch.sh {event} {ADAPTER_ENV}",
+                "command": f"{{{{ADAPTERS_DIR}}}}/dispatch.sh {event} {ADAPTER_ENV}",
                 "cwd": "{{FRAMEWORK_DIR}}",
                 "timeout": timeout,
             }
             assert shlex.split(entry["command"]) == [
-                "adapters/dispatch.sh",
+                "{{ADAPTERS_DIR}}/dispatch.sh",
                 event,
                 ADAPTER_ENV,
             ]
@@ -67,9 +69,10 @@ class TestHooksMap:
         assert "UserPromptSubmit" not in hooks
         for orchestrator_slug in EXPECTED_H0_ORCHESTRATORS:
             assert shlex.split(
-                f"adapters/dispatch.sh UserPromptSubmit {ADAPTER_ENV} {orchestrator_slug}"
+                f"{{{{ADAPTERS_DIR}}}}/dispatch.sh UserPromptSubmit {ADAPTER_ENV} "
+                f"{orchestrator_slug}"
             ) == [
-                "adapters/dispatch.sh",
+                "{{ADAPTERS_DIR}}/dispatch.sh",
                 "UserPromptSubmit",
                 ADAPTER_ENV,
                 orchestrator_slug,
