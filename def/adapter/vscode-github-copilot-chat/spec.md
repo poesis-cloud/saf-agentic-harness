@@ -52,7 +52,9 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
   the host → dispatch → harness → host chain, which contract governs each seam, and the
   dispatch-as-CLI verdict
 - [Rendered registration](#rendered-registration) — the workspace `.github/hooks/*.json` file
-  plus the orchestrator `.agent.md` frontmatter block
+  plus the orchestrator `.agent.md` frontmatter block, and the
+  [open decision](#open-decision--which-root-the-registration-resolves-adapters-against) on
+  which root the registration resolves `adapters/` against
 - [Inconsistencies with the harness spec](#inconsistencies-with-the-harness-spec) — findings
   fed back into [`../../core/spec.md`](../../core/spec.md); all are now **resolved or
   integrated** except the permanently tracked items (I4's host-native attribution surface,
@@ -1447,6 +1449,40 @@ Three render targets, all from this adapter's sources at bundle render time,
 1. **Workspace settings** — `.vscode/settings.json` in the workspace carries the
    [required settings](#required-vs-code-settings) (`chat.useHooks: true`).
 
+### OPEN DECISION — which root the registration resolves `adapters/` against
+
+Both render targets pair a **relative** `command` (`adapters/dispatch.sh …`) with
+`cwd: {{FRAMEWORK_DIR}}`, so the registration asserts that `adapters/` sits under the
+FRAMEWORK root. It does not: `adapters/` ships in the HARNESS repo. This is the layout
+half of the same two-repo confusion that produced the `harness_entrypoint` defect one
+layer down; the code half is settled and immune — `build_default_adapter()` derives the
+harness root from the adapter's own location (`adapter_dir.parents[1]`) and reads
+`FRAMEWORK_DIR` as a *separate* environment anchor, so whichever copy of `adapters/` the
+host execs finds its own `harness.py`. The registration is what still asserts a layout.
+
+Unconditionally broken today, whichever way the layout lands: **nothing substitutes the
+placeholder**. `make install-hooks` dumps `hooks.yaml` to
+`.github/hooks/safe-harness.json` verbatim, so the installed file carries the literal
+string `{{FRAMEWORK_DIR}}` as its `cwd`. The "bundle render time" this section names is a
+stage that does not exist in this repo. That defect is real independently of the decision
+below — but its fix IS the renderer, and the renderer cannot be written before the
+decision, so both are deferred to one deliberate change.
+
+The options, and what each costs:
+
+| Option | Registration | Cost |
+| --- | --- | --- |
+| **A — anchor on the harness root** | `cwd` becomes a harness-root placeholder | Needs a second deployment anchor; `FRAMEWORK_DIR` is today the ONLY root `src/application.py` knows, so the anchor set grows and every embedder must supply both. |
+| **B — vendor `adapters/` into the framework** | unchanged; `cwd: {{FRAMEWORK_DIR}}` becomes true | Forks the adapter source per framework: the copy drifts from the harness it binds, and the harness repo stops being the single place the adapter is fixed. |
+| **C — render an absolute `command`** | `command` is absolutized at render time; `cwd` only sets the process working directory | Registration is no longer relocatable — moving either checkout invalidates every installed hook file until re-rendered. |
+
+Not decided here, deliberately: the answer is a deployment-topology choice (one repo or
+two, vendored or referenced), not something derivable from the adapter's own code, and
+guessing one into `hooks.yaml` would harden a layout nobody has chosen. Until it is
+chosen, `hooks.yaml` keeps the placeholder and
+[`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) pins it —
+pinning the unresolved shape, not endorsing it.
+
 ---
 
 ## Inconsistencies with the harness spec
@@ -1460,8 +1496,10 @@ attribution surface) and I13(a)/(d) (host verifications only live experimentatio
   Normalization now states that the correlation classifier is the **fallback** for hosts
   without structurally distinct session-open events — a host with distinct events (this one)
   classifies by them directly, the correlation resolving only *which step*, validated inside
-  function 0 (see I15); the actor-heuristic fallback is likewise demoted to hosts that lack a
-  direct actor field.
+  function 0 (see I15). There is no actor-heuristic fallback to demote: the core spec no
+  longer carries one, because this adapter never needs it — H1 supplies the step's
+  `parentSessionId` outright (it passes the firing through when the host gives it none),
+  so *which step* resolves from the named parent, never from a guess about the actor.
 - **I2 — RESOLVED: the spec's session nouns no longer conflate the conversation with the
   agent session.** This
   adapter binds sessions per the framework definition: **1 agent session = 1 execution of 1

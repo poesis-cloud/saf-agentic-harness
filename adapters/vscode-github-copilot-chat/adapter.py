@@ -259,8 +259,6 @@ class Adapter:
                 f"check-step-artifact unavailable: {failure}",
                 "The write could not be validated. Retry once the harness answers.",
             )
-        if _read_status(report) == _NOT_APPLICABLE_STATUS:
-            return self._renderer.render_pass_through()
         return self._renderer.render_write_outcome(report)
 
     def _handle_step_ended(self, event: HookEvent) -> HookDecision:
