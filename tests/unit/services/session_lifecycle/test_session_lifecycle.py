@@ -428,6 +428,53 @@ class TestSessionLifecycle:
         assert report.outcome.error.code == "log-creation-failed"
         assert report.session is None
 
+    def test_start_session_seeds_the_session_scope_of_every_later_entry(
+        self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
+    ) -> None:
+        """Spec function 0, postcondition 2: the start is the session-scope seed — every
+        subsequent entry of this session carries the started `sessionId` (and
+        `parentSessionId` where present) in its envelope."""
+        session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        session_log_store.append_log_entry(
+            "sess-root", _resolution_entry("sess-root", actor="reviewer")
+        )
+        lifecycle.start_session(
+            agent="reviewer", session_id="sess-step", parent_session_id="sess-root"
+        )
+
+        lifecycle.end_session(session_id="sess-step")
+
+        entries = read_journal("sess-step")
+        assert len(entries) > 1
+        seed = entries[0]["report"]["context"]
+        for entry in entries[1:]:
+            envelope = entry["report"]["context"]
+            assert envelope["sessionId"] == seed["sessionId"]
+            assert envelope["parentSessionId"] == seed["parentSessionId"]
+
+    def test_start_session_never_mints_or_accepts_a_self_reported_session_id(
+        self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
+    ) -> None:
+        """Spec function 0, invariant 2: session ids are observed or minted by the
+        surrounding mechanism — never minted by the harness, never self-reported by an
+        agent.
+
+        The observed id is carried through verbatim, in a shape the harness's own minting
+        (Crockford base32 instance ids) would never produce; and the inquiry offers the
+        agent no id surface at all — `agent` is the only self-reported field, and the log
+        records the observed id, not anything derived from it.
+        """
+        observed = "chat-session-guid-t2026-07-11t14-32-07-000z"
+
+        report = lifecycle.start_session(
+            agent="orchestrator", session_id=observed, parent_session_id=None
+        )
+
+        assert report.context.session_id == observed
+        assert report.session.session_id == observed
+        assert read_journal(observed)[0]["report"]["context"]["sessionId"] == observed
+        assert not hasattr(session_log_store, "mint_session_id")
+
     def test_end_session_closes_an_open_log_with_a_final_entry(
         self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
     ) -> None:
@@ -461,6 +508,35 @@ class TestSessionLifecycle:
 
         assert report.outcome.status == "ended"
         assert len(read_journal("sess-root")) == 2
+
+    def test_a_session_that_never_ends_is_not_a_fault_condition(
+        self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
+    ) -> None:
+        """Spec function 11, invariant 3: best-effort by design — this function's absence
+        from a session's log is not a fault condition anywhere else in this contract.
+
+        A session whose closure was never observed (host crash, force-quit) stays fully
+        serviceable: its registration still replays as `started`, and a step session still
+        correlates to it. Nothing reads the missing ending entry as an error.
+        """
+        session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        session_log_store.append_log_entry(
+            "sess-root", _resolution_entry("sess-root", actor="reviewer")
+        )
+
+        replay = lifecycle.start_session(
+            agent="orchestrator", session_id="sess-root", parent_session_id=None
+        )
+        child = lifecycle.start_session(
+            agent="reviewer", session_id="sess-step", parent_session_id="sess-root"
+        )
+
+        assert replay.outcome.status == "started"
+        assert child.outcome.status == "started"
+        assert all(
+            entry["report"]["context"]["function"] != "end-session"
+            for entry in read_journal("sess-root")
+        )
 
     def test_end_session_is_exempt_from_the_ended_session_refusal(
         self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore

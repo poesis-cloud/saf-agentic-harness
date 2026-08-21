@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
+
+import celpy
 
 from config.access_control_list import AccessControlList
 from config.artifact_node import ArtifactNode
@@ -48,6 +52,15 @@ _REQUIRED_LAYOUT_KEYS = (
     "FRAMEWORK_WORKSPACE_DIR",
 )
 _PRECONDITION_KIND = "precondition"
+_ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
+_ARTIFACTS_SLUG = re.compile(r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]")
+_ARTIFACTS_PROPERTY = re.compile(
+    r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)"
+)
+# CEL macros and list members read like a property but bind no artifact field.
+_CEL_MEMBERS = frozenset(
+    {"all", "exists", "exists_one", "filter", "map", "size"}
+)
 
 
 def _to_plain_data(value: Any) -> Any:
@@ -229,21 +242,26 @@ class ConfigLoader:
 
     def load_workflow_catalog(self, framework_root: str | Path) -> WorkflowCatalog:
         """Load every workflow configuration and validate the catalog's advisory graph."""
-        workflows_dir = self.load_framework_layout(framework_root).workflows_dir
-        paths = sorted(workflows_dir.glob(f"*{_WORKFLOW_FILENAME_SUFFIX}"))
+        layout = self.load_framework_layout(framework_root)
+        paths = sorted(layout.workflows_dir.glob(f"*{_WORKFLOW_FILENAME_SUFFIX}"))
         if not paths:
             raise ConfigurationError(
                 "empty-workflow-catalog",
-                f"Workflow directory '{workflows_dir}' holds no workflow configuration file.",
+                f"Workflow directory '{layout.workflows_dir}' holds no workflow "
+                f"configuration file.",
                 False,
             )
 
+        artifact_schemas = self._index_artifact_schemas(layout.artifacts_dir)
         sources: dict[str, Mapping[str, Any]] = {}
         for path in paths:
             data = self._load_source(path, _WORKFLOW_CONTRACT)
-            self._require_workflow_rules(data, path.name[: -len(_WORKFLOW_FILENAME_SUFFIX)])
+            self._require_workflow_rules(
+                data, path.name[: -len(_WORKFLOW_FILENAME_SUFFIX)], artifact_schemas
+            )
             sources[data["slug"]] = data
         self._require_catalog_rules(sources)
+        self._require_orchestrators_are_framework_agents(sources, framework_root)
 
         workflows = {slug: self._build_workflow(data) for slug, data in sources.items()}
         return WorkflowCatalog(workflows=MappingProxyType(workflows))
@@ -272,7 +290,12 @@ class ConfigLoader:
             )
         return data
 
-    def _require_workflow_rules(self, data: Mapping[str, Any], filename_slug: str) -> None:
+    def _require_workflow_rules(
+        self,
+        data: Mapping[str, Any],
+        filename_slug: str,
+        artifact_schemas: Mapping[str, Mapping[str, Any]],
+    ) -> None:
         """Apply one workflow file's semantic rules, in dependency order."""
         slug = data["slug"]
         if slug != filename_slug:
@@ -289,6 +312,7 @@ class ConfigLoader:
         self._require_resolvable_step_references(slug, steps)
         self._require_acyclic_step_graph(slug, steps)
         self._require_positive_capability_weight(slug, steps)
+        self._require_static_condition_expressions(slug, steps, artifact_schemas)
 
     def _require_unique_step_slugs(self, slug: str, steps: Sequence[Mapping[str, Any]]) -> None:
         """Spec: step slugs are unique within a workflow."""
@@ -368,6 +392,125 @@ class ConfigLoader:
                     "missing-capability-weight",
                     f"Workflow '{slug}' step '{step['slug']}' declares no positive "
                     f"capability weight.",
+                    False,
+                )
+
+    def _index_artifact_schemas(self, artifacts_dir: Path) -> Mapping[str, Mapping[str, Any]]:
+        """Index the framework's artifact schemas by the slug a condition may name."""
+        schemas: dict[str, Mapping[str, Any]] = {}
+        for path in sorted(artifacts_dir.glob(f"*{_ARTIFACT_SCHEMA_SUFFIX}")):
+            try:
+                schemas[path.name[: -len(_ARTIFACT_SCHEMA_SUFFIX)]] = json.loads(
+                    path.read_text(encoding="utf-8")
+                )
+            except (OSError, json.JSONDecodeError) as error:
+                raise ConfigurationError(
+                    "unreadable-artifact-schema",
+                    f"Artifact schema '{path}' could not be read: {error}",
+                    False,
+                ) from error
+        return schemas
+
+    def _require_static_condition_expressions(
+        self,
+        slug: str,
+        steps: Sequence[Mapping[str, Any]],
+        artifact_schemas: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """Spec (function 5, invariant 2): statically invalid expressions never reach runtime.
+
+        Static reach is the direct `artifacts['<slug>'].<property>` form: the expression
+        must compile, its artifact slugs must resolve to a declared schema, and a property
+        read straight off the slug must be declared there. A property reached through a
+        macro-bound variable is left to runtime — resolving it needs a scope-tracking AST
+        walk, and guessing would reject valid configurations.
+        """
+        environment = celpy.Environment()
+        for step in steps:
+            for condition in step.get("conditions", ()):
+                selector = condition.get("setSelector")
+                if selector is None:
+                    continue
+                for expression in (selector["setQuery"], condition["setPredicate"]):
+                    self._require_compilable_expression(
+                        environment, slug, step["slug"], condition["slug"], expression
+                    )
+                    self._require_declared_artifact_references(
+                        slug, step["slug"], condition["slug"], expression, artifact_schemas
+                    )
+
+    def _require_compilable_expression(
+        self,
+        environment: celpy.Environment,
+        slug: str,
+        step_slug: str,
+        condition_slug: str,
+        expression: str,
+    ) -> None:
+        """Compile one CEL expression, so no unparseable expression is ever evaluated."""
+        try:
+            environment.program(environment.compile(expression))
+        except celpy.CELParseError as error:
+            raise ConfigurationError(
+                "uncompilable-condition-expression",
+                f"Workflow '{slug}' step '{step_slug}' condition '{condition_slug}' "
+                f"declares an expression that does not compile: '{expression}' ({error}).",
+                False,
+            ) from error
+
+    def _require_declared_artifact_references(
+        self,
+        slug: str,
+        step_slug: str,
+        condition_slug: str,
+        expression: str,
+        artifact_schemas: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """Resolve every artifact slug the expression names, then its direct properties."""
+        for artifact_slug in sorted(set(_ARTIFACTS_SLUG.findall(expression))):
+            if artifact_slug not in artifact_schemas:
+                raise ConfigurationError(
+                    "unresolvable-artifact-slug",
+                    f"Workflow '{slug}' step '{step_slug}' condition '{condition_slug}' "
+                    f"references the artifact slug '{artifact_slug}', which the framework "
+                    f"declares no schema for.",
+                    False,
+                )
+
+        for artifact_slug, member in _ARTIFACTS_PROPERTY.findall(expression):
+            if member in _CEL_MEMBERS:
+                continue
+            declared = artifact_schemas[artifact_slug].get("properties", {})
+            if member not in declared:
+                raise ConfigurationError(
+                    "undeclared-artifact-property",
+                    f"Workflow '{slug}' step '{step_slug}' condition '{condition_slug}' "
+                    f"reads the property '{member}' off artifact '{artifact_slug}', which "
+                    f"its schema does not declare.",
+                    False,
+                )
+
+    def _require_orchestrators_are_framework_agents(
+        self,
+        sources: Mapping[str, Mapping[str, Any]],
+        framework_root: str | Path,
+    ) -> None:
+        """Spec (function 1, precondition C): the session's agent is a framework orchestrator.
+
+        Function 0's registration gate admits the framework agents the ACL declares. An
+        orchestrator the ACL never declares can never open a session, so its workflows are
+        unreachable and function 1 would hand back an empty instruction set. The
+        complementary half — an orchestrator facilitating zero workflows — cannot arise:
+        the contract makes `orchestrator` required and singular per workflow file.
+        """
+        access_control_list = self.load_access_control_list(framework_root)
+        for slug, data in sources.items():
+            orchestrator = data["orchestrator"]
+            if not access_control_list.is_framework_agent(orchestrator):
+                raise ConfigurationError(
+                    "unknown-orchestrator-agent",
+                    f"Workflow '{slug}' declares the orchestrator '{orchestrator}', which "
+                    f"the access control list declares no framework agent for.",
                     False,
                 )
 

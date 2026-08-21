@@ -106,7 +106,11 @@ def workflow_catalog() -> WorkflowCatalog:
                 slug="pair-programming",
                 facilitator="orchestrator",
                 steps=(pairing_step,),
-                instructions=("workflow-selection-handling", "step-resolution-handling"),
+                instructions=(
+                    "workflow-selection-handling",
+                    "step-resolution-handling",
+                    "no-next-step-handling",
+                ),
                 skills=("workflow-selection", "pair-programming-procedure"),
             ),
         }

@@ -45,6 +45,22 @@ class TestCheckStepPreconditionsCommand:
 
         assert failure.value.code == "invalid-inquiry"
 
+    def test_refuses_a_non_slug_session_id_at_the_contract_boundary(
+        self, schema_validator: SchemaValidator
+    ) -> None:
+        """Spec (Outcomes rule 1 + rule 4): a non-slug `sessionId` fails function 5's input
+        contract as `invalid-inquiry` — pre-attribution and unjournalable, so it surfaces
+        at the command exit plane and no report is ever built.
+        """
+        service = RecordingService("check-step-preconditions")
+        command = CheckStepPreconditionsCommand(service, schema_validator)
+
+        with pytest.raises(InquiryError) as failure:
+            command.parse_inquiry({"sessionId": "../escape"})
+
+        assert failure.value.code == "invalid-inquiry"
+        assert service.calls == []
+
     def test_unpacks_the_inquiry_into_the_precondition_checker_call(
         self, schema_validator: SchemaValidator
     ) -> None:

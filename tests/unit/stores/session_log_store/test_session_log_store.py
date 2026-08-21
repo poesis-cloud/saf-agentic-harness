@@ -122,6 +122,8 @@ def _postconditions(
 
 class TestContext:
     def test_renders_contract_keys(self) -> None:
+        """Spec (Logging): the envelope every entry carries — the function, the session ids,
+        and the workflow instance — rendered under the log-entry contract's own key names."""
         context = Context("start-session", "sess-1", None, "flow-01AB")
 
         assert context.to_dict() == {
@@ -134,6 +136,8 @@ class TestContext:
 
 class TestError:
     def test_renders_optional_retryable(self) -> None:
+        """Spec (Outcomes): `error.code` and `retryable` are structured, normative fields —
+        rendered alongside the advisory `message`."""
         assert Error("bad", "Bad", True).to_dict() == {
             "code": "bad",
             "message": "Bad",
@@ -143,6 +147,8 @@ class TestError:
 
 class TestOutcome:
     def test_renders_error_when_present(self) -> None:
+        """Spec (Outcomes): a non-success outcome carries its `error` object; `error.code`
+        is the normative test surface."""
         outcome = Outcome("state-error", Error("bad", "Bad", False))
 
         assert outcome.to_dict()["error"]["code"] == "bad"
@@ -150,6 +156,8 @@ class TestOutcome:
 
 class TestReport:
     def test_renders_context_outcome_and_payload(self) -> None:
+        """Spec (Classes, reports): a report is the envelope plus its function-specific
+        payload, which renders flat beside `context` and `outcome`."""
         report = _report("end-session", "ended", payload={"extra": 1})
 
         assert report.to_dict()["extra"] == 1
@@ -157,6 +165,8 @@ class TestReport:
 
 class TestLogEntry:
     def test_round_trips_from_contract_dict(self) -> None:
+        """Spec (Logging): entries are the persisted contract form — a rendered entry parses
+        back into an equal entry, which is what makes byte-stable replay possible."""
         entry = _start_entry()
 
         assert LogEntry.from_dict(entry.to_dict()) == entry
@@ -164,6 +174,8 @@ class TestLogEntry:
 
 class TestLog:
     def test_exposes_session_and_entries(self) -> None:
+        """Spec (Logging): a log is one session's ordered entries, keyed by that session —
+        single-writer, append-only."""
         entry = _start_entry()
         log = Log("sess-1", (entry,))
 
@@ -173,6 +185,9 @@ class TestLog:
 
 class TestWorkflowInstanceView:
     def test_queries_executed_steps_latest_outcomes_and_unresolved_resolution(self) -> None:
+        """Spec (function 3, invariant 1): a step counts as executed when its LATEST
+        journaled function-10 outcome passes — latest wins, so a re-run that fails drops the
+        step back out; and the actor's resolution with no later outcome is the in-flight one."""
         view = WorkflowInstanceView(
             "flow-01AB",
             (
@@ -191,6 +206,8 @@ class TestWorkflowInstanceView:
 
 class TestSessionLogStore:
     def test_create_append_load_round_trip_byte_stability(self, tmp_path: Path) -> None:
+        """Spec (Logging): the log is the persisted record — what is loaded re-renders to the
+        exact bytes on disk, one JSON object per line, so replay is byte-stable."""
         store = SessionLogStore(tmp_path)
         start = _start_entry()
         end = _entry("2026-08-17T13:00:01Z", "end-session", "ended")
@@ -205,6 +222,8 @@ class TestSessionLogStore:
         assert rendered == lines
 
     def test_create_refuses_to_overwrite_existing_log(self, tmp_path: Path) -> None:
+        """Spec (Logging): logs are append-only — creation never truncates an existing log,
+        so no registration can silently erase a session's history."""
         store = SessionLogStore(tmp_path)
         store.create_session_log(_start_entry())
 
@@ -212,6 +231,8 @@ class TestSessionLogStore:
             store.create_session_log(_start_entry())
 
     def test_append_rejects_contract_invalid_entry(self, tmp_path: Path) -> None:
+        """Spec (Internal validation): an entry that fails the log-entry contract never
+        reaches the log — the journal cannot hold a record no contract admits."""
         store = SessionLogStore(tmp_path)
         store.create_session_log(_start_entry())
         invalid = _entry("2026-08-17T13:00:01Z", "start-session", "started")
@@ -220,11 +241,16 @@ class TestSessionLogStore:
             store.append_log_entry("sess-1", invalid)
 
     def test_mint_workflow_instance_id_uses_crockford_base32(self, tmp_path: Path) -> None:
+        """Spec (function 3, invariant 8): instance ids are minted by the harness as
+        `<workflowSlug>-<Crockford base32>` — agents never pass or mint them."""
         minted = SessionLogStore(tmp_path).mint_workflow_instance_id("flow")
 
         assert re.fullmatch(r"flow-[0-9A-HJKMNP-TV-Z]{4,}", minted)
 
     def test_load_workflow_instance_view_orders_entries_across_logs_by_timestamp(self, tmp_path: Path) -> None:
+        """Spec (function 3, invariant 1 / the instance view): the view is assembled ACROSS
+        session logs in timestamp order — one instance spans the orchestrator's log and every
+        step session's log, and is derived, never persisted."""
         store = SessionLogStore(tmp_path)
         store.create_session_log(_start_entry("sess-1", "2026-08-17T13:00:00Z"))
         store.create_session_log(_start_entry("sess-2", "2026-08-17T13:00:00Z"))
@@ -239,6 +265,9 @@ class TestSessionLogStore:
         ]
 
     def test_find_latest_open_instance_handles_none_one_multiple_and_closed(self, tmp_path: Path) -> None:
+        """Spec (function 3, invariant 8): instance correlation is deduced, latest-open-wins
+        — no instance, one open instance, an instance closed by every step passing, and two
+        open instances where the later one is the one continued. No register closes anything."""
         store = SessionLogStore(tmp_path)
         assert store.find_latest_open_instance("flow", workflow_steps=("alpha",)) is None
 

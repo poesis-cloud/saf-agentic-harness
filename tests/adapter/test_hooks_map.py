@@ -19,16 +19,24 @@ EXPECTED_H0_ORCHESTRATORS = [
 
 class TestHooksMap:
     def test_hooks_yaml_parses_as_copilot_hook_map(self, hooks_yaml):
+        """Adapter spec (Hook registration): `hooks.yaml` is the host's own hook-map shape —
+        an object keyed by event name — not an adapter-private format."""
         assert isinstance(hooks_yaml, dict)
         assert isinstance(hooks_yaml.get("hooks"), dict)
 
     def test_hooks_yaml_renders_like_makefile_install_hooks(self, hooks_yaml):
+        """Adapter spec (Hook registration): the installed map is this file rendered as JSON
+        — installation is a pure re-serialization, so the source of truth cannot drift from
+        what the host is given."""
         rendered = json.dumps(hooks_yaml, indent=2)
 
         assert json.loads(rendered) == hooks_yaml
         assert rendered.startswith('{\n  "hooks":')
 
     def test_workspace_hooks_match_h1_through_h7_registrations(self, hooks_yaml):
+        """Adapter spec H1–H7: exactly the events those hooks declare are registered at
+        workspace scope, each firing the one dispatch entry point with this adapter's env
+        name — one registration per event, no extras."""
         hooks = hooks_yaml["hooks"]
 
         assert set(hooks) == set(EXPECTED_WORKSPACE_HOOKS)
@@ -51,6 +59,9 @@ class TestHooksMap:
             ]
 
     def test_h0_user_prompt_submit_is_agent_scoped_not_workspace_scoped(self, hooks_yaml):
+        """Adapter spec H0: `UserPromptSubmit` is AGENT-scoped — registered per orchestrator
+        agent, never at workspace scope, so it fires only for sessions that can open a
+        workflow."""
         hooks = hooks_yaml["hooks"]
 
         assert "UserPromptSubmit" not in hooks
@@ -65,6 +76,8 @@ class TestHooksMap:
             ]
 
     def test_events_explicitly_not_registered_by_the_spec_are_absent(self, hooks_yaml):
+        """Adapter spec (Hook registration): events the spec deliberately does not bind stay
+        unregistered — the adapter's firing surface is exactly H0–H7, nothing opportunistic."""
         hooks = hooks_yaml["hooks"]
 
         assert "SessionStart" not in hooks
@@ -73,6 +86,9 @@ class TestHooksMap:
         assert "ErrorOccurred" not in hooks
 
     def test_tool_classes_match_h2_through_h6_spec_sections(self, tools_yaml):
+        """Adapter spec H2–H6: the tool classes those hooks classify on — dispatch, write
+        (with its action verb per tool), mediated-command and guarded-shell — are declared in
+        configuration, so classification is data the spec fixes, never code that guesses."""
         assert tools_yaml["toolKeys"] == ["tool_name"]
         assert tools_yaml["inputKeys"] == ["tool_input"]
         assert tools_yaml["dispatchTools"] == ["runSubagent"]
@@ -97,6 +113,9 @@ class TestHooksMap:
         ]
 
     def test_session_identity_binding_keys_match_spec(self, tools_yaml):
+        """Adapter spec (Session identity binding): which host payload keys carry the session,
+        the step session and the step actor. `hostParentSessionKeys` is empty — this host
+        publishes no parent-session payload, the fact H1's correlation is written against."""
         assert tools_yaml["hostSessionKeys"] == ["session_id"]
         assert tools_yaml["hostParentSessionKeys"] == []
         assert tools_yaml["hostStepSessionKeys"] == ["agent_id"]

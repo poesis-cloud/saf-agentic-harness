@@ -251,10 +251,34 @@ class TestStepResolver:
         assert report.step is not None
         assert report.step.slug == "review"
 
+    def test_a_step_retry_leaves_no_trace_in_what_the_orchestrator_relays(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 7: step retries happen inside the workflow through re-resolution,
+        invisible to the user — there is no step-level user surface.
+
+        The resolution the orchestrator relays after a failed attempt is identical to the
+        one it relayed before it: no attempt counter, no retry flag, no escalation field.
+        Nothing in what the agent relays tells the user a step was retried, because the
+        workflow — not the step — is the user-facing unit of execution.
+        """
+        start_session_log(log_store)
+        start_session_log(log_store, session_id=STEP_SESSION, agent="qa-engineer")
+        resolver = _build_resolver(log_store, build_step("review"))
+        first = resolver.resolve_step(ORCHESTRATOR_SESSION, None, WORKFLOW_SLUG).to_dict()
+
+        append_resolution(log_store, "2026-08-17T13:01:00Z", "review")
+        append_outcome(log_store, "2026-08-17T13:02:00Z", "fail")
+        retried = resolver.resolve_step(ORCHESTRATOR_SESSION, None, WORKFLOW_SLUG).to_dict()
+
+        assert retried["step"] == first["step"]
+        assert retried["outcome"] == first["outcome"]
+        assert set(retried) == set(first)
+
     def test_returns_the_step_alone_with_no_step_level_user_surface(
         self, log_store: SessionLogStore
     ) -> None:
-        """Invariant 7: the report is `outcome` ± `step`, nothing more — no in-band gate."""
+        """Out: the report is `outcome` ± `step`, nothing more — no in-band gate field."""
         start_session_log(log_store)
         resolver = _build_resolver(log_store, build_step("review"))
 

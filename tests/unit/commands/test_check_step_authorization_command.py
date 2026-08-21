@@ -45,9 +45,10 @@ class TestCheckStepAuthorizationCommand:
     def test_refuses_an_action_outside_the_declared_vocabulary(
         self, schema_validator: SchemaValidator
     ) -> None:
-        """Spec (Outcomes rule 1): `unknown-action` is an `inquiry-error`; the ACL
-        contract's action vocabulary is create, update, delete — reads are never
-        modeled (C3).
+        """Spec (Outcomes rule 1): a non-vocabulary action fails the input contract as
+        `invalid-inquiry` — the ACL contract's action vocabulary is create, update, delete,
+        reads are never modeled (C3). The contract rejects `read` at the command boundary,
+        BEFORE function 8's own `unknown-action` branch could be reached.
         """
         command = CheckStepAuthorizationCommand(
             RecordingService("check-step-authorization"), schema_validator

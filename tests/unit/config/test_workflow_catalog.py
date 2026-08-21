@@ -159,3 +159,111 @@ class TestWorkflowCatalog:
 
         with pytest.raises(ConfigurationError, match="cyclic workflow"):
             config_loader.load_workflow_catalog(framework_root)
+
+
+class TestOrchestratorFacilitation:
+    """Verify function 1's (C) precondition is established at configuration load."""
+
+    def test_rejects_an_orchestrator_that_is_not_a_framework_agent(self, config_loader, framework_root) -> None:
+        """Spec (function 1, precondition C): the session's agent is a framework orchestrator.
+
+        Function 0's registration gate admits framework agents — the ACL actors. An
+        orchestrator the ACL never declares can therefore never open a session, so the
+        workflows it drives are unreachable and the agents that do open sessions
+        facilitate zero workflows. The load rejects the catalog rather than let function 1
+        hand back an empty instruction set.
+        """
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(orchestrator="ghost"),
+        )
+
+        with pytest.raises(ConfigurationError, match="ghost"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_every_declared_orchestrator_facilitates_at_least_one_workflow(self, config_loader, framework_root) -> None:
+        """Spec (function 1, precondition C): an orchestrator facilitating zero workflows is rejected at load.
+
+        The complementary half of the clause holds by construction: the workflow contract
+        makes `orchestrator` required and singular, and the filename-stem rule keeps
+        workflow slugs unique, so every orchestrator the catalog knows facilitates at
+        least one workflow. This pins that construction — were `orchestrator` ever
+        relaxed to optional or plural, or a workflow dropped while building the catalog,
+        the facilitation index would go empty for some orchestrator and this fails.
+        """
+        write_yaml(framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml", workflow_yaml())
+        write_yaml(framework_root / "conf" / "workflows" / "review.workflow.conf.yaml", workflow_yaml(slug="review"))
+
+        catalog = config_loader.load_workflow_catalog(framework_root)
+
+        orchestrators = {workflow.facilitator for workflow in catalog.workflows.values()}
+        assert orchestrators
+        for orchestrator in orchestrators:
+            assert catalog.list_facilitated_workflows(orchestrator)
+
+
+class TestConditionExpressionStaticValidation:
+    """Verify statically invalid condition expressions cannot reach runtime."""
+
+    def test_rejects_a_condition_expression_that_does_not_compile(self, config_loader, framework_root) -> None:
+        """Spec (function 5, invariant 2): statically invalid expressions cannot reach runtime.
+
+        The runtime evaluator only maps `CELEvalError` to `condition-evaluation-failed`;
+        an expression that does not parse raises through it uncaught. The load compiles
+        every `setQuery` and `setPredicate` so no such expression is ever reachable.
+        """
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_predicate="size(selected) >"),
+        )
+
+        with pytest.raises(ConfigurationError, match="does not compile"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_rejects_an_artifact_slug_the_framework_declares_no_schema_for(self, config_loader, framework_root) -> None:
+        """Spec (function 5, invariant 2): an unresolvable slug is a hard error, not a false pass."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_query="artifacts['ghost']"),
+        )
+
+        with pytest.raises(ConfigurationError, match="ghost"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_rejects_a_property_the_artifact_schema_does_not_declare(self, config_loader, framework_root) -> None:
+        """Spec (function 5, invariant 2): an undeclared property is a hard error, not a false pass.
+
+        `artifacts['<slug>'].<property>` is validated against that slug's artifact
+        schema — the direct access form, which is what the static reach covers.
+        """
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_query="artifacts['epic'].ghost"),
+        )
+
+        with pytest.raises(ConfigurationError, match="ghost"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_admits_a_property_the_artifact_schema_declares(self, config_loader, framework_root) -> None:
+        """Spec (function 5, invariant 2): validation is against the slug's schema, not a blanket ban."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_query="artifacts['epic'].state"),
+        )
+
+        assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
+
+    def test_admits_a_comprehension_variable_the_static_reach_cannot_follow(self, config_loader, framework_root) -> None:
+        """Spec (function 5, invariant 2): static validation covers the direct access form.
+
+        A property read through a macro-bound variable (`a.ghost` inside `.exists(a, ...)`)
+        is not a `artifacts['<slug>'].<property>` reference; resolving it would need a
+        scope-tracking CEL AST walk. The load compiles the expression and validates the
+        slug, and admits the comprehension body rather than reject it on a guess.
+        """
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_query="artifacts['epic'].exists(a, a.ghost == 'x')"),
+        )
+
+        assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")

@@ -584,8 +584,9 @@ class TestAdapter:
     def test_denies_a_guarded_shell_command_naming_the_workspace_logs_path(
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
-        """Adapter spec H3 / H4 rule 1: a path under the workspace logs directory is
-        DENIED, never passed through — logs are harness-authored, single-writer.
+        """Adapter spec H4, rule 1 fall-through / I9: a guarded-shell command textually
+        referencing a path under the workspace logs directory is DENIED, never passed
+        through — logs are harness-authored, single-writer.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -723,9 +724,9 @@ class TestAdapter:
     def test_stamps_the_resolved_session_onto_the_allowed_command(
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
-        """Adapter spec H4, rule 4 / invariant 3: the executed invocation's attribution is
-        fully adapter-controlled, and the hook itself invokes no harness function — it is
-        attribution plumbing, not a boundary function.
+        """Adapter spec H4, rule 4 / invariant 2: the stamped id is resolved from the
+        envelope `session_id` — the same host-observed value H0's opening derives from,
+        never from any model-authored argument (core function 0, invariant 2).
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -976,8 +977,9 @@ class TestAdapter:
     def test_never_surfaces_a_closure_failure_to_the_host(
         self, make_adapter, tracker: SessionTracker
     ) -> None:
-        """Adapter spec H7, Out / invariant 1: `end-session`'s outcome is never surfaced,
-        success or error alike — best-effort closure has no host-visible effect.
+        """Adapter spec H7, Out: closure is silent — exit 0 and empty stdout, whatever
+        the harness command did. A failing `end-session` is surfaced no differently from a
+        succeeding one.
         """
         runner = FakeCommandRunner(failure=RuntimeError("harness command crashed"))
         adapter = make_adapter(runner)

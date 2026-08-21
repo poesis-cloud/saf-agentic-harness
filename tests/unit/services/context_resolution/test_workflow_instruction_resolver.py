@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,35 @@ _EXPECTED_INSTRUCTIONS = (
     "workflow-selection-handling",
     "reports-handling",
     "step-resolution-handling",
+    "no-next-step-handling",
 )
+_RESOLVE_STEP_OUTPUT_CONTRACT = (
+    Path(__file__).resolve().parents[4] / "contracts" / "api" / "resolve-step.output.schema.json"
+)
+
+
+def _list_function_three_return_kinds() -> frozenset[str]:
+    """Read function 3's return kinds off its own output contract.
+
+    The contract pins `context.function` with the same `const` keyword it uses for the
+    outcome statuses, so the function name is excluded by name.
+    """
+    contract = json.loads(_RESOLVE_STEP_OUTPUT_CONTRACT.read_text(encoding="utf-8"))
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            constant = node.get("const")
+            if isinstance(constant, str):
+                found.add(constant)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(contract)
+    return frozenset(found - {"resolve-step"})
 
 
 @pytest.fixture
@@ -48,6 +77,26 @@ class TestWorkflowInstructionResolver:
         assert report.context.session_id == orchestrator_session
         assert report.context.workflow_instance_id is None
         assert report.instructions == _EXPECTED_INSTRUCTIONS
+
+    def test_resolve_workflow_instructions_covers_every_function_three_return_kind(
+        self, resolver: WorkflowInstructionResolver, orchestrator_session: str
+    ) -> None:
+        """Spec function 1, invariant 2: every function-3 return the orchestrator receives
+        — and the workflow selection itself — is covered by an injected instruction.
+
+        Completeness is asserted against the return-kind set function 3's own output
+        contract declares, not against a hand-listed subset: a return kind added to the
+        contract with no instruction covering it fails here.
+        """
+        report = resolver.resolve_workflow_instructions(
+            session_id=orchestrator_session, parent_session_id=None
+        )
+
+        return_kinds = _list_function_three_return_kinds()
+        assert return_kinds
+        required = {f"{kind}-handling" for kind in return_kinds}
+        required.add("workflow-selection-handling")
+        assert required <= set(report.instructions)
 
     def test_resolve_workflow_instructions_journals_its_own_entry(
         self, resolver: WorkflowInstructionResolver, orchestrator_session: str, read_journal

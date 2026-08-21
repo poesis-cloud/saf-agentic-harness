@@ -13,6 +13,7 @@ from config.folder_node import FolderNode
 from config.workspace_layout import WorkspaceLayout
 from errors import StateError
 from stores.artifact_store import Artifact, ArtifactStore, Finding
+from stores.session_log_store import Context, LogEntry, Outcome, Report, SessionLogStore
 
 
 def _run_git(workspace: Path, *args: str) -> str:
@@ -154,6 +155,44 @@ class TestArtifactStore:
         store.commit_artifacts((Path("sample/same.json"),), session_id="sess-2")
 
         assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before
+
+    def test_a_session_log_never_enters_the_committed_workspace_state(
+        self, workspace: Path, store: ArtifactStore
+    ) -> None:
+        """Spec (C0): logs are local-only — never committed or synced.
+
+        Persisted logs sit inside the workspace repository, so the only thing keeping them
+        out of workspace state is that the commit gate never stages them. A log written
+        beside the artifacts being committed must still be absent from `HEAD` afterwards.
+        """
+        log_store = SessionLogStore(workspace)
+        log_store.create_session_log(
+            LogEntry(
+                timestamp="2026-08-21T09:00:00.000000Z",
+                report=Report(
+                    context=Context(function="start-session", session_id="sess-log"),
+                    outcome=Outcome(status="started"),
+                    payload={
+                        "session": {
+                            "agent": "orchestrator",
+                            "sessionId": "sess-log",
+                            "parentSessionId": None,
+                        }
+                    },
+                ),
+            )
+        )
+        (workspace / "sample").mkdir()
+        (workspace / "sample" / "a.json").write_text(
+            '{"slug":"a","kind":"sample"}\n', encoding="utf-8"
+        )
+
+        store.commit_artifacts((Path("sample/a.json"),), session_id="sess-log")
+
+        assert (workspace / "logs" / "sess-log.log.jsonl").is_file()
+        committed = _run_git(workspace, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+        assert "sample/a.json" in committed
+        assert not [path for path in committed if path.startswith("logs/")]
 
     def test_revert_artifact_restores_tracked_path(
         self, workspace: Path, store: ArtifactStore

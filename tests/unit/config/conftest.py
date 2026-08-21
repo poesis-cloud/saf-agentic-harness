@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -82,7 +83,29 @@ def framework_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ),
         encoding="utf-8",
     )
+    write_artifact_schema(root, "epic")
+    write_yaml(root / "conf" / "access-control-list.conf.yaml", access_control_yaml())
     return root
+
+
+def write_artifact_schema(root: Path, slug: str, properties: tuple[str, ...] = ("slug", "state")) -> Path:
+    """Write one artifact schema under the framework's artifacts directory."""
+    path = root / "artifacts" / f"{slug}.artifact.schema.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": f"gsmarc://saf/tests/unit/config/artifacts/{slug}/v1",
+                "title": f"{slug} fixture artifact schema",
+                "type": "object",
+                "properties": {name: {"type": "string"} for name in properties},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def write_yaml(path: Path, data: str) -> Path:
@@ -106,9 +129,12 @@ def model_profiles_yaml() -> str:
 
 
 def access_control_yaml() -> str:
-    """Return a minimal ACL fixture."""
+    """Return a minimal ACL fixture declaring the workflow fixture's orchestrator."""
     return """actors:
   - slug: planner
+    roles:
+      - author
+  - slug: facilitator
     roles:
       - author
 roles:
@@ -148,6 +174,9 @@ def workflow_yaml(
     predecessor: str | None = None,
     second_step_condition: str = "draft",
     positive_capabilities: bool = True,
+    orchestrator: str = "facilitator",
+    set_query: str = "artifacts['epic']",
+    set_predicate: str = "size(selected) > 0",
 ) -> str:
     """Return a minimal workflow fixture."""
     caps = "\n".join(
@@ -155,7 +184,7 @@ def workflow_yaml(
     )
     predecessor_block = f"predecessors:\n  - {predecessor}\n" if predecessor else ""
     return f"""slug: {slug}
-{predecessor_block}orchestrator: facilitator
+{predecessor_block}orchestrator: {orchestrator}
 skills:
   - orchestrate
 instructions:
@@ -186,8 +215,8 @@ steps:
       - kind: precondition
         slug: state-ready
         setSelector:
-          setQuery: "artifacts['epic']"
-        setPredicate: "size(selected) > 0"
+          setQuery: "{set_query}"
+        setPredicate: "{set_predicate}"
 """
 
 
