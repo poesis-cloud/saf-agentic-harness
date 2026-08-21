@@ -111,9 +111,9 @@ output construction:
   machinery (no `applyTo` matching, no skill registration, no progressive disclosure).
   Consequences: (a) session-scoped context MUST be re-injected every turn — which the
   per-turn agent-session semantics require anyway; (b) skill injection must be a **load
-  directive** (the resolved `SKILL.md` paths plus the instruction to read them), never an
-  inline dump — inlining would defeat the skills' own lazy-loading design and bloat every
-  turn's prompt; instruction refs are small and are inlined.
+  directive** (the resolved `<slug>.skill.md` paths plus the instruction to read them),
+  never an inline dump — inlining would defeat the skills' own lazy-loading design and
+  bloat every turn's prompt; instruction refs are small and are inlined.
 
 **Discovery** — the host collects hook configuration files from the folders configured in
 `chat.hookFilesLocations` (default includes `.github/hooks`) plus user-profile locations; all
@@ -605,7 +605,7 @@ native instructions/skills machinery is NOT engaged):
 1. Each `WorkflowInstructionsReport.instructions` ref resolved against
    `FRAMEWORK_INSTRUCTIONS_DIR` and **inlined** (instruction files are small and normative),
    in report order, each under a header naming its ref.
-2. Each `WorkflowSkillsReport.skills` id resolved to its `SKILL.md` path under
+2. Each `WorkflowSkillsReport.skills` id resolved to its `<slug>.skill.md` path under
    `FRAMEWORK_SKILLS_DIR` and emitted as a **load directive** — the resolved path plus the
    instruction to read it before acting — never an inline dump (skills are designed for lazy
    loading; inlining would bloat every request).
@@ -731,9 +731,9 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
 1. For each ref in `StepInstructionsReport.instructions` (contract/repo-relative refs):
    resolve against `FRAMEWORK_INSTRUCTIONS_DIR` and **inline the file content**, in report
    order, each under a header naming its ref.
-2. For each id in `StepSkillsReport.skills`: resolve the skill's `SKILL.md` path under
-   `FRAMEWORK_SKILLS_DIR` and emit a **load directive** (path + the instruction to read it
-   before acting) — never an inline dump (skills are lazy-loaded by design).
+2. For each id in `StepSkillsReport.skills`: resolve the skill's `<slug>.skill.md` path
+   under `FRAMEWORK_SKILLS_DIR` and emit a **load directive** (path + the instruction to
+   read it before acting) — never an inline dump (skills are lazy-loaded by design).
 3. Concatenate 1 then 2. No adapter-authored prose beyond the fixed headers/directive
    wording; the agent receives exactly its step's declared refs — nothing more, nothing
    chosen by the agent (functions 6–7 postconditions).

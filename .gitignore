@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .pytest_cache
+
+# Adapter runtime state — it belongs under XDG_STATE_HOME; ignored as belt-and-braces
+.session-tracker.json

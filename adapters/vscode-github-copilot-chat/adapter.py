@@ -32,6 +32,10 @@ from session_identity import (
 from session_tracker import SessionTracker
 
 _SUBAGENT_STOP = "SubagentStop"
+_HARNESS_ENTRYPOINT_NAME = "harness.py"
+_SESSION_RECORD_NAME = "session-tracker.json"
+_STATE_HOME_VARIABLE = "XDG_STATE_HOME"
+_STATE_NAMESPACE = "saf-agentic-harness"
 _STARTED_STATUS = "started"
 _NOT_APPLICABLE_STATUS = "not-applicable"
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
@@ -348,7 +352,8 @@ class Adapter:
 def build_default_adapter() -> Adapter:
     """Build the adapter the host entry uses, from this adapter's own sources."""
     adapter_dir = Path(__file__).resolve().parent
-    framework_dir = Path(os.environ.get("FRAMEWORK_DIR", adapter_dir.parents[1]))
+    harness_dir = adapter_dir.parents[1]
+    framework_dir = Path(os.environ.get("FRAMEWORK_DIR", harness_dir))
     workspace_dir = _resolve_layout_dir(framework_dir, "FRAMEWORK_WORKSPACE_DIR")
     binding = load_hook_binding(
         adapter_dir,
@@ -357,13 +362,13 @@ def build_default_adapter() -> Adapter:
     return Adapter(
         binding=binding,
         classifier=HookClassifier(binding),
-        tracker=SessionTracker(adapter_dir / ".session-tracker.json"),
+        tracker=SessionTracker(_resolve_state_dir(adapter_dir) / _SESSION_RECORD_NAME),
         renderer=HookRenderer(
             instructions_dir=_resolve_layout_dir(framework_dir, "FRAMEWORK_INSTRUCTIONS_DIR"),
             skills_dir=_resolve_layout_dir(framework_dir, "FRAMEWORK_SKILLS_DIR"),
         ),
         command_runner=SubprocessCommandRunner(
-            harness_entrypoint=framework_dir / "harness.py"
+            harness_entrypoint=harness_dir / _HARNESS_ENTRYPOINT_NAME
         ),
         workspace_dir=workspace_dir,
     )
@@ -407,6 +412,19 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
 def _resolve_layout_dir(framework_dir: Path, variable: str) -> Path:
     declared = os.environ.get(variable)
     return framework_dir / declared if declared else framework_dir
+
+
+def _resolve_state_dir(adapter_dir: Path) -> Path:
+    """Resolve this adapter's per-user runtime state directory, outside every repo.
+
+    The tracker's record is runtime state, not source and not governed data: inside the
+    harness checkout it dirties version control every turn and breaks a read-only or
+    shared deployment, and inside the workspace it would breach the Git plane's
+    artifacts-plus-logs ring fence.
+    """
+    declared = os.environ.get(_STATE_HOME_VARIABLE)
+    state_home = Path(declared) if declared else Path.home() / ".local" / "state"
+    return state_home / _STATE_NAMESPACE / adapter_dir.name
 
 
 def _read_status(report: Mapping[str, Any]) -> str:
