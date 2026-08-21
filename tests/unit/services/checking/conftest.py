@@ -87,7 +87,9 @@ def workspace_layout() -> WorkspaceLayout:
                     ArtifactNode(
                         slug="<name>.json",
                         description="One review report.",
+                        cardinality="0..*",
                         artifact="review-report",
+                        template="review-report",
                     ),
                 ),
             ),

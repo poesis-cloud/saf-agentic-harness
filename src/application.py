@@ -34,6 +34,8 @@ from config.workflow_catalog import WorkflowCatalog
 from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, InquiryError
 from services.checking.condition_evaluator import ConditionEvaluator
+from services.checking.step_artifact_checker import StepArtifactChecker
+from services.checking.step_authorization_checker import StepAuthorizationChecker
 from services.checking.step_postcondition_checker import StepPostconditionChecker
 from services.checking.step_precondition_checker import StepPreconditionChecker
 from services.context_resolution.step_instruction_resolver import (
@@ -251,6 +253,15 @@ class Application:
             ),
             CheckStepPreconditionsCommand(
                 StepPreconditionChecker(evaluator, session_log_store, catalog), validator
+            ),
+            CheckStepAuthorizationCommand(
+                StepAuthorizationChecker(
+                    session_log_store, acl, workspace_layout, artifact_store
+                ),
+                validator,
+            ),
+            CheckStepArtifactCommand(
+                StepArtifactChecker(session_log_store, artifact_store), validator
             ),
             ResolveStepInstructionsCommand(
                 StepInstructionResolver(catalog, session_log_store), validator

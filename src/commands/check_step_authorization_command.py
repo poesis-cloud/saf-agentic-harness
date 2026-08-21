@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from commands.check_step_authorization_inquiry import CheckStepAuthorizationInquiry
 from commands.command import Command
+from services.checking.step_authorization_checker import StepAuthorizationChecker
 from stores.session_log_store.report import Report
 from utils.schema_validator import SchemaValidator
 
@@ -22,12 +23,10 @@ class CheckStepAuthorizationCommand(Command):
     FUNCTION = "check-step-authorization"
     INPUT_CONTRACT_ID = "gsmarc://saf/contracts/api/check-step-authorization.input/v1"
 
-    def __init__(self, checker: Any, schema_validator: SchemaValidator) -> None:
-        """Create the command over the authorization checker it decides through.
-
-        `checker` is typed `Any` until `StepAuthorizationChecker` lands in
-        `services/checking/`; the composition root supplies the concrete service.
-        """
+    def __init__(
+        self, checker: StepAuthorizationChecker, schema_validator: SchemaValidator
+    ) -> None:
+        """Create the command over the authorization checker it decides through."""
         super().__init__(schema_validator)
         self._checker = checker
 

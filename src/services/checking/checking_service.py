@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from errors import HarnessError, StateError
 from stores.session_log_store import (
@@ -62,16 +62,20 @@ class CheckingService(ABC):
         """Build this function's own report type carrying only the envelope."""
 
     def _execute_check(
-        self, session_id: str, parent_session_id: str | None
+        self, session_id: str, parent_session_id: str | None, **request: Any
     ) -> Report:
-        """Run the function behind the C8 refusal and the single error seam."""
+        """Run the function behind the C8 refusal and the single error seam.
+
+        `request` carries the function's own inquiry parameters — the condition
+        checkers have none, the write-boundary checkers have the write itself.
+        """
         workflow_instance_id: str | None = None
         try:
             log = self._session_log_store.load_session_log(session_id)
             self._refuse_ended_session(log)
             workflow_instance_id = self._find_workflow_instance_id(log)
             return self._check_open_session(
-                session_id, parent_session_id, log, workflow_instance_id
+                session_id, parent_session_id, log, workflow_instance_id, **request
             )
         except HarnessError as error:
             report = self._build_report(
@@ -98,6 +102,7 @@ class CheckingService(ABC):
         parent_session_id: str | None,
         log: Log,
         workflow_instance_id: str | None,
+        **request: Any,
     ) -> Report:
         """Run this function's own logic against an open, registered session."""
 

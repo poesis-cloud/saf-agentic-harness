@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from commands.check_step_artifact_inquiry import CheckStepArtifactInquiry
 from commands.command import Command
+from services.checking.step_artifact_checker import StepArtifactChecker
 from stores.session_log_store.report import Report
 from utils.schema_validator import SchemaValidator
 
@@ -21,12 +22,10 @@ class CheckStepArtifactCommand(Command):
     FUNCTION = "check-step-artifact"
     INPUT_CONTRACT_ID = "gsmarc://saf/contracts/api/check-step-artifact.input/v1"
 
-    def __init__(self, checker: Any, schema_validator: SchemaValidator) -> None:
-        """Create the command over the artifact checker it gates through.
-
-        `checker` is typed `Any` until `StepArtifactChecker` lands in
-        `services/checking/`; the composition root supplies the concrete service.
-        """
+    def __init__(
+        self, checker: StepArtifactChecker, schema_validator: SchemaValidator
+    ) -> None:
+        """Create the command over the artifact checker it gates through."""
         super().__init__(schema_validator)
         self._checker = checker
 

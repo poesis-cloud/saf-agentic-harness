@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,8 @@ WIRED_FUNCTIONS = frozenset(
         "resolve-step",
         "resolve-step-model",
         "check-step-preconditions",
+        "check-step-authorization",
+        "check-step-artifact",
         "resolve-step-instructions",
         "resolve-step-skills",
         "check-step-postconditions",
@@ -192,6 +195,21 @@ def _workspace_dir(framework_root: Path) -> Path:
     return framework_root.parent / "workspace"
 
 
+def _git(workspace: Path, *args: str) -> str:
+    """Run one Git command in the workspace repository."""
+    return subprocess.run(
+        ("git", *args), cwd=workspace, text=True, capture_output=True, check=True
+    ).stdout.strip()
+
+
+def _init_git_workspace(workspace: Path) -> None:
+    """Turn the workspace into the Git repository the commit gate transacts on."""
+    _git(workspace, "init")
+    _git(workspace, "config", "user.email", "test@example.com")
+    _git(workspace, "config", "user.name", "Test User")
+    _git(workspace, "commit", "--allow-empty", "-m", "baseline")
+
+
 class TestApplication:
     """The composition root: fail-fast wiring, argv dispatch, and the exit plane."""
 
@@ -298,10 +316,6 @@ class TestApplication:
     ) -> None:
         """Spec (Classes, `commands`): `Command` is realized by twelve commands —
         exactly one per harness function — and nothing else, no hook command.
-
-        Functions 8 and 9 are absent from this set only because
-        `StepAuthorizationChecker` and `StepArtifactChecker` do not yet exist under
-        `services/checking/`; wiring them here is the only change their landing needs.
         """
         application = Application(framework_root)
 
@@ -361,6 +375,75 @@ class TestApplication:
         assert exit_code == 0
         assert report["outcome"]["status"] == "not-applicable"
         assert not (_workspace_dir(framework_root) / "logs" / "s1.log.jsonl").exists()
+
+    def test_dispatches_the_write_boundary_to_its_concrete_authorization_service(
+        self, framework_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Spec (`application`): the composition root wires the object graph — the
+        write-starting boundary reaches `StepAuthorizationChecker` itself, so the
+        deny it renders is the service's decision, not a stubbed one.
+        """
+        application = Application(framework_root)
+        application.dispatch_command(
+            ["start-session", "--session-id", "s1", "--agent", "planner"]
+        )
+        capsys.readouterr()
+
+        exit_code = application.dispatch_command(
+            [
+                "check-step-authorization",
+                "--session-id",
+                "s1",
+                "--artifact-path",
+                "portfolio/epics/one.md",
+                "--action",
+                "delete",
+            ]
+        )
+
+        report = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert report["context"]["function"] == "check-step-authorization"
+        assert report["outcome"]["status"] == "denied"
+        assert report["authorization"] == {
+            "actor": "planner",
+            "artifactPath": "portfolio/epics/one.md",
+            "action": "delete",
+            "resource": "epic",
+            "failureMessage": report["authorization"]["failureMessage"],
+        }
+
+    def test_dispatches_the_commit_gate_to_its_concrete_artifact_service(
+        self, framework_root: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Spec (`application`): the commit gate reaches `StepArtifactChecker` itself
+        — the validated set is promoted into committed state by the wired service's
+        own Git transaction (function 9, invariant 3).
+
+        The path sits under the artifact kind's own scope, which is how
+        `ArtifactStore` matches a path to its schema.
+        """
+        workspace = _workspace_dir(framework_root)
+        _init_git_workspace(workspace)
+        application = Application(framework_root)
+        application.dispatch_command(
+            ["start-session", "--session-id", "s1", "--agent", "planner"]
+        )
+        capsys.readouterr()
+        staged = workspace / "epic" / "one.md"
+        staged.parent.mkdir(parents=True)
+        staged.write_text('{"slug": "one"}', encoding="utf-8")
+
+        exit_code = application.dispatch_command(
+            ["check-step-artifact", "--session-id", "s1", "--artifact-path", "epic/one.md"]
+        )
+
+        report = json.loads(capsys.readouterr().out)
+        assert exit_code == 0
+        assert report["context"]["function"] == "check-step-artifact"
+        assert report["outcome"]["status"] == "valid"
+        assert "epic/one.md" in _git(workspace, "ls-tree", "-r", "--name-only", "HEAD")
+        assert "s1" in _git(workspace, "log", "-1", "--format=%B")
 
     def test_surfaces_an_invalid_inquiry_at_the_exit_plane_without_a_report(
         self, framework_root: Path, capsys: pytest.CaptureFixture[str]
