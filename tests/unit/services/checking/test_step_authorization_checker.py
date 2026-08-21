@@ -380,10 +380,12 @@ class TestStepAuthorizationChecker:
         access_control_list: AccessControlList,
         artifact_store: ArtifactStore,
     ) -> None:
-        """Function 8, invariant 2 + 4: the resource must resolve to ONE artifact
-        schema identity; a path several kinds' patterns match resolves to none of
-        them here — function 8 has no artifact `type` to disambiguate with — so it is
-        denied as an unresolvable resource rather than authorized by guesswork."""
+        """Function 8, invariant 2 + 4: the resource must resolve to ONE artifact schema
+        identity, and "a layout in which two kinds claim one path is rejected at
+        configuration load". This layout is therefore built directly, bypassing
+        `ConfigLoader` — defence in depth for the branch the load-time rule is meant to
+        make unreachable. Reached anyway, the checker denies it as an unresolvable
+        resource (invariant 4) rather than authorizing by guesswork."""
         _open_session(log_store)
         checker = _build_checker(
             log_store, access_control_list, build_ambiguous_layout(), artifact_store

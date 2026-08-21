@@ -372,10 +372,11 @@ class TestArtifactStoreOverARealisticLayout:
         self, workspace: Path, portfolio_store: ArtifactStore
     ) -> None:
         """Spec (function 9, invariant 1): "Every artifact write is validated against its
-        matched artifact schema (path patterns + `type` disambiguation)"; function 8,
-        invariant 2: the resource is "resolved from the write path — via the workspace
-        layout's singleton map ... else via the artifact schemas' own path patterns". A
-        nested layout binds `feature` to a path no artifact slug prefixes."""
+        matched artifact schema (path patterns; schemas extend the harness base contract
+        via `$ref`)"; function 8, invariant 2: the resource is "resolved from the write
+        path — via the workspace layout's singleton map ... else via the artifact schemas'
+        own path patterns". A nested layout binds `feature` to a path no artifact slug
+        prefixes."""
         _stage(workspace, _FEATURE_REF, '{"slug":"refunds","status":"draft"}\n')
 
         assert portfolio_store.validate_artifact(Path(_FEATURE_REF)) == ()

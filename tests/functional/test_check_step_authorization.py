@@ -274,11 +274,13 @@ class TestCheckStepAuthorization:
     def test_an_action_outside_the_vocabulary_fails_at_the_command_exit_plane(
         self, harness: FunctionalHarness, builder_session: str
     ) -> None:
-        """Spec (rule 4 + the input contract's `action` enum): an action the contract
-        does not name fails CONTRACT validation, which is pre-attribution — no report at
-        all, stderr plus a nonzero exit, and nothing journaled. The inline
-        `unknown-action` precondition can therefore never be reached through the command
-        boundary: the enum refuses first."""
+        """Spec (rule 4 + function 8's Interface): the write `action` is `create`,
+        `update` or `delete`, and the input contract's enum admits nothing else. An
+        action outside that vocabulary fails CONTRACT validation, which is
+        pre-attribution — it "produces no report at all", surfacing at the command exit
+        plane (stderr + nonzero exit), with nothing journaled. Mapping a host tool to an
+        action verb is the adapter's job, so an out-of-vocabulary action is adapter
+        misconfiguration, and the contract is where it is caught."""
         assert harness.validate_inquiry(
             FUNCTION,
             {"sessionId": builder_session, "artifactPath": EPIC_REF, "action": "append"},

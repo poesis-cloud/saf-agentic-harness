@@ -12,6 +12,7 @@ from typing import Callable
 
 import pytest
 
+from errors import ConfigurationError
 from functional_fixtures import (
     FunctionalHarness,
     assert_contract_round_trip,
@@ -224,25 +225,29 @@ class TestCheckStepArtifact:
         assert harness.count_commits() == commits_before
         assert assert_journal_contract(harness, builder_session)[-1]["report"] == report
 
-    def test_a_path_two_kinds_bind_is_refused_never_guessed(
+    def test_a_layout_two_kinds_bind_is_refused_at_configuration_load(
         self, build_harness: HarnessBuilder
     ) -> None:
-        """Spec (function 9, invariant 1 — `type` disambiguation): when several path
-        patterns match, the kind must be disambiguated by the artifact's `type`. Neither
-        write-boundary contract carries one, so the harness cannot disambiguate and
-        refuses instead of guessing a schema: `artifact-schema-unresolved`, the set
-        discarded, committed state untouched."""
+        """Spec (function 8, invariant 2): "The layout must resolve a path to exactly one
+        artifact kind; a layout in which two kinds claim one path is rejected at
+        configuration load" — which is what lets function 9, invariant 1 speak of "its
+        matched artifact schema" in the singular.
+
+        Internal validation — not functions: `Application` builds every configuration
+        dataclass at instantiation, so EVERY invocation of ANY function fails fast, as a
+        domain exception at the trigger plane, before any function runs. The ambiguous
+        layout never reaches the write plane at all — there is nothing left to guess at.
+        """
         harness = build_write_boundary_harness(build_harness, AMBIGUOUS_WORKSPACE_LAYOUT)
-        session = open_session(harness, "builder-session", "builder")
-        stage_write(harness, EPIC_REF, epic_markdown("checkout", "draft"))
 
-        run = harness.invoke(FUNCTION, sessionId=session, artifactPaths=[EPIC_REF])
+        with pytest.raises(ConfigurationError) as opening_refusal:
+            harness.invoke("start-session", sessionId="builder-session", agent="builder")
+        with pytest.raises(ConfigurationError) as write_refusal:
+            harness.invoke(FUNCTION, sessionId="builder-session", artifactPaths=[EPIC_REF])
 
-        report = assert_contract_round_trip(harness, run)
-        assert report["outcome"]["status"] == "state-error"
-        assert run.error_code == "artifact-schema-unresolved"
-        assert "ambiguous" in report["outcome"]["error"]["message"]
-        assert read_worktree(harness, EPIC_REF) is None
+        assert opening_refusal.value.code == "ambiguous-workspace-path"
+        assert write_refusal.value.code == "ambiguous-workspace-path"
+        assert not harness.is_session_logged("builder-session")
         assert harness.count_commits() == 1
 
     def test_each_validation_journals_exactly_one_entry(
