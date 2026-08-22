@@ -7,28 +7,34 @@
 # resolves its `cwd` against $HOME by default, so both must be absolute by the time the host
 # reads them. This script is that rendering stage.
 #
-# TWO render targets, one substitution path:
+# THREE render targets, one substitution path:
 #   hooks.yaml        -> the workspace hook file, <dest>/safe-harness.json;
-#   agent-hooks.yaml  -> a `hooks:` block in the frontmatter of one generated agent file per
-#                        framework ORCHESTRATOR (the H0 session-started boundary, which the
-#                        host reads per agent, never from the workspace file).
+#   agent-hooks.yaml  -> a `hooks:` block in the frontmatter of one agent file per framework
+#                        ORCHESTRATOR (the H0 session-started boundary, which the host reads
+#                        per agent, never from the workspace file);
+#   settings.yaml     -> the required workspace editor settings, MERGED into the workspace
+#                        settings file. Without them the other two targets are inert: the
+#                        host discovers hook files and does not execute them.
 #
-# Three placeholders are substituted:
-#   {{ADAPTERS_DIR}}   this directory, derived from THIS FILE'S own location — `adapters/`
-#                      ships in the harness repo, never in the framework, so anchoring the
-#                      dispatch path on any environment variable would name a file that does
-#                      not exist;
-#   {{FRAMEWORK_DIR}}  the absolute framework root, supplied explicitly and required to exist.
-#   {{AGENT_SLUG}}     the scoping orchestrator's slug (agent target only) — the trailing
-#                      dispatch argument that carries the agent identity no payload names.
+# Four placeholders are substituted:
+#   {{ADAPTERS_DIR}}    this directory, derived from THIS FILE'S own location — `adapters/`
+#                       ships in the harness repo, never in the framework, so anchoring the
+#                       dispatch path on any environment variable would name a file that does
+#                       not exist;
+#   {{FRAMEWORK_DIR}}   the absolute framework root, supplied explicitly and required to exist.
+#   {{AGENT_SLUG}}      the scoping orchestrator's slug (agent target only) — the trailing
+#                       dispatch argument that carries the agent identity no payload names.
+#   {{HOOKS_LOCATION}}  where the hooks file actually landed, as the host must be told to
+#                       discover it (settings target only).
 #
-# Rendered output is machine-specific: it is generated at install time, never committed. The
-# agent target therefore writes to a GENERATED agent file and reads the framework's committed
-# agent sources without touching them; everything outside the managed block — frontmatter and
-# body alike — is carried across byte for byte.
+# Rendered hook output is machine-specific: it is generated at install time, never committed.
+# The agent target writes into the DELIVERED agent copy and never the framework's committed
+# sources; everything outside the managed block — frontmatter and body alike — is carried
+# across byte for byte. The settings target writes into a file that IS committed and
+# hand-maintained, so it merges keys and preserves everything else, including comments.
 #
 # Rendering is all-or-nothing — every output is validated in memory and files are written only
-# once BOTH targets pass. A half-rendered registration is the failure this stage prevents.
+# once ALL THREE targets pass. A half-rendered registration is the failure this stage prevents.
 
 import argparse
 import json
@@ -41,11 +47,15 @@ import yaml
 
 RENDERED_FILENAME = "safe-harness.json"
 AGENT_HOOKS_FILENAME = "agent-hooks.yaml"
+SETTINGS_FILENAME = "settings.yaml"
 _COMMAND_FIELD = "command"
 _REQUIRED_FIELDS = ("type", "command", "cwd")
 _PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
 _HOOKS_KEY = "hooks"
 _AGENT_HOOKS_KEY = "agentHooks"
+_SETTINGS_KEY = "settings"
+_SETTINGS_PATH_KEY = "path"
+_SETTINGS_MERGE_KEY = "merge"
 _ORCHESTRATOR_KEY = "orchestrator"
 _WORKFLOW_GLOB = "*.workflow.conf.yaml"
 _FENCE = "---"
@@ -307,6 +317,318 @@ def render_agents(
     return outputs
 
 
+# The settings target — a MERGE into a file the OPERATOR owns.
+#
+# The other two targets are generated artifacts this renderer owns outright. The workspace
+# settings file is not: it is committed, hand-maintained, and read by the host as JSONC
+# (comments and trailing commas allowed). So it is edited textually, key by key — parsing and
+# re-serialising it would silently delete the operator's comments and reflow their file, and
+# a file that cannot be parsed is refused rather than replaced, because replacing it destroys
+# settings that cannot be recovered.
+#
+# The keys carry no managed delimiter, unlike the H0 block: a delimiter marks a region this
+# renderer may strip, and these are individual host settings in someone else's file.
+
+
+def _scan_string(text: str, index: int) -> int:
+    """The index just past the closing quote of the JSON string starting at `index`."""
+    cursor = index + 1
+    while cursor < len(text):
+        if text[cursor] == "\\":
+            cursor += 2
+            continue
+        if text[cursor] == '"':
+            return cursor + 1
+        cursor += 1
+    raise RenderError("a string is never closed")
+
+
+def _end_of_comment(text: str, index: int) -> int:
+    if text[index + 1] == "/":
+        end = text.find("\n", index)
+        return len(text) if end == -1 else end
+    end = text.find("*/", index + 2)
+    if end == -1:
+        raise RenderError("a block comment is never closed")
+    return end + 2
+
+
+def _is_comment(text: str, index: int) -> bool:
+    return text[index] == "/" and index + 1 < len(text) and text[index + 1] in "/*"
+
+
+def _skip_insignificant(text: str, index: int) -> int:
+    while index < len(text):
+        if text[index].isspace():
+            index += 1
+        elif _is_comment(text, index):
+            index = _end_of_comment(text, index)
+        else:
+            return index
+    return index
+
+
+def _strict_json(text: str) -> str:
+    """A JSONC projection onto strict JSON — comments blanked, trailing commas dropped —
+    with every other byte, and every offset, left where it was."""
+    out = list(text)
+    index = 0
+    last = -1
+    while index < len(text):
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if _is_comment(text, index):
+            end = _end_of_comment(text, index)
+            for position in range(index, end):
+                if out[position] != "\n":
+                    out[position] = " "
+            index = end
+            continue
+        if char == '"':
+            last = index
+            index = _scan_string(text, index)
+            continue
+        if char in "}]" and last >= 0 and text[last] == ",":
+            out[last] = " "
+        last = index
+        index += 1
+    return "".join(out)
+
+
+def _scan_value(text: str, index: int) -> int:
+    """The index just past the JSON value starting at `index`."""
+    if text[index] == '"':
+        return _scan_string(text, index)
+    if text[index] in "{[":
+        depth = 0
+        while index < len(text):
+            char = text[index]
+            if char == '"':
+                index = _scan_string(text, index)
+                continue
+            if _is_comment(text, index):
+                index = _end_of_comment(text, index)
+                continue
+            if char in "{[":
+                depth += 1
+            elif char in "}]":
+                depth -= 1
+                if depth == 0:
+                    return index + 1
+            index += 1
+        raise RenderError("a value is never closed")
+    while index < len(text) and text[index] not in ",}] \t\r\n" and not _is_comment(text, index):
+        index += 1
+    return index
+
+
+def _top_level_members(text: str) -> tuple[int, list[tuple[str, int, int, int]]]:
+    """The outermost object's opening brace, and one `(key, key_start, value_start,
+    value_end)` per member — the spans a key-level edit rewrites."""
+    index = _skip_insignificant(text, 0)
+    if index >= len(text) or text[index] != "{":
+        raise RenderError("the settings are not a JSON object")
+
+    brace = index
+    index = _skip_insignificant(text, index + 1)
+    members: list[tuple[str, int, int, int]] = []
+    while index < len(text) and text[index] != "}":
+        if text[index] == ",":
+            index = _skip_insignificant(text, index + 1)
+            continue
+        if text[index] != '"':
+            raise RenderError("a settings key is not a quoted string")
+        key_start = index
+        key_end = _scan_string(text, index)
+        index = _skip_insignificant(text, key_end)
+        if index >= len(text) or text[index] != ":":
+            raise RenderError("a settings key carries no value")
+        index = _skip_insignificant(text, index + 1)
+        value_start = index
+        index = _scan_value(text, index)
+        members.append((json.loads(text[key_start:key_end]), key_start, value_start, index))
+        index = _skip_insignificant(text, index)
+    return brace, members
+
+
+def _line_indent(text: str, index: int) -> str:
+    start = text.rfind("\n", 0, index) + 1
+    return text[start:index] if not text[start:index].strip() else "  "
+
+
+def _rendered_value(value, indent: str) -> str:
+    rendered = json.dumps(value, indent=2)
+    head, *rest = rendered.splitlines()
+    return "\n".join([head] + [indent + line for line in rest])
+
+
+def _spliced(text: str, updates: dict) -> str:
+    """The same file with ONLY the given keys' values rewritten (or added) — every other
+    byte, comment and indentation included, exactly where it was."""
+    brace, members = _top_level_members(text)
+    spans = {key: (key_start, value_start, value_end) for key, key_start, value_start, value_end in members}
+    indent = _line_indent(text, members[0][1]) if members else "  "
+
+    replacements = []
+    additions = []
+    for key, value in updates.items():
+        if key in spans:
+            key_start, value_start, value_end = spans[key]
+            replacements.append((value_start, value_end, _rendered_value(value, _line_indent(text, key_start))))
+        else:
+            additions.append(f"{indent}{json.dumps(key)}: {_rendered_value(value, indent)}")
+
+    for start, end, rendered in sorted(replacements, reverse=True):
+        text = text[:start] + rendered + text[end:]
+
+    if additions:
+        joined = ",\n".join(additions)
+        chunk = f"\n{joined}," if members else f"\n{joined}\n"
+        text = text[: brace + 1] + chunk + text[brace + 1 :]
+    return text
+
+
+def _merged(existing: dict, key: str, required):
+    """A required object value is merged one level deep: the host reads
+    `chat.hookFilesLocations` as a discovery SET, so this adapter's entry joins whatever
+    else is registered rather than displacing it."""
+    if not isinstance(required, dict):
+        return required
+    current = existing.get(key)
+    if current is None:
+        return dict(required)
+    if not isinstance(current, dict):
+        raise RenderError(
+            f"the workspace settings already set '{key}' to a {type(current).__name__} — "
+            "the host reads it as an object and discards anything else. This renderer "
+            "merges into that setting rather than replacing a value the operator chose, "
+            "so correct or remove it and re-run"
+        )
+    return {**current, **required}
+
+
+def _render_settings_text(source_text: str | None, required: dict, where: str) -> str | None:
+    """The settings file's new contents, or None when every required setting already holds."""
+    if source_text is None or not _strict_json(source_text).strip():
+        return json.dumps(required, indent=2) + "\n"
+
+    try:
+        existing = json.loads(_strict_json(source_text))
+    except ValueError as error:
+        raise RenderError(
+            f"the workspace settings at {where} cannot be parsed ({error}) — they are "
+            "hand-maintained and this renderer will not replace a file whose contents it "
+            "cannot preserve; repair the file and re-run"
+        ) from error
+    if not isinstance(existing, dict):
+        raise RenderError(
+            f"the workspace settings at {where} are not a JSON object — there is nowhere "
+            "to carry a setting, and overwriting the file would discard whatever it means"
+        )
+
+    updates = {key: _merged(existing, key, value) for key, value in required.items()}
+    if all(existing.get(key) == value for key, value in updates.items()):
+        return None
+
+    rendered = _spliced(source_text, updates)
+    if json.loads(_strict_json(rendered)) != {**existing, **updates}:
+        raise RenderError(f"rendering {where} altered a setting that was not required")
+    return rendered
+
+
+def _hooks_location(hooks_dest: Path, framework_root: Path) -> str:
+    """Where the host must be told to look — workspace-relative when the hooks file landed
+    inside the framework workspace, absolute when it did not, never the default restated."""
+    resolved = hooks_dest.resolve()
+    try:
+        return resolved.relative_to(framework_root).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def _substituted_settings(node, literals: dict):
+    """Substitution over KEYS as well as values — the hooks location is a key of the
+    discovery map, not a value."""
+    if isinstance(node, dict):
+        return {
+            _substituted_settings(key, literals): _substituted_settings(value, literals)
+            for key, value in node.items()
+        }
+    if isinstance(node, list):
+        return [_substituted_settings(item, literals) for item in node]
+    if isinstance(node, str):
+        for placeholder, value in literals.items():
+            node = node.replace(placeholder, value)
+        return node
+    return node
+
+
+def render_settings(
+    settings_source: Path,
+    framework_root: Path,
+    hooks_dest: Path,
+    settings_dest: Path | None = None,
+) -> tuple[Path, str | None]:
+    """The settings target: the file the required settings belong in, and its new contents
+    — or None when it already carries them."""
+    source = _load_source(settings_source, "settings map")
+    declared = source.get(_SETTINGS_KEY)
+    if not isinstance(declared, dict):
+        raise RenderError(
+            f"the settings map at {settings_source} has no '{_SETTINGS_KEY}' object"
+        )
+
+    relative = declared.get(_SETTINGS_PATH_KEY)
+    required = declared.get(_SETTINGS_MERGE_KEY)
+    if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
+        raise RenderError(
+            f"the settings map at {settings_source} names no workspace-relative "
+            f"'{_SETTINGS_PATH_KEY}' to merge into"
+        )
+    if not isinstance(required, dict) or not required:
+        raise RenderError(
+            f"the settings map at {settings_source} requires no setting — without "
+            "'chat.useHooks' the host discovers every rendered hook and executes none"
+        )
+
+    required = _substituted_settings(
+        required, {"{{HOOKS_LOCATION}}": _hooks_location(hooks_dest, framework_root)}
+    )
+    _no_leftover_placeholder(json.dumps(required), "the workspace settings")
+
+    target = (
+        settings_dest / Path(relative).name
+        if settings_dest is not None
+        else framework_root / relative
+    )
+    source_text = target.read_text(encoding="utf-8") if target.is_file() else None
+    return target, _render_settings_text(source_text, required, str(target))
+
+
+def _resolve_agents_dir(explicit: str | None, bundle: str | None, role: str) -> Path:
+    """Where the H0 block is injected. There is NO framework-anchored default: a framework
+    ships its agents through a host bundle, so writing a second copy elsewhere would put the
+    same agent in front of the host twice — once carrying the hook, once carrying the
+    bundle's own tool restrictions — and which one wins is not something this renderer can
+    know. It refuses to guess instead."""
+    if explicit:
+        return Path(explicit)
+    if bundle:
+        root = Path(bundle).expanduser()
+        if not root.is_dir():
+            raise RenderError(f"the bundle root does not exist: {root}")
+        return root.resolve() / "agents"
+    raise RenderError(
+        f"no agent directory to be {role} — the H0 registration is injected into the "
+        "DELIVERED agents, so pass --bundle-dir <bundle root> after the framework's own "
+        "bundle renderer has run, or name --agents-dir/--agents-dest explicitly for a "
+        "framework delivered some other way. Defaulting would install a second copy of "
+        "every orchestrator alongside the delivered one"
+    )
+
+
 def _resolve_framework_root(raw: str | None) -> Path:
     if not raw:
         raise RenderError(
@@ -335,12 +657,26 @@ def main(argv: list[str] | None = None) -> int:
         help="H0 agent hook template; defaults to adapters/<env>/agent-hooks.yaml",
     )
     parser.add_argument(
+        "--settings",
+        help="required-settings map; defaults to adapters/<env>/settings.yaml",
+    )
+    parser.add_argument(
+        "--settings-dest",
+        help="directory holding the workspace settings file; defaults to the location the "
+        "settings map names, under <framework-dir>",
+    )
+    parser.add_argument(
+        "--bundle-dir",
+        help="root of the host bundle the framework's agents are DELIVERED from; the H0 "
+        "block is injected there, in place, on top of the bundle's own frontmatter",
+    )
+    parser.add_argument(
         "--agents-dir",
-        help="agent sources to render from; defaults to <framework-dir>/agents",
+        help="agent sources to render from; defaults to <bundle-dir>/agents",
     )
     parser.add_argument(
         "--agents-dest",
-        help="directory the rendered agents land in; defaults to <framework-dir>/.github/agents",
+        help="directory the rendered agents land in; defaults to <bundle-dir>/agents",
     )
     parser.add_argument(
         "--workflows-dir",
@@ -357,17 +693,18 @@ def main(argv: list[str] | None = None) -> int:
             if args.agent_hooks
             else adapters_dir / args.env / AGENT_HOOKS_FILENAME
         )
-        agents_dir = Path(args.agents_dir) if args.agents_dir else framework_root / "agents"
-        agents_dest = (
-            Path(args.agents_dest)
-            if args.agents_dest
-            else framework_root / ".github" / "agents"
+        settings_source = (
+            Path(args.settings) if args.settings else adapters_dir / args.env / SETTINGS_FILENAME
         )
+        agents_dir = _resolve_agents_dir(args.agents_dir, args.bundle_dir, "read from")
+        agents_dest = _resolve_agents_dir(args.agents_dest, args.bundle_dir, "written to")
         workflows_dir = (
             Path(args.workflows_dir)
             if args.workflows_dir
             else framework_root / "conf" / "workflows"
         )
+        dest = Path(args.dest) if args.dest else framework_root / ".github" / "hooks"
+        settings_dest = Path(args.settings_dest) if args.settings_dest else None
 
         hook_map = render(hooks_source, adapters_dir, framework_root)
         agents = render_agents(
@@ -378,12 +715,14 @@ def main(argv: list[str] | None = None) -> int:
             adapters_dir,
             framework_root,
         )
+        settings_target, settings_text = render_settings(
+            settings_source, framework_root, dest, settings_dest
+        )
     except RenderError as error:
         print(f"render_hooks: {error}", file=sys.stderr)
         return 2
 
-    # Both targets validated: only now does anything reach disk.
-    dest = Path(args.dest) if args.dest else framework_root / ".github" / "hooks"
+    # All three targets validated: only now does anything reach disk.
     dest.mkdir(parents=True, exist_ok=True)
     target = dest / RENDERED_FILENAME
     target.write_text(json.dumps(hook_map, indent=2) + "\n", encoding="utf-8")
@@ -391,6 +730,10 @@ def main(argv: list[str] | None = None) -> int:
     agents_dest.mkdir(parents=True, exist_ok=True)
     for path, text in agents.items():
         path.write_text(text, encoding="utf-8")
+
+    if settings_text is not None:
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_text(settings_text, encoding="utf-8")
 
     print(f"installed: {target}")
     print(f"  rendered from: {hooks_source}")
@@ -400,6 +743,11 @@ def main(argv: list[str] | None = None) -> int:
     for path in sorted(agents):
         print(f"  {path}")
     print(f"  rendered from: {agent_hooks_source} + {agents_dir}")
+    if settings_text is None:
+        print(f"settings already correct: {settings_target}")
+    else:
+        print(f"settings merged: {settings_target}")
+        print(f"  rendered from: {settings_source}")
     return 0
 
 

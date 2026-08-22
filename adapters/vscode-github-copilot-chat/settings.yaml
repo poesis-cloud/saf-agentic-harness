@@ -1,0 +1,24 @@
+# The workspace VS Code settings this adapter requires — the THIRD render target.
+#
+# The other two targets register the hooks; this one is what makes the host RUN them.
+# `chat.useHooks` is the master switch: without it the rendered hook file is discovered
+# and never executed, so however perfectly the other two targets render, no hook fires.
+#
+# Unlike those two, the target file is a COMMITTED, hand-maintained file that carries the
+# operator's own unrelated settings. The renderer therefore MERGES these keys into it and
+# never rewrites it: `merge` is a set of keys to assert, not a file to install. A key whose
+# value is an object is merged one level deep (the host reads `chat.hookFilesLocations`
+# as a discovery set, so this adapter's entry is added to whatever else is there).
+#
+# `chat.useClaudeHooks` is deliberately absent: the adapter spec's Required VS Code
+# settings table marks it not required (`false` acceptable) — this adapter reads
+# Copilot-format hook files only, and asserting an unrequired setting in someone else's
+# file is an opinion, not a requirement.
+settings:
+  path: .vscode/settings.json
+  merge:
+    chat.useHooks: true
+    chat.hookFilesLocations:
+      # Where the hooks file actually landed — an install-time choice (`--dest`), not the
+      # host default restated.
+      "{{HOOKS_LOCATION}}": true

@@ -90,6 +90,8 @@ class TestHookRenderer:
             ADAPTER_ENV,
             "--framework-dir",
             str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
             "--dest",
             str(dest),
         )
@@ -114,6 +116,8 @@ class TestHookRenderer:
             "--env",
             ADAPTER_ENV,
             "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
             str(framework_root),
             "--dest",
             str(dest),
@@ -146,6 +150,8 @@ class TestHookRenderer:
             ADAPTER_ENV,
             "--framework-dir",
             str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
             "--dest",
             str(dest),
         )
@@ -173,6 +179,8 @@ class TestHookRenderer:
             ADAPTER_ENV,
             "--framework-dir",
             str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
             "--dest",
             str(dest),
         )
@@ -199,6 +207,8 @@ class TestHookRenderer:
             "--env",
             ADAPTER_ENV,
             "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
             str(framework_root),
         )
 
@@ -272,6 +282,8 @@ class TestHookRenderer:
             ADAPTER_ENV,
             "--framework-dir",
             str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
             "--dest",
             str(dest),
             "--hooks",
@@ -303,6 +315,8 @@ class TestHookRenderer:
             "--env",
             ADAPTER_ENV,
             "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
             str(framework_root),
             "--dest",
             str(dest),

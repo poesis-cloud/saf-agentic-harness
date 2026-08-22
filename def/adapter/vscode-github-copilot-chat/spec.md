@@ -51,9 +51,10 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
 - [Invocation plumbing and contract layering](#invocation-plumbing-and-contract-layering) —
   the host → dispatch → harness → host chain, which contract governs each seam, and the
   dispatch-as-CLI verdict
-- [Rendered registration](#rendered-registration) — the workspace `.github/hooks/*.json` file
-  plus the orchestrator `.agent.md` frontmatter block, the
-  [installation destination](#installation-destination), and the
+- [Rendered registration](#rendered-registration) — the workspace `.github/hooks/*.json` file,
+  the delivered agents' `.agent.md` frontmatter block, and the merged workspace
+  `.vscode/settings.json`, plus the
+  [installation destination](#installation-destination) and the
   [rendering guarantees](#rendering-guarantees-decision-c) of the renderer that resolves
   which root the registration resolves `adapters/` against
 - [Inconsistencies with the harness spec](#inconsistencies-with-the-harness-spec) — findings
@@ -83,15 +84,16 @@ per whole chat conversation regardless of which agent is selected. H0 is built o
 
 ### Required VS Code settings
 
-The adapter is inert unless the user's VS Code carries these settings (workspace-recommended
-via `.vscode/settings.json`; the harness's fail-fast configuration load SHOULD validate their
-presence as part of the adapter binding):
+The adapter is inert unless the user's VS Code carries these settings. They are the third
+[render target](#rendered-registration): `make install-hooks` merges them into the workspace
+`.vscode/settings.json`, and the harness's fail-fast configuration load SHOULD validate their
+presence as part of the adapter binding.
 
 | Setting | Required value | Why |
 | --- | --- | --- |
 | `chat.useHooks` | `true` | Master switch — hook files are discovered but **not executed** without it. |
-| `chat.hookFilesLocations` | must include `.github/hooks` (host default — verify not overridden) | Discovery of the rendered workspace hooks file. |
-| `chat.useClaudeHooks` | not required (`false` acceptable) | Claude-format hook files — unused by this adapter (Copilot-format only). |
+| `chat.hookFilesLocations` | an object map that includes the hooks directory (`.github/hooks` is the host default — verify not overridden) | Discovery of the rendered workspace hooks file. The host reads this setting as `{ location: boolean }` and discards any other shape. |
+| `chat.useClaudeHooks` | not required (`false` acceptable) | Claude-format hook files — unused by this adapter (Copilot-format only), so it is not written. |
 
 Hooks are a **preview** feature: setting names may drift; the harness's fail-fast
 adapter-binding validation at instantiation (spec — Internal validation) is the drift
@@ -1418,16 +1420,17 @@ must forward a third optional argument (H0's scoping agent slug), which its curr
 
 ## Rendered registration
 
-Three render targets, all from this adapter's sources. The first two are rendered by this
-repo, in ONE installation run; see [Rendering guarantees](#rendering-guarantees-decision-c).
+Three render targets, all from this adapter's sources, all rendered by this repo in ONE
+installation run; see [Rendering guarantees](#rendering-guarantees-decision-c).
 
-Three placeholders are substituted at install time:
+Four placeholders are substituted at install time:
 
 | Placeholder | Substituted with | Derived from |
 | --- | --- | --- |
 | `{{ADAPTERS_DIR}}` | this harness checkout's `adapters/` directory | the renderer's OWN location (`Path(__file__).parent`) |
 | `{{FRAMEWORK_DIR}}` | the absolute framework root | the `--framework-dir` argument, required and required to exist |
 | `{{AGENT_SLUG}}` | the scoping orchestrator's slug (H0 target only) | the framework's own workflow catalog — every `orchestrator:` it names |
+| `{{HOOKS_LOCATION}}` | where the hooks file actually landed (settings target only) | the resolved `--dest`, workspace-relative when it is inside the framework root |
 
 Both paths must be absolute in the installed artifacts: the host resolves a hook `cwd`
 against `$HOME` by default, and `adapters/` ships in the HARNESS repo, so a command relative
@@ -1468,37 +1471,103 @@ to the framework root names nothing (see host facts).
    every `orchestrator:` it names (`--workflows-dir` overrides). A catalog naming none is a
    refusal — without a registration H0 never fires and no session is ever opened.
 
-   **Where it is written — a generated agent file, never the committed source.** The block
-   pins one machine's absolute paths, and the framework's `agents/*.agent.md` are committed,
-   host-agnostic sources (the framework's own bundle stage already injects host-specific
-   frontmatter — `tools:` — into a rendered COPY, never into them). So the renderer reads
-   `<framework>/agents/<slug>.agent.md` and writes `<framework>/.github/agents/<slug>.agent.md`
-   — the host's verified workspace agent location, generated and ignored exactly like the
-   workspace hooks file. `AGENTS_DIR` / `AGENTS_DEST` override both ends: point them at an
-   already-rendered agent bundle and the block is injected there instead, in place and
-   idempotently, on top of that bundle's own `tools:` injection.
+   **Where it is written — into the agents the host is actually DELIVERED.** The block pins
+   one machine's absolute paths, so it never belongs in the framework's committed
+   `agents/*.agent.md`, which are host-agnostic sources. But it must land in the copy the
+   host reads, and a framework reaches this host through a **plugin bundle**: its own bundle
+   renderer copies the source tree, injects the host-specific `tools:` frontmatter into every
+   manifest agent in that COPY, and the packaging pipeline publishes the copy as the
+   installable artifact (evidence below). So the renderer reads and writes
+   `<bundle>/agents/<slug>.agent.md` — in place, idempotently, on top of the bundle's own
+   `tools:` injection. `AGENTS_DIR` / `AGENTS_DEST` override both ends for a framework
+   delivered some other way, e.g. into the host's workspace `.github/agents/` scope.
 
-   Everything outside the managed block — `name`, `description`, every other frontmatter key
-   and the whole body — is carried across byte for byte and re-verified after rendering. The
-   block is delimited by `# >>> safe-harness H0 … >>>` / `# <<< safe-harness H0 <<<` and is
-   stripped before re-injection, so re-running replaces it rather than appending a second
-   `hooks:` key; a damaged delimiter pair, or an agent declaring its own unmanaged `hooks:`,
-   is a refusal rather than a file the renderer patches around.
+   Everything outside the managed block — `name`, `description`, `tools`, every other
+   frontmatter key and the whole body — is carried across byte for byte and re-verified after
+   rendering. The block is delimited by `# >>> safe-harness H0 … >>>` /
+   `# <<< safe-harness H0 <<<` and is stripped before re-injection, so re-running replaces it
+   rather than appending a second `hooks:` key; a damaged delimiter pair, or an agent
+   declaring its own unmanaged `hooks:`, is a refusal rather than a file the renderer patches
+   around.
 
    Installed by the same `make install-hooks` run.
 
-1. **Workspace settings** — `.vscode/settings.json` in the workspace carries the
-   [required settings](#required-vs-code-settings) (`chat.useHooks: true`).
+1. **Workspace settings** — `settings.yaml` in this folder is the source of truth for the
+   [required settings](#required-vs-code-settings), **merged** into the workspace
+   `.vscode/settings.json` by the SAME stage:
+
+```json
+{
+  "chat.useHooks": true,
+  "chat.hookFilesLocations": { "{{HOOKS_LOCATION}}": true }
+}
+```
+
+   This target is what makes the other two run at all: `chat.useHooks` is the master switch,
+   and without it the host discovers every rendered hook and executes none. It is also the
+   only target whose file the adapter does **not** own — `.vscode/settings.json` is committed,
+   hand-maintained and read by the host as JSONC — so the contract is a merge, not an install:
+
+   - only the two required keys are written; every other setting, the operator's comments and
+     the file's own indentation survive byte for byte, because the file is edited textually,
+     key by key, rather than parsed and re-serialized;
+   - `chat.hookFilesLocations` is a discovery **set**: the adapter's entry joins whatever the
+     operator already registered rather than displacing it, and the entry names where the
+     hooks file actually landed (`--dest`), not the host default restated;
+   - the file is created when absent, left untouched when it already carries both settings,
+     and **refused** — never replaced — when it cannot be parsed, is not an object, or already
+     holds `chat.hookFilesLocations` as a value the merge cannot join (which the host would
+     discard anyway). Replacing a file whose contents cannot be preserved destroys settings
+     the operator cannot recover;
+   - the keys carry **no managed delimiter**, unlike the H0 block. A delimiter marks a region
+     this renderer may strip; these are individual host settings in someone else's file, and
+     claiming them would license silently reverting a value the operator deliberately set.
+     Idempotency needs no delimiter here — setting the same key twice is already a no-op.
+
+   `chat.useClaudeHooks` is deliberately not written: the table above marks it not required.
 
 ### Installation destination
 
-`HOOKS_DEST` is explicit, defaulting to `<framework root>/.github/hooks`; `AGENTS_DEST` is
-explicit, defaulting to `<framework root>/.github/agents`. The host collects
-`.github/hooks/*.json` and `.github/agents/*.agent.md` from **the workspace folder it has
-open** — which is the framework workspace the agents run in, not this harness checkout.
-Installing into the harness repo registers hooks for sessions editing the harness and for no
-other, which is precisely backwards; the defaults therefore point at the framework root, and
-any other destination must be a folder VS Code actually reads that framework's agents from.
+`HOOKS_DEST` is explicit, defaulting to `<framework root>/.github/hooks`. The host collects
+`.github/hooks/*.json` from **the workspace folder it has open** — which is the framework
+workspace the agents run in, not this harness checkout. Installing into the harness repo
+registers hooks for sessions editing the harness and for no other, which is precisely
+backwards; the default therefore points at the framework root.
+
+`AGENTS_DIR` / `AGENTS_DEST` have **no default**. `BUNDLE_DIR` supplies both as
+`<bundle>/agents`, and with neither given the renderer refuses. The reasoning:
+
+- **The plugin bundle is the delivery path — verified from the framework's own artifacts.**
+  Its build manifest names all agents and skills; its bundle renderer copies the source tree
+  and injects each agent's `tools:` into the copy; its packaging pipeline renders that bundle,
+  gates it, zips it and publishes it as *the installable artifact*. The manifest at the
+  source root names nothing at all, and the published zip excludes `.github/` outright — so
+  nothing rendered into `<framework>/.github/agents/` ever ships.
+- **Whether the host would shadow or duplicate is NOT verified.** The host's own agent
+  reference documents exactly two agent scopes — workspace `.github/agents/*.agent.md` and
+  user-profile `<profile>/agents/*.agent.md` — and states no precedence rule for two agents
+  of the same `name` across them. An installed plugin and a workspace file are different
+  scopes, so a framework-anchored default would put each orchestrator in front of the host
+  twice: one copy carrying the H0 hook without the bundle's tool restrictions, one carrying
+  the restrictions without the hook. If the delivered copy wins, no session ever opens; if
+  the rendered copy wins, every orchestrator runs unrestricted. Both are failures, and which
+  occurs cannot be determined from the documented host behavior.
+- Faced with an unverifiable precedence, the renderer takes the option that **cannot produce
+  the ambiguity**: one copy of each agent, the delivered one, carrying both. It refuses to
+  guess rather than defaulting into a second copy.
+
+The pipeline is therefore ordered — the framework's own bundle renderer first, the H0
+injection second, on top of its output:
+
+```bash
+# in the framework checkout
+python3 builds/<host>/render_bundle.py . "$BUNDLE"
+# in this harness checkout
+make install-hooks FRAMEWORK_DIR=<framework root> BUNDLE_DIR="$BUNDLE"
+```
+
+The first step has no harness target: the bundle renderer is the framework's own artifact,
+in the framework's own repo, and the harness neither ships nor versions it.
 
 ### Rendering guarantees (decision C)
 
@@ -1513,28 +1582,34 @@ Options A (a second harness-root anchor, growing the anchor set every embedder m
 and B (vendoring `adapters/` into each framework, forking the adapter per framework) were
 rejected. C needs no new anchor and keeps one copy of the adapter.
 
-`adapters/render_hooks.py` is the rendering stage for BOTH targets. It sits beside
+`adapters/render_hooks.py` is the rendering stage for ALL THREE targets. It sits beside
 `dispatch.sh` as shared, environment-neutral plumbing: it names no host, takes the
 environment as `--env`, and imports nothing from `src/` (I15). It guarantees:
 
 - the `command` is absolutized from the RENDERER'S own location — never from `FRAMEWORK_DIR`,
   the wrong anchor that this whole section exists to correct;
 - `{{FRAMEWORK_DIR}}` resolves to an absolute framework root that exists on disk;
-- **rendering is all-or-nothing, across both targets.** Every output is validated in memory
-  and files are written only once all of them pass: no `{{…}}` survives anywhere, every entry
-  carries `type`/`command`/`cwd`, `cwd` is an absolute existing directory, the command's
-  program is an absolute existing file and is emitted unfolded on one line, and each rendered
-  agent re-parses to its source's own frontmatter keys plus exactly the managed block, over a
-  byte-identical body. Any refusal prints a diagnostic to stderr and exits nonzero having
-  written nothing — not for the failing agent, and not for the ones that rendered before it;
+- **rendering is all-or-nothing, across all three targets.** Every output is validated in
+  memory and files are written only once all of them pass: no `{{…}}` survives anywhere, every
+  entry carries `type`/`command`/`cwd`, `cwd` is an absolute existing directory, the command's
+  program is an absolute existing file and is emitted unfolded on one line, each rendered
+  agent re-parses to its source's own frontmatter keys plus exactly the managed block over a
+  byte-identical body, and the merged settings re-parse to exactly the operator's own settings
+  plus the required ones. Any refusal prints a diagnostic to stderr and exits nonzero having
+  written nothing — not the settings, not the failing agent, and not the ones that rendered
+  before it. Enabling `chat.useHooks` while the hooks file was never written would point the
+  host at a registration that does not exist;
 - **re-running changes nothing but what moved.** The managed block is delimited and stripped
   before re-injection, so installation is idempotent even when source and destination are the
-  same file.
+  same file — which, for the H0 target, they now are. The settings file is not rewritten at
+  all when it already carries the required settings.
 
 Pinned by [`tests/adapter/test_hook_render.py`](../../../tests/adapter/test_hook_render.py)
 (workspace rendering, anchoring, failure paths),
 [`tests/adapter/test_agent_hook_render.py`](../../../tests/adapter/test_agent_hook_render.py)
-(H0: per-orchestrator scoping, preservation, idempotency, refusals) and
+(H0: delivery path, per-orchestrator scoping, preservation, idempotency, refusals),
+[`tests/adapter/test_settings_render.py`](../../../tests/adapter/test_settings_render.py)
+(the merge guarantees and the refusals that protect a hand-maintained file) and
 [`tests/adapter/test_hooks_map.py`](../../../tests/adapter/test_hooks_map.py) (the sources of
 truth keep the placeholders and are not installable verbatim).
 

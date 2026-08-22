@@ -38,23 +38,45 @@ adapter:
 test: verify
 
 ## install-hooks: render the VS Code hook registration and install it where the host will read
-## it. BOTH targets in one run: the workspace hooks file, and the per-orchestrator agent-scoped
-## UserPromptSubmit block (H0) that opens the session. Everything rendered is MACHINE-SPECIFIC
-## (absolute dispatch path + absolute framework root) and is never committed — re-run this after
-## moving either checkout.
-##   FRAMEWORK_DIR  required — the framework root; becomes every hook's cwd.
+## it. ALL THREE targets in one run: the workspace hooks file, the per-orchestrator
+## agent-scoped UserPromptSubmit block (H0) that opens the session, and the workspace settings
+## that make the host EXECUTE them — without `chat.useHooks` the other two are discovered and
+## never run. Everything rendered into the first two is MACHINE-SPECIFIC (absolute dispatch
+## path + absolute framework root) and is never committed — re-run this after moving either
+## checkout.
+##
+## PIPELINE ORDERING — a framework ships its agents through a host bundle, and the H0 block
+## belongs in the agents the host is actually given. So the framework's OWN bundle renderer
+## runs FIRST, and this target injects on top of its output:
+##
+##   (in the framework checkout)  python3 builds/<host>/render_bundle.py . "$$BUNDLE"
+##   (here)                       make install-hooks FRAMEWORK_DIR=<framework> BUNDLE_DIR=$$BUNDLE
+##
+## There is no harness target for the first step: the bundle renderer is the framework's
+## artifact, in the framework's repo, and the harness neither ships nor versions it.
+##
+##   FRAMEWORK_DIR  required — the framework root; becomes every hook's cwd and the anchor the
+##                  harness itself reads from the environment.
+##   BUNDLE_DIR     the rendered bundle root. AGENTS_DIR and AGENTS_DEST both default to
+##                  $(BUNDLE_DIR)/agents — the H0 block is injected in place, on top of the
+##                  bundle's own frontmatter. There is NO framework-anchored default: it would
+##                  install a second copy of every orchestrator beside the delivered one.
 ##   HOOKS_DEST     defaults to $(FRAMEWORK_DIR)/.github/hooks — the host collects
 ##                  .github/hooks/*.json from the workspace folder it has OPEN, which is the
 ##                  framework workspace the agents run in, not this harness checkout.
-##   AGENTS_DIR     defaults to $(FRAMEWORK_DIR)/agents — the framework's committed, host-agnostic
-##                  agent sources, read and never written.
-##   AGENTS_DEST    defaults to $(FRAMEWORK_DIR)/.github/agents — the host's workspace agent
-##                  location. Point it (with AGENTS_DIR) at an already-rendered agent bundle to
-##                  inject the block into that instead; the injection is idempotent in place.
+##   AGENTS_DIR     agent sources to read; set it with AGENTS_DEST for a framework whose agents
+##                  reach the host some other way (e.g. the workspace .github/agents/ scope).
+##   AGENTS_DEST    where the rendered agents land.
+##   SETTINGS_DEST  directory holding the workspace settings file; defaults to the location the
+##                  adapter's settings map names, under $(FRAMEWORK_DIR). That file is COMMITTED
+##                  and hand-maintained, so the required keys are merged into it and everything
+##                  else — other settings, comments, indentation — is left as it was.
 install-hooks:
 	python3 adapters/render_hooks.py \
 		--env vscode-github-copilot-chat \
 		--framework-dir "$(FRAMEWORK_DIR)" \
 		--dest "$(HOOKS_DEST)" \
+		--bundle-dir "$(BUNDLE_DIR)" \
 		--agents-dir "$(AGENTS_DIR)" \
-		--agents-dest "$(AGENTS_DEST)"
+		--agents-dest "$(AGENTS_DEST)" \
+		--settings-dest "$(SETTINGS_DEST)"
