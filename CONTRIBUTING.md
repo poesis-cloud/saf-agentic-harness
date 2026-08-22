@@ -36,7 +36,7 @@ which are distributed under their own upstream licenses and are **not** included
 in or relicensed by this repository:
 
 | Component | Description | License |
-|---|---|---|
+| --- | --- | --- |
 | `SE:*` bench agents | Specialist subagent plugins for GitHub Copilot / VS Code | Microsoft / GitHub ToS |
 | AI Runway / Azure AI | Azure ML / inference services | Microsoft Azure service agreements |
 

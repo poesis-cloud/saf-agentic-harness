@@ -1,0 +1,101 @@
+---
+# CD — publish a versioned harness source archive.
+#
+# The harness has no image and no Helm chart: it is a pure-Python library that embedding
+# frameworks consume from a checkout. What CD ships is therefore a PINNABLE VERSION —
+# today the framework's own cd.yml checks this repository out at the default branch, so a
+# release tag is what lets it pin instead.
+#
+# The gate runs first and in full: a tag never publishes an unverified tree.
+#
+# Triggers:
+#   - push a tag v*      → gate, then publish a GitHub Release asset
+#   - workflow_dispatch  → gate + build, upload a workflow artifact only
+
+name: cd
+
+on:
+    push:
+        tags:
+            - "v*"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: cd-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    gate:
+        name: Verification gate
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install dependencies
+              run: pip install --quiet -r requirements-dev.txt
+
+            - name: Run the verification gate
+              run: make verify
+
+    package:
+        name: Package
+        needs: gate
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        outputs:
+            archive: ${{ steps.build.outputs.archive }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Build the source archive
+              id: build
+              # `git archive` ships exactly the committed tree — no build cruft, no
+              # machine-specific rendered output (which is git-ignored by construction).
+              run: |
+                  REF="${GITHUB_REF_NAME}"
+                  NAME="saf-agentic-harness-${REF}"
+                  git archive --format=tar.gz --prefix="${NAME}/" -o "${NAME}.tar.gz" HEAD
+                  sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+                  echo "archive=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+            - name: Upload workflow artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: harness-archive
+                  path: |
+                      ${{ steps.build.outputs.archive }}
+                      ${{ steps.build.outputs.archive }}.sha256
+                  retention-days: 14
+
+    publish:
+        name: Publish release
+        needs: package
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        steps:
+            - name: Download the archive
+              uses: actions/download-artifact@v4
+              with:
+                  name: harness-archive
+
+            - name: Publish the GitHub Release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      ${{ needs.package.outputs.archive }}
+                      ${{ needs.package.outputs.archive }}.sha256
+                  generate_release_notes: true

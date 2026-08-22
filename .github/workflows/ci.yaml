@@ -1,0 +1,74 @@
+---
+# CI baseline for saf-agentic-harness.
+#
+# The gate is `make verify` — the SAME entry point the inner dev loop uses, so a green
+# CI and a green desk mean the same thing. The harness is a pure-Python library with no
+# deployable artifact, so CI proves portability across the supported interpreters rather
+# than building an image.
+
+name: ci
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    verify:
+        name: Verify (Python ${{ matrix.python-version }})
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ["3.10", "3.11", "3.12"]
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: ${{ matrix.python-version }}
+
+            - name: Install dependencies
+              run: pip install --quiet -r requirements-dev.txt
+
+            - name: Run the verification gate
+              run: make verify
+
+    lint-markdown:
+        name: Lint Markdown
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Run markdownlint-cli2
+              uses: DavidAnson/markdownlint-cli2-action@v19
+              with:
+                  globs: "**/*.md"
+                  config: ".markdownlint.yaml"
+
+    lint-yaml:
+        name: Lint YAML
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install yamllint
+              run: pip install yamllint --quiet
+
+            - name: Run yamllint
+              run: yamllint -d relaxed .

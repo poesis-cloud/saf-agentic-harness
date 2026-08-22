@@ -19,6 +19,16 @@ MD032: false
 # MD033 — inline HTML: allow (badges in README, HTML comment copyright headers)
 MD033: false
 
+# MD036 — emphasis as heading: disable. The specs use **Interface** / **Preconditions** /
+# **Postconditions** / **Invariants** as the fixed clause labels under each numbered function;
+# they are deliberately NOT headings, so they stay out of the document outline.
+MD036: false
+
+# MD007 — unordered list indent: disable. Sub-lists nested under an ordered item align to that
+# item's text (3 spaces), which this rule reads as wrong and which cannot be "fixed" to 4
+# without turning the block into an indented code block.
+MD007: false
+
 # MD040 — fenced code language: ENABLED (language specifiers are required)
 # MD040: true  # (default — leave enabled; fix missing languages at source)
 

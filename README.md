@@ -1,5 +1,9 @@
 # Agentic Harness
 
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](requirements.txt)
+[![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)](pytest.ini)
+
 The harness is the deterministic execution core of an agentic framework: it resolves steps,
 models, and agents' session context (instructions and skills — injected at session open),
 checks steps' conditions, authorization, and artifacts, and logs all of it —
