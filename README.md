@@ -1,6 +1,7 @@
 # Agentic Harness
 
 [![CI](https://github.com/poesis-cloud/saf-agentic-harness/actions/workflows/ci.yaml/badge.svg)](https://github.com/poesis-cloud/saf-agentic-harness/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/poesis-cloud/saf-agentic-harness)](https://github.com/poesis-cloud/saf-agentic-harness/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)](.github/workflows/ci.yaml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
