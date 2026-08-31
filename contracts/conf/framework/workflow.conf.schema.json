@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1",
   "title": "harness workflow configuration schema",
-  "description": "Defines the canonical shape of a workflow configuration. The schema root IS the workflow object: it declares `slug`, `orchestrator`, optional advisory `predecessors`, and the `steps` that constitute the flow. Workflows and steps are identified by slugs. Each step declares exactly one `artifact`; multi-artifact work is modeled as several steps. Each step's obligations are ONE flat `conditions` list, of two dedicated entry types: `stepCondition` binds another step by slug (`step` is the predecessor for `kind: precondition`, the successor for `kind: postcondition`); `stateCondition` binds a `setSelector` + `setPredicate` — `setSelector.setQuery` is a CEL expression that references artifacts directly by their schema slug (no alias pre-declaration) to yield `selected`. Behavioral guidance lives at the step level via `step.instructions`.",
+  "description": "Defines the canonical shape of a workflow configuration. The schema root IS the workflow object: it declares `slug`, `orchestrator`, optional `description`, optional advisory `predecessors`, and the `steps` that constitute the flow. Workflows and steps are identified by slugs. Each step declares exactly one `artifact`; multi-artifact work is modeled as several steps. Each step's obligations are ONE flat `conditions` list, of two dedicated entry types: `stepCondition` binds another step by slug (`step` is the predecessor for `kind: precondition`, the successor for `kind: postcondition`); `stateCondition` binds a `setSelector` + `setPredicate` — `setSelector.setQuery` is a CEL expression that references artifacts directly by their schema slug (no alias pre-declaration) to yield `selected`. Behavioral guidance lives at the step level via `step.instructions`. Optional `description` on the workflow and on each step is prose for orchestrator selection and for distinguishing main delivery artifacts from challenge/mediation packets.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,6 +14,11 @@
     "slug": {
       "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/workflowSlug",
       "description": "URL-safe workflow identifier."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable purpose of this workflow: the user concern it answers, the orchestrator who should select it, and which artifacts are main (must be challenged before owner commit) versus challenge/mediation (required by 1-step-1-artifact, not themselves challenged)."
     },
     "predecessors": {
       "description": "Advisory predecessors: the workflow slugs that NATURALLY come before this one. Shapes the harness's `propose` action only \u2014 never a hard gate.",
@@ -74,7 +79,7 @@
   },
   "$defs": {
     "step": {
-      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list of `stepCondition` (binds another step by slug for structural dependencies) and `stateCondition` (binds `setSelector` + `setPredicate` for workspace-state assertions) entries. Behavioral guidance (`instructions`) is attached at the step level. Exactly one `actor` and exactly one `artifact` per step: multi-actor or multi-artifact work is modeled as several steps. 1 step = 1 agent = 1 session = 1 artifact.",
+      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list of `stepCondition` (binds another step by slug for structural dependencies) and `stateCondition` (binds `setSelector` + `setPredicate` for workspace-state assertions) entries. Behavioral guidance (`instructions`) is attached at the step level. Exactly one `actor` and exactly one `artifact` per step: multi-actor or multi-artifact work is modeled as several steps. 1 step = 1 agent = 1 session = 1 artifact. Optional `description` names whether this step authors a main artifact, a challenge/mediation packet, or an owner rewrite after challenge.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -88,6 +93,11 @@
         "slug": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/stepSlug",
           "description": "URL-safe step identifier."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable purpose of this step: whether it authors a main artifact, a challenge/mediation packet, or an owner rewrite after challenge."
         },
         "actor": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",

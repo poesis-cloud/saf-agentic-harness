@@ -22,6 +22,7 @@ class Workflow:
     after: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     instructions: tuple[str, ...] = ()
+    description: str | None = None
 
 
 __all__ = ["Workflow"]

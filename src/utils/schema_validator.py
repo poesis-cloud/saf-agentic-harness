@@ -60,7 +60,7 @@ class SchemaValidator:
         schema_paths: Iterable[str | Path],
         json_loader: JsonLoader | None = None,
     ) -> "SchemaValidator":
-        """Compile contract files into a validator registry keyed by canonical `$id`."""
+        """Compile contract files into a validator registry keyed by `$id` URI."""
         loader = json_loader or JsonLoader()
         schemas: dict[str, Mapping[str, Any]] = {}
         resources: list[tuple[str, Resource[Any]]] = []

@@ -53,6 +53,7 @@ from stores.artifact_store.artifact_store import ArtifactStore
 from stores.session_log_store.session_log_store import SessionLogStore
 from utils.clock import Clock
 from utils.env_loader import EnvLoader
+from utils.named_file import index_unique_stems
 from utils.schema_validator import SchemaValidator
 from utils.yaml_loader import YamlLoader
 
@@ -136,25 +137,27 @@ def _require_framework_agent(acl: AccessControlList, actor: str, workflow: str) 
 
 
 def _require_refs_resolve(
-    layout: FrameworkLayout,
     workflow: str,
     skills: Sequence[str],
     instructions: Sequence[str],
+    skill_files: Mapping[str, Path],
+    instruction_files: Mapping[str, Path],
 ) -> None:
     """Enforce that every instruction and skill ref resolves to a framework file."""
-    candidates = [
-        (layout.skills_dir / f"{slug}{_SKILL_SUFFIX}", slug) for slug in skills
-    ]
-    candidates += [
-        (layout.instructions_dir / f"{slug}{_INSTRUCTION_SUFFIX}", slug)
-        for slug in instructions
-    ]
-    for path, slug in candidates:
-        if not path.is_file():
+    for slug in skills:
+        if slug not in skill_files:
             raise ConfigurationError(
                 "unresolved-context-ref",
-                f"Workflow '{workflow}' references '{slug}', which resolves to no file "
-                f"at '{path}'.",
+                f"Workflow '{workflow}' references '{slug}', which resolves to no "
+                f"skill file '{slug}{_SKILL_SUFFIX}'.",
+                False,
+            )
+    for slug in instructions:
+        if slug not in instruction_files:
+            raise ConfigurationError(
+                "unresolved-context-ref",
+                f"Workflow '{workflow}' references '{slug}', which resolves to no "
+                f"instruction file '{slug}{_INSTRUCTION_SUFFIX}'.",
                 False,
             )
 
@@ -169,13 +172,15 @@ def _resolve_artifact_schemas(
     slugs.update(
         step.artifact for workflow in catalog.workflows.values() for step in workflow.steps
     )
+    schema_files = index_unique_stems(layout.schemas_dir, _ARTIFACT_SCHEMA_SUFFIX)
     schemas: dict[str, Path] = {}
     for slug in sorted(slugs):
-        path = layout.schemas_dir / f"{slug}{_ARTIFACT_SCHEMA_SUFFIX}"
-        if not path.is_file():
+        path = schema_files.get(slug)
+        if path is None:
             raise ConfigurationError(
                 "unresolved-artifact-schema",
-                f"Artifact slug '{slug}' resolves to no artifact schema at '{path}'.",
+                f"Artifact slug '{slug}' resolves to no artifact schema "
+                f"'{slug}{_ARTIFACT_SCHEMA_SUFFIX}'.",
                 False,
             )
         schemas[slug] = path
@@ -196,15 +201,25 @@ def _require_coherent_configuration(
     steps and profiles reference ONE shared `capabilities` definition, so the config
     boundary's own contract validation already enforces it.
     """
+    skill_files = index_unique_stems(layout.skills_dir, _SKILL_SUFFIX)
+    instruction_files = index_unique_stems(layout.instructions_dir, _INSTRUCTION_SUFFIX)
     for workflow in catalog.workflows.values():
         _require_framework_agent(acl, workflow.facilitator, workflow.slug)
         _require_refs_resolve(
-            layout, workflow.slug, workflow.skills, workflow.instructions
+            workflow.slug,
+            workflow.skills,
+            workflow.instructions,
+            skill_files,
+            instruction_files,
         )
         for step in workflow.steps:
             _require_framework_agent(acl, step.actor, workflow.slug)
             _require_refs_resolve(
-                layout, workflow.slug, step.skills, step.instructions
+                workflow.slug,
+                step.skills,
+                step.instructions,
+                skill_files,
+                instruction_files,
             )
 
 

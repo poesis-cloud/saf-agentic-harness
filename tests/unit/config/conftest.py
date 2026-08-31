@@ -199,21 +199,25 @@ def workflow_yaml(
     orchestrator: str = "facilitator",
     set_query: str = "artifacts['epic']",
     set_predicate: str = "size(selected) > 0",
+    description: str | None = None,
+    step_description: str | None = None,
 ) -> str:
     """Return a minimal workflow fixture."""
     caps = "\n".join(
         f"      {key}: {value}" for key, value in capabilities(positive_capabilities).items()
     )
     predecessor_block = f"predecessors:\n  - {predecessor}\n" if predecessor else ""
+    description_block = f'description: "{description}"\n' if description else ""
+    step_description_block = f'    description: "{step_description}"\n' if step_description else ""
     return f"""slug: {slug}
-{predecessor_block}orchestrator: {orchestrator}
+{description_block}{predecessor_block}orchestrator: {orchestrator}
 skills:
   - orchestrate
 instructions:
   - run-workflow
 steps:
   - slug: draft
-    actor: planner
+{step_description_block}    actor: planner
     artifact: epic
     skills:
       - drafting

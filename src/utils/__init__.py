@@ -7,6 +7,7 @@ from utils.env_loader import EnvLoader
 from utils.json_loader import JsonLoader
 from utils.jsonl_store import JsonlStore
 from utils.markdown_loader import MarkdownDocument, MarkdownLoader
+from utils.named_file import index_unique_stems
 from utils.schema_validator import SchemaValidator, ValidationErrorRecord
 from utils.yaml_loader import YamlLoader
 
@@ -20,4 +21,5 @@ __all__ = [
     "SchemaValidator",
     "ValidationErrorRecord",
     "YamlLoader",
+    "index_unique_stems",
 ]

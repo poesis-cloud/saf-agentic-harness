@@ -187,8 +187,23 @@ class HookRenderer:
         return "\n\n".join(sections)
 
     def _render_instruction(self, ref: str) -> str:
-        path = self._instructions_dir / f"{ref}{_INSTRUCTION_FILE_SUFFIX}"
-        return f"## {ref}\n\n{path.read_text(encoding='utf-8').strip()}"
+        filename = f"{ref}{_INSTRUCTION_FILE_SUFFIX}"
+        matches = sorted(
+            path
+            for path in self._instructions_dir.rglob(filename)
+            if path.is_file() and path.name == filename
+        )
+        if not matches:
+            raise FileNotFoundError(
+                f"instruction '{ref}' resolves to no file '{filename}' under "
+                f"{self._instructions_dir}"
+            )
+        if len(matches) > 1:
+            raise ValueError(
+                f"instruction '{ref}' resolves to more than one file: "
+                f"{', '.join(str(path) for path in matches)}"
+            )
+        return f"## {ref}\n\n{matches[0].read_text(encoding='utf-8').strip()}"
 
     def _render_skill(self, skill: str) -> str:
         path = self._skills_dir / f"{skill}{_SKILL_FILE_SUFFIX}"

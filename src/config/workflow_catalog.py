@@ -1,4 +1,4 @@
-"""The typed view over `conf/workflows/*.workflow.conf.yaml`."""
+"""The typed view over `workflows/**/*.workflow.conf.yaml`."""
 
 from __future__ import annotations
 

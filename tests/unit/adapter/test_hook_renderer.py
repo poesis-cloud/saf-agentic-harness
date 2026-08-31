@@ -73,6 +73,33 @@ class TestHookRenderer:
         assert "Wait for explicit assent." in context
         assert context.index("reports-handling") < context.index("assent")
 
+    def test_inlines_an_instruction_nested_under_an_actor_folder(
+        self, framework_dirs: tuple[Path, Path], assert_valid_stdout
+    ) -> None:
+        """Instruction refs resolve by unique filename stem, including actor folders."""
+        instructions_dir, skills_dir = framework_dirs
+        nested = instructions_dir / "scrum-master"
+        nested.mkdir()
+        (instructions_dir / "assent.instructions.md").rename(
+            nested / "assent.instructions.md"
+        )
+        renderer = HookRenderer(instructions_dir=instructions_dir, skills_dir=skills_dir)
+
+        decision = renderer.render_context_injection(
+            EventClass.SESSION_STARTED,
+            (
+                build_report(
+                    "resolve-workflow-instructions",
+                    "resolved",
+                    instructions=["assent"],
+                ),
+            ),
+        )
+
+        rendered = assert_valid_stdout(decision.stdout)
+        context = rendered["hookSpecificOutput"]["additionalContext"]
+        assert "Wait for explicit assent." in context
+
     def test_renders_skills_as_load_directives_never_as_an_inline_dump(
         self, renderer: HookRenderer, framework_dirs: tuple[Path, Path], assert_valid_stdout
     ) -> None:

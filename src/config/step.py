@@ -25,6 +25,7 @@ class Step:
     capabilities: Mapping[str, float]
     skills: tuple[str, ...] = ()
     conditions: tuple[StepCondition | StateCondition, ...] = ()
+    description: str | None = None
 
 
 __all__ = ["Step"]

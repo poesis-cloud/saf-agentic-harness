@@ -66,8 +66,30 @@ class TestWorkflow:
         assert workflow.facilitator == "facilitator"
         assert workflow.after == ("setup",)
         assert workflow.instructions == ("run-workflow",)
+        assert workflow.description is None
+        assert workflow.steps[0].description is None
         with pytest.raises(FrozenInstanceError):
             workflow.facilitator = "other"  # type: ignore[misc]
+
+    def test_maps_optional_description_on_workflow_and_step(self, config_loader, framework_root) -> None:
+        """Spec: optional description is loaded on the workflow and on each step."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(
+                description="Tactical PI commit: challenge objectives before the RTE records them.",
+                step_description="Main artifact draft: the business Epic hypothesis.",
+            ),
+        )
+
+        workflow = config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
+
+        assert workflow.description == (
+            "Tactical PI commit: challenge objectives before the RTE records them."
+        )
+        assert workflow.steps[0].description == (
+            "Main artifact draft: the business Epic hypothesis."
+        )
+        assert workflow.steps[1].description is None
 
 
 class TestWorkflowCatalog:
@@ -84,6 +106,19 @@ class TestWorkflowCatalog:
         with pytest.raises(ConfigurationError, match="unknown workflow"):
             catalog.find_workflow("missing")
 
+    def test_loads_a_workflow_nested_under_a_layer_folder(
+        self, config_loader, framework_root
+    ) -> None:
+        """The catalog discovers workflow files recursively under FRAMEWORK_WORKFLOWS_DIR."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "program" / "planning.workflow.conf.yaml",
+            workflow_yaml(),
+        )
+
+        catalog = config_loader.load_workflow_catalog(framework_root)
+
+        assert catalog.find_workflow("planning").slug == "planning"
+
     def test_rejects_empty_workflow_directory(self, config_loader, framework_root) -> None:
         """Spec: workflow catalog source fails fast when no workflow files exist."""
         with pytest.raises(ConfigurationError, match="no workflow"):
@@ -94,6 +129,22 @@ class TestWorkflowCatalog:
         write_yaml(framework_root / "conf" / "workflows" / "wrong.workflow.conf.yaml", workflow_yaml(slug="planning"))
 
         with pytest.raises(ConfigurationError, match="filename"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_rejects_duplicate_workflow_slugs_in_nested_folders(
+        self, config_loader, framework_root
+    ) -> None:
+        """A slug may appear once in the catalog, even across layer folders."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(),
+        )
+        write_yaml(
+            framework_root / "conf" / "workflows" / "program" / "planning.workflow.conf.yaml",
+            workflow_yaml(),
+        )
+
+        with pytest.raises(ConfigurationError, match="declared more than once"):
             config_loader.load_workflow_catalog(framework_root)
 
     def test_rejects_duplicate_step_slugs(self, config_loader, framework_root) -> None:

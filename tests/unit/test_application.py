@@ -284,12 +284,36 @@ class TestApplication:
 
         assert failure.value.code == "unresolved-artifact-schema"
 
+    def test_resolves_instruction_and_schema_files_in_actor_folders(
+        self, framework_root: Path
+    ) -> None:
+        """Slug identity is the unique filename stem, including nested actor folders."""
+        instruction = (
+            framework_root / "instructions" / "draft-instructions.instructions.md"
+        )
+        nested_instruction = (
+            framework_root
+            / "instructions"
+            / "planner"
+            / "draft-instructions.instructions.md"
+        )
+        nested_instruction.parent.mkdir()
+        instruction.rename(nested_instruction)
+        schema = framework_root / "artifacts" / "epic.artifact.schema.json"
+        nested_schema = (
+            framework_root / "artifacts" / "business-owner" / "epic.artifact.schema.json"
+        )
+        nested_schema.parent.mkdir()
+        schema.rename(nested_schema)
+
+        Application(framework_root)
+
     def test_refuses_an_instruction_ref_that_resolves_to_no_file(
         self, framework_root: Path
     ) -> None:
         """Spec (Internal validation): `instruction/skill refs resolve to files in the
-        framework layout`; spec (slug convention): the harness resolves a referenced
-        entity by joining its canonical directory, the slug, and the fixed extension.
+        framework layout`; spec (slug convention): the slug is the unique filename stem
+        under the canonical directory.
         """
         (framework_root / "instructions" / "draft-instructions.instructions.md").unlink()
 

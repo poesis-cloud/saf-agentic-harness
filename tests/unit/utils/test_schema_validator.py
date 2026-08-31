@@ -52,8 +52,8 @@ class TestSchemaValidator:
         assert any(error.path == "/sessionId" for error in errors)
         assert any("does not match" in error.message for error in errors)
 
-    def test_resolves_cross_file_refs_by_canonical_gsmarc_id(self) -> None:
-        """Spec: cross-file $refs resolve by canonical $id, never filesystem path."""
+    def test_resolves_cross_file_refs_by_gsmarc_uri(self) -> None:
+        """Spec: cross-file $refs resolve by Archetype URI, never filesystem path."""
         validator = SchemaValidator.compile_contracts(CONTRACTS_ROOT.rglob("*.schema.json"))
         entry = {
             "timestamp": "2026-07-08T14:32:07Z",

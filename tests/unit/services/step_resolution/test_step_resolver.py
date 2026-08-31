@@ -438,6 +438,19 @@ class TestStepResolver:
         assert rendered["conditions"] == [
             {"kind": "precondition", "slug": "after-build", "step": "build"}
         ]
+        assert "description" not in rendered
+
+    def test_renders_optional_step_description_when_set(self, log_store: SessionLogStore) -> None:
+        """Spec: resolve-step includes step.description when the catalog set one."""
+        start_session_log(log_store)
+        resolver = _build_resolver(
+            log_store,
+            build_step("review", description="Challenge packet: feasibility of the committed plan."),
+        )
+
+        rendered = resolver.resolve_step(ORCHESTRATOR_SESSION, None, WORKFLOW_SLUG).to_dict()["step"]
+
+        assert rendered["description"] == "Challenge packet: feasibility of the committed plan."
 
     def test_journals_exactly_one_entry_carrying_the_returned_report(
         self, log_store: SessionLogStore, workspace_dir: Path

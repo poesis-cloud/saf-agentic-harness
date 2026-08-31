@@ -30,6 +30,8 @@ def _render_step(step: Step) -> dict[str, Any]:
         "instructions": list(step.instructions),
         "capabilities": dict(step.capabilities),
     }
+    if step.description:
+        rendered["description"] = step.description
     if step.skills:
         rendered["skills"] = list(step.skills)
     if step.conditions:

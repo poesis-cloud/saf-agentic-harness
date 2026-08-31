@@ -162,7 +162,7 @@ class ArtifactStore:
         )
 
     def _read_schema_id(self, schema_path: Path) -> str:
-        """Read one artifact schema's canonical `$id`, failing fast when absent."""
+        """Read one artifact schema's `$id` URI, failing fast when absent."""
         document = self._json_loader.load_json(schema_path)
         schema_id = document.get("$id") if isinstance(document, Mapping) else None
         if not isinstance(schema_id, str):

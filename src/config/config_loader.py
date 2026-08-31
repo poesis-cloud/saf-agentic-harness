@@ -26,6 +26,7 @@ from config.workflow_catalog import WorkflowCatalog
 from config.workspace_layout import WorkspaceLayout, paths_can_collide
 from errors import ConfigurationError
 from utils.env_loader import EnvLoader
+from utils.named_file import index_unique_stems
 from utils.schema_validator import SchemaValidator
 from utils.yaml_loader import YamlLoader
 
@@ -245,7 +246,7 @@ class ConfigLoader:
     def load_workflow_catalog(self, framework_root: str | Path) -> WorkflowCatalog:
         """Load every workflow configuration and validate the catalog's advisory graph."""
         layout = self.load_framework_layout(framework_root)
-        paths = sorted(layout.workflows_dir.glob(f"*{_WORKFLOW_FILENAME_SUFFIX}"))
+        paths = sorted(layout.workflows_dir.rglob(f"*{_WORKFLOW_FILENAME_SUFFIX}"))
         if not paths:
             raise ConfigurationError(
                 "empty-workflow-catalog",
@@ -261,7 +262,14 @@ class ConfigLoader:
             self._require_workflow_rules(
                 data, path.name[: -len(_WORKFLOW_FILENAME_SUFFIX)], artifact_schemas
             )
-            sources[data["slug"]] = data
+            slug = data["slug"]
+            if slug in sources:
+                raise ConfigurationError(
+                    "duplicate-workflow-slug",
+                    f"Workflow slug '{slug}' is declared more than once.",
+                    False,
+                )
+            sources[slug] = data
         self._require_catalog_rules(sources)
         self._require_orchestrators_are_framework_agents(sources, framework_root)
 
@@ -400,11 +408,9 @@ class ConfigLoader:
     def _index_artifact_schemas(self, artifacts_dir: Path) -> Mapping[str, Mapping[str, Any]]:
         """Index the framework's artifact schemas by the slug a condition may name."""
         schemas: dict[str, Mapping[str, Any]] = {}
-        for path in sorted(artifacts_dir.glob(f"*{_ARTIFACT_SCHEMA_SUFFIX}")):
+        for slug, path in index_unique_stems(artifacts_dir, _ARTIFACT_SCHEMA_SUFFIX).items():
             try:
-                schemas[path.name[: -len(_ARTIFACT_SCHEMA_SUFFIX)]] = json.loads(
-                    path.read_text(encoding="utf-8")
-                )
+                schemas[slug] = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as error:
                 raise ConfigurationError(
                     "unreadable-artifact-schema",
@@ -599,6 +605,7 @@ class ConfigLoader:
             after=_normalize_slug_refs(data.get("predecessors")),
             skills=_normalize_slug_refs(data.get("skills")),
             instructions=_normalize_slug_refs(data.get("instructions")),
+            description=data.get("description"),
         )
 
     def _build_step(self, data: Mapping[str, Any]) -> Step:
@@ -615,6 +622,7 @@ class ConfigLoader:
             conditions=tuple(
                 self._build_condition(condition) for condition in data.get("conditions", ())
             ),
+            description=data.get("description"),
         )
 
     def _build_condition(self, data: Mapping[str, Any]) -> StepCondition | StateCondition:

@@ -187,7 +187,7 @@ def _orchestrator_slugs(workflows_dir: Path) -> list[str]:
         )
 
     slugs = set()
-    for path in sorted(workflows_dir.glob(_WORKFLOW_GLOB)):
+    for path in sorted(workflows_dir.rglob(_WORKFLOW_GLOB)):
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(workflow, dict):
             raise RenderError(f"the workflow at {path} is not an object")

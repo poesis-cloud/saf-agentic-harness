@@ -113,7 +113,9 @@ and implementation parts prescribe its realization.
 - **Workflow** — a configuration entity (`conf/workflows/*.workflow.conf.yaml`): an atomic,
   artifact-delivering unit of the methodology, made of steps. Each workflow declares its
   **orchestrator** — the orchestrator agent that drives its instances; the orchestrator's
-  workflow instructions are injected at its session open (function 1).
+  workflow instructions are injected at its session open (function 1). Optional `description`
+  is prose for orchestrator selection (which user concern this workflow answers) and for
+  naming main delivery artifacts versus challenge/mediation packets.
 - **Workflow instance** — one run of one workflow, the way an object is an instance of a
   class: the workflow configuration is the definition; the instance is one dated execution of
   it, journaled across the session logs that serve it — its *instance view* — with its own
@@ -569,7 +571,7 @@ forward resolution returns it again. Retry is re-resolution, not selection.
 - **Out** — `StepResolutionReport`: `outcome` ± `step`, nothing more:
   - a **step resolution** (`step-resolution`): the configured step object itself, verbatim
     from the workflow configuration — `slug`, `actor`, `skills`, `instructions`, `artifact`
-    (schema slug / URI), flat `conditions`, and `capabilities`;
+    (schema slug / URI), flat `conditions`, `capabilities`, and optional `description`;
   - `no-next-step`: every authored step currently has a passing journaled execution — a
     reversible observation, no step attached. Advisory succession is `no-next-step-handling`
     instruction content (function 1), not function output.
@@ -1742,13 +1744,13 @@ Four placement rules settle the boundary questions:
   composition, or multi-source intersection — not for ordinary single-base extension.
   A rooted schema uses `unevaluatedProperties: false`, never `additionalProperties: false`,
   which cannot see the base's properties through the `$ref`.
-- **Contract identities follow the GSM `gsmarc://` `$id` convention.** Every schema declares a
-  canonical `$id` of the form `gsmarc://saf/<path>/<stem>/v1`, where `<path>` mirrors the file's
+- **Contract identities follow the GSM `gsmarc://` `$id` convention.** Every schema declares an
+  `$id` of the form `gsmarc://saf/<path>/<stem>/v1`, where `<path>` mirrors the file's
   repo location (`contracts/`, `artifacts/`, or an adapter's own `adapters/<adapter>/contracts/`)
   and `<stem>` is the filename without
   `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `saf`,
   logical path, filename stem as the identity segment, and `/v1` version suffix. Every
-  cross-file `$ref` uses the target's canonical `$id` — **never a filesystem-relative path**:
+  cross-file `$ref` uses the target's URI — **never a filesystem-relative path**:
   because each schema declares a `gsmarc://` `$id`, that id (not the file's location) is the
   base URI a relative reference resolves against, so `../report.schema.json` would resolve to
   a `gsmarc://` URI that does not exist and the contract would not compile. Absolute ids are
@@ -1775,8 +1777,9 @@ Four placement rules settle the boundary questions:
     flat directory,
   - `nodeSlug` = a workspace node's own path segment (`conf/workspace.conf.yaml`) — may embed
     `<name>` VARIABLE placeholders, optionally mixed with literal text.
-  The harness resolves a referenced entity by joining its canonical directory, the slug,
-  and the fixed extension — never by scanning arbitrary files.
+  The harness resolves a referenced entity by the unique filename `{slug}{extension}`
+  under its canonical directory (nested actor or layer folders are allowed; a stem
+  that appears twice is a configuration error).
   The directories themselves are declared by the framework in `.env`
   (`FRAMEWORK_AGENTS_DIR`, `FRAMEWORK_ARTIFACTS_DIR`, `FRAMEWORK_SKILLS_DIR`,
   `FRAMEWORK_TEMPLATES_DIR`, `FRAMEWORK_WORKFLOWS_DIR`, `FRAMEWORK_INSTRUCTIONS_DIR`),

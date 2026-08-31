@@ -9,6 +9,7 @@ import pytest
 from errors import ConfigurationError
 from tests.unit.config.conftest import (
     ambiguous_workspace_yaml,
+    workflow_yaml,
     workspace_yaml,
     write_standard_configs,
     write_yaml,
@@ -51,6 +52,28 @@ class TestConfigLoader:
 
         with pytest.raises(ConfigurationError, match="schema validation failed"):
             config_loader.load_model_profiles(framework_root)
+
+    def test_rejects_unknown_workflow_property(self, config_loader, framework_root: Path) -> None:
+        """Spec: workflow.conf additionalProperties is false — unknown keys fail fast."""
+        write_standard_configs(framework_root)
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml() + "role: main\n",
+        )
+
+        with pytest.raises(ConfigurationError, match="schema validation failed"):
+            config_loader.load_workflow_catalog(framework_root)
+
+    def test_rejects_unknown_step_property(self, config_loader, framework_root: Path) -> None:
+        """Spec: step additionalProperties is false — unknown keys fail fast."""
+        write_standard_configs(framework_root)
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml().replace("  - slug: draft\n", "  - slug: draft\n    role: main\n"),
+        )
+
+        with pytest.raises(ConfigurationError, match="schema validation failed"):
+            config_loader.load_workflow_catalog(framework_root)
 
     def test_loads_all_configuration_sources_against_real_contracts(self, config_loader, framework_root: Path) -> None:
         """Spec: each load_* method returns an immutable typed configuration view."""

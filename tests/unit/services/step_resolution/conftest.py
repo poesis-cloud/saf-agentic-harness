@@ -69,6 +69,7 @@ def build_step(
     weights: Mapping[str, float] | None = None,
     skills: Sequence[str] = ("code-review",),
     instructions: Sequence[str] = ("review",),
+    description: str | None = None,
 ) -> Step:
     """Build one configured step with its structural step conditions."""
     conditions: list[StepCondition] = [
@@ -87,6 +88,7 @@ def build_step(
         capabilities=weights or build_capabilities(deep_reasoning=9.0),
         skills=tuple(skills),
         conditions=tuple(conditions),
+        description=description,
     )
 
 
