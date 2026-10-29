@@ -1,0 +1,11 @@
+scope: product
+name: SAF Agentic Harness
+milestones:
+  - version: v1.0.0
+    current: true
+    features:
+      - https://github.com/poesis-cloud/saf-agentic-harness/issues/1
+      - https://github.com/poesis-cloud/saf-agentic-harness/issues/2
+      - https://github.com/poesis-cloud/saf-agentic-harness/issues/3
+      - https://github.com/poesis-cloud/saf-agentic-harness/issues/4
+      - https://github.com/poesis-cloud/saf-agentic-harness/issues/5
