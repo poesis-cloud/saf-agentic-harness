@@ -54,3 +54,10 @@ make full
 ```
 
 See [`def/core/spec.md`](def/core/spec.md#validation-surface) for what each target runs.
+
+<!-- roadmap:start -->
+## Roadmap
+
+![Roadmap](docs/roadmap.svg)
+
+<!-- roadmap:end -->
