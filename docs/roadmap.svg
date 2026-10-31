@@ -7,7 +7,7 @@
 <line x1="60" y1="270" x2="940" y2="270" stroke="#c9d6df" stroke-width="3"/>
 <text x="250.0" y="230" font-size="20" font-weight="700" fill="#1580c8" text-anchor="middle">v1.0.0 · CURRENT</text>
 <circle cx="250.0" cy="270" r="14" fill="#1580c8" stroke="#1580c8" stroke-width="4"/>
-<rect x="120.0" y="300" width="260" height="56" rx="12" fill="#eaf3fa" stroke="#c9dff0"/><text x="250.0" y="324" font-size="16" font-weight="700" fill="#1580c8" text-anchor="middle">DATE TBD</text><text x="250.0" y="346" font-size="14" fill="#0b1f2c" text-anchor="middle">Capa: opportus</text>
+<rect x="120.0" y="300" width="260" height="56" rx="12" fill="#eaf3fa" stroke="#c9dff0"/><text x="250.0" y="324" font-size="16" font-weight="700" fill="#1580c8" text-anchor="middle">DATE TBD</text><text x="250.0" y="346" font-size="14" fill="#0b1f2c" text-anchor="middle">Capa: Clément</text>
 <rect x="85.0" y="380" width="330" height="200" fill="#fff" stroke="#d5e2eb"/><rect x="85.0" y="380" width="330" height="6" fill="#1580c8"/>
 <text x="105.0" y="420" font-size="17" font-weight="700" fill="#0b1f2c">• Workflow / step resolution</text>
 <text x="105.0" y="444" font-size="17" font-weight="700" fill="#0b1f2c">• Skill &amp; instruction injection</text>
