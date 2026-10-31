@@ -1,4 +1,4 @@
-SDLC Agentic Framework
+SAF Agentic Harness — part of the Systemic Agentic Framework (SAF)
 Copyright 2026 Poesis Cloud and contributors
 
 This product is distributed under the Apache License, Version 2.0.
@@ -21,5 +21,16 @@ repository and are NOT relicensed under Poesis Cloud's Apache-2.0:
 
 Users of this framework are responsible for reviewing and accepting the terms
 of each upstream component independently.
+
+-------------------------------------------------------------------------------
+
+TRADEMARKS
+-------------------------------------------------------------------------------
+
+Poesis, Generative System Model (GSM), Systemic Intelligence Engine (SIE),
+Organizational Intelligence Platform (OIP), Systemic Intelligence Sourcing (SIS),
+Systemic Agentic Framework (SAF), and Systemic Intelligence Model (SIM) are
+trademarks of Clément Cazaud. They are NOT licensed under the Apache License,
+Version 2.0 (see Section 6 of the License).
 
 -------------------------------------------------------------------------------
