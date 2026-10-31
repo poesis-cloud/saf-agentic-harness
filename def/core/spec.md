@@ -1734,7 +1734,7 @@ Four placement rules settle the boundary questions:
 
 - **Harness contracts use JSON Schema 2020-12 and GSM-style composition.** The harness contract
   dialect is `https://json-schema.org/draft/2020-12/schema` — every contract, including the
-  configuration and slug libraries — matching GSM/ITIP's Archetype
+  configuration and slug libraries — matching GSM/OIP's Archetype
   validation posture rather than draft-07 portability; shared definitions live under the
   2020-12 `$defs` keyword, never the pre-2019 `definitions`. Contract extension uses a root `$ref`
   when a schema specializes exactly one base contract — every function output roots
@@ -1748,7 +1748,7 @@ Four placement rules settle the boundary questions:
   `$id` of the form `gsmarc://saf/<path>/<stem>/v1`, where `<path>` mirrors the file's
   repo location (`contracts/`, `artifacts/`, or an adapter's own `adapters/<adapter>/contracts/`)
   and `<stem>` is the filename without
-  `.schema.json`. This aligns SAFE with GSM/ITIP/SIE: scheme `gsmarc://`, product segment `saf`,
+  `.schema.json`. This aligns SAFE with GSM/OIP/SIE: scheme `gsmarc://`, product segment `saf`,
   logical path, filename stem as the identity segment, and `/v1` version suffix. Every
   cross-file `$ref` uses the target's URI — **never a filesystem-relative path**:
   because each schema declares a `gsmarc://` `$id`, that id (not the file's location) is the
