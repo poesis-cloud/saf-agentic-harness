@@ -120,7 +120,8 @@ class ContextRenderer:
 
     def _render_skill(self, skill: str) -> str:
         path = self._skills_dir / f"{skill}{_SKILL_FILE_SUFFIX}"
-        return f"## {skill}\n\n{_LOAD_DIRECTIVE.format(path=path)}"
+        # One path form for the agent on every OS; Windows tools accept `C:/...` too.
+        return f"## {skill}\n\n{_LOAD_DIRECTIVE.format(path=path.as_posix())}"
 
 
 def read_status(report: Mapping[str, Any]) -> str:
