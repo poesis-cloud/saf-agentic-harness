@@ -75,6 +75,20 @@ and implementation parts prescribe its realization.
   field names it by schema slug (the artifact kind) or URI (a specific instance) — and a
   workflow's deliverables are simply the union of its steps' artifacts (in this framework:
   epics, features, stories, …).
+- **Artifact provenance** — the harness-owned property `provenance` every artifact instance
+  carries, defined by the harness's artifact contract (not by any framework artifact schema)
+  and therefore present on every artifact kind:
+  `provenance.sessionId` is the `sessionId` of the session whose function-9 commit last
+  changed the instance's path in committed state (`HEAD`) — read from that commit's
+  `session-id` trailer (function 9, invariant 3) — or `null` when that commit was not made
+  by the harness (a user-seeded or out-of-band commit). It is **derived, never authored**:
+  the harness computes it from its own commit attribution at read time and no artifact's
+  bytes carry it — an instance whose own data supplies a `provenance` property is invalid
+  (function 9, invariant 6), so no agent can forge a session's authorship. An update counts
+  exactly like a creation: the session that committed the latest change to an instance is its
+  provenance. Framework-owned per-step records written inside artifacts (e.g. a
+  `stepOutcomes` list) are ordinary, agent-authored artifact content under the framework's own
+  property names; they never stand in for provenance.
 - **Log** — the harness's record: the append-only JSONL file of one session
   (`<workspace>/logs/<sessionId>.log.jsonl`), created by function 0 (`start-session`)'s entry —
   its first line. Every completed function invocation appends exactly one entry to the log of
@@ -256,7 +270,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
-| `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
+| `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`; `no-bound-model` — the host binds no model the catalog declares), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
 | `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives another workflow's instance (`session-instance-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
@@ -269,8 +283,9 @@ refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-er
 the codes named in this specification
 (`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
 `session-kind-mismatch`, `not-facilitator`,
-`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `step-correlation-missing`,
-`condition-evaluation-failed`, `artifact-schema-unresolved`, `log-unreadable`) are normative; implementations
+`unknown-workflow`, `no-bound-model`, `step-in-flight`, `session-instance-bound`,
+`step-correlation-missing`, `condition-evaluation-failed`, `artifact-schema-unresolved`,
+`log-unreadable`) are normative; implementations
 may add codes but never repurpose these. Statuses, codes, and structured fields are the
 normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
 tests assert their presence and key facts, never exact wording.
@@ -614,11 +629,11 @@ Example:
       "conditions": [
         { "kind": "precondition", "slug": "after_build", "step": "build" },
         {
-          "kind": "postcondition", "slug": "report_exists",
+          "kind": "postcondition", "slug": "report_approved",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts[artifact].filter(a, a.status == 'approved')"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
         }
       ],
       "capabilities": {
@@ -724,9 +739,9 @@ The model resolution function: which model profile serves this step's dispatch. 
 function 3: the two functions are fully independent, and whoever needs both composes them
 outside the harness (the orchestrator per its instructions, or whatever mediates the invocation
 surface, on one hook).
-Resolved from two static configuration layers, deterministically, with no artifact reads and
-no per-instance estimation; the harness deduces WHICH step from its own logs — the agent
-asks, never describes.
+Resolved from two static configuration layers, deterministically, among the models the host
+binds, with no artifact reads and no per-instance estimation; the harness deduces WHICH step
+from its own logs — the agent asks, never describes.
 
 **Interface**
 
@@ -735,11 +750,14 @@ asks, never describes.
   journaled in the invoking session, not yet
   concluded by a function-10 outcome (unambiguous by function 3, invariant 9) — and reads
   its weighted `capabilities` from the workflow configuration: an agent never supplies
-  weights (self-reporting).
+  weights (self-reporting). Plus **`boundModels`** (required, non-empty, unique): the
+  canonical model profile slugs the host can run — the host binding's model map, supplied by
+  the adapter, never authored by an agent (invariant 6). The core stays host-agnostic: it
+  learns what the host binds only from this set.
 - **Out** — `ModelProfileReport`: the canonical model **profile**
-  `{slug, score, costRank, reason}` — a catalog profile, not a host model id: a host-specific
-  binding maps it to the host-specific id at dispatch. It always returns a profile
-  (invariant 4).
+  `{slug, score, costRank, reason}` — a catalog profile the host binds, not a host model id: a
+  host-specific binding maps it to the host-specific id at dispatch. It returns a profile
+  whenever the host binds at least one catalog model (invariants 4 and 6).
 - **Caller usage** — the orchestrator calls it between function 3's resolution and the
   dispatch (per its `step-resolution-handling` instruction) and relays the profile into the
   dispatch.
@@ -750,7 +768,8 @@ Example:
 {
   "in": {
     "sessionId": "01j9xq0f2m",
-    "parentSessionId": null
+    "parentSessionId": null,
+    "boundModels": ["claude-sonnet-4", "gpt-5.4-mini"]
   },
   "out": {
     "context": {
@@ -781,8 +800,10 @@ Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../
 **Postconditions**
 
 - One log entry records the resolution (1 invocation = 1 entry), carrying the deduced step in
-  its envelope. A profile is always returned: unroutable configurations died at load
-  (invariant 4) — no `Auto` and no unknown id ever reaches a dispatch.
+  its envelope. A bound profile is returned whenever the host binds a catalog model:
+  unroutable configurations died at load (invariant 4), and a host binding no catalog model is
+  refused explicitly (invariant 6) — no `Auto`, no unknown id and no unbound model ever
+  reaches a dispatch.
 
 **Invariants**
 
@@ -813,10 +834,19 @@ Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../
    configuration load (invariant 1 plus catalog validation), so it cannot occur at runtime and
    is never papered over with a silent `Auto`.
 5. **Deterministic and idempotent per step**: the profile is a pure function of static
-   configuration and the deduced step, so any number of calls for the same step yields the
-   identical profile — there is no "once" to protect and no re-resolution risk. The relayed
+   configuration, the deduced step, and `boundModels`, so any number of calls for the same
+   step on the same host yields the identical profile — there is no "once" to protect and no
+   re-resolution risk. The relayed
    profile is what reaches the dispatch, per the orchestrator's `step-resolution-handling`
    instruction: the harness resolves; the instructed agent relays.
+6. **Only bound models are candidates**: invariant 3 ranks exactly the catalog profiles whose
+   slug is in `boundModels`; a bound slug the catalog does not declare is ignored. A model the
+   host cannot run is never returned — a host silently substituting another model would run
+   the step with the wrong model's tool set. When no catalog profile is bound, the
+   invocation is `inquiry-error` (`no-bound-model`), journaled — never an unbound profile.
+   `boundModels` is the adapter's answer from its host binding (e.g. the canonical slugs of its
+   `models.yaml`): an adapter stamps it onto every mediated `resolve-step-model` request and
+   refuses an agent-authored one, exactly as it does session attribution.
 
 ### 5. check-step-preconditions
 
@@ -858,13 +888,13 @@ Example:
       { "condition": { "kind": "precondition", "slug": "after_build", "step": "build" }, "outcome": "pass" },
       {
         "condition": {
-          "kind": "precondition", "slug": "report_exists",
+          "kind": "precondition", "slug": "build_ready",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts['build-report'].filter(a, a.status == 'ready')"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
         },
-        "outcome": "fail", "failureMessage": "no artifact matches 'review-report'"
+        "outcome": "fail", "failureMessage": "no 'build-report' instance is ready"
       }
     ]
   }
@@ -913,9 +943,21 @@ plane, exactly as function 8's enforcement scope.
 2. `stateCondition`: `setSelector.setQuery` is a CEL expression that references artifacts
    directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug ->
    matching instances, e.g. `artifacts['review-report']`) to produce `selected`; `setPredicate`
-   is then evaluated over `selected`. The step's declared `artifact` ref is in scope as a
-   runtime constant. Every `artifacts['<slug>'].<property>` reference is statically validated
-   against that slug's artifact schema — an unresolvable slug or an undeclared property is a
+   is then evaluated over `selected`. `artifacts['<slug>']` is resolved **by kind**: it holds
+   every committed instance whose path the workspace layout binds to that artifact schema,
+   wherever the layout places it — never the instances under a folder that happens to be
+   named after the slug. It spans the whole workspace (every instance of the kind, whoever
+   wrote it); each instance exposes its own data plus the harness-owned
+   [artifact provenance](#terminology) `provenance.sessionId`. Two runtime constants are in
+   scope: `artifact`, the step's declared artifact slug (so `artifacts[artifact]` is the
+   step's own kind), and `stepSessionIds`, the list of the sessions executing the in-flight
+   step — the sessions its `actor` registered (function 0) under the dispatching session at
+   or after the step's resolution entry; empty until the step session is registered (so
+   always empty at the step-starting boundary). An instance slug is compared with an instance
+   slug, never with `artifact` (a kind slug); scope a selector to this step's own work with
+   `a.provenance.sessionId in stepSessionIds`. Every `artifacts['<slug>'].<property>`
+   reference is statically validated against that slug's artifact schema — `provenance` is
+   valid on every kind — and an unresolvable slug or an undeclared property is a
    hard error, not a false pass. An empty selected set is a normal value: the predicate decides
    whether it passes or fails. A CEL expression failing **at runtime** (an evaluation error,
    not a false predicate) is `state-error` (`condition-evaluation-failed`), journaled, the
@@ -1256,8 +1298,9 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
    staging. Unclean baselines were denied before the write (function 8, invariant 5), so
    `invalid but left in place` is not a function-9 outcome.
 3. A fully valid set is **committed** in the same act — 1 validated set = 1 commit, attributed
-   to the acting session (its `sessionId` in the commit message) so Git history and the
-   session log correlate. The commit and the discard are the harness's only deliberate Git
+   to the acting session (its `sessionId` in the commit message's `session-id` trailer) so Git
+   history and the session log correlate — the attribution
+   [artifact provenance](#terminology) is derived from. The commit and the discard are the harness's only deliberate Git
    actions: the discard is recorded inside the validation entry's report (the revert records);
    the commit's record is the Git history itself, correlated by session id. The commit carries
    exactly the validated set: any other content already staged in the index stays staged and
@@ -1267,11 +1310,17 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
    a commit occurred.
 5. A Git failure mid-commit or mid-discard is the uniform `system-error` (rule 1): the staged
    state is whatever the failure left — C6's detect-and-remediate plane owns residual cleanup.
+6. `provenance` is a **reserved** artifact property: a staged artifact whose data supplies it
+   is invalid (rule `reserved`) and its set is reverted, whatever its schema says — and a
+   committed instance supplying it fails the read like any invalid committed bytes (C6). So
+   [artifact provenance](#terminology) is only ever the harness's derivation, never forgeable
+   artifact content.
 
 ### 10. check-step-postconditions
 
-Did this step deliver? The same condition machinery as function 5, applied to the step's
-declared postconditions — and the producer of the step outcome that drives the whole instance:
+Did this step deliver? The same condition machinery as function 5, applied to the
+harness's built-in artifact-delivery check (invariant 5) and the step's declared
+postconditions — and the producer of the step outcome that drives the whole instance:
 function 3's cursor reads nothing else.
 
 **Interface**
@@ -1284,7 +1333,7 @@ function 3's cursor reads nothing else.
   dispatch-return events carry no step identity are fully supported.
 - **Out** — `CheckStepPostconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
   `conditionChecks`, exactly as function 5 (same payload, distinct type — one output contract
-  each).
+  each); its first check is always the built-in `harness-artifact-delivered` (invariant 5).
 - **Caller usage** — on a passing outcome the orchestrator calls function 3 for the next step;
   on a failing one — per its `reports-handling` instruction (function 1) — it handles the
   failure messages and calls function 3 again — the failed step is not
@@ -1311,11 +1360,21 @@ Example:
     "conditionChecks": [
       {
         "condition": {
-          "kind": "postcondition", "slug": "report_exists",
+          "kind": "postcondition", "slug": "harness-artifact-delivered",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts[artifact].filter(a, a.provenance.sessionId in stepSessionIds)"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
+        },
+        "outcome": "pass"
+      },
+      {
+        "condition": {
+          "kind": "postcondition", "slug": "report_approved",
+          "setSelector": {
+            "setQuery": "artifacts[artifact].filter(a, a.status == 'approved')"
+          },
+          "setPredicate": "selected.size() > 0"
         },
         "outcome": "pass"
       }
@@ -1354,9 +1413,43 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
 3. The step's outcome logs from this function: its postconditions hold, or they do not.
    This journaled outcome is exactly what function 3's cursor reads — a step whose latest
    outcome passes counts as executed.
-4. A step declaring zero postconditions passes vacuously: `outcome: pass` with an empty
-   `conditionChecks` array — journaled, and sufficient for the cursor to count the step
-   executed.
+4. The aggregate passes iff every check passes. A step's **declared** postconditions may be
+   zero, but its `conditionChecks` never are: the built-in check (invariant 5) is always
+   evaluated, so nothing passes vacuously — a step declaring zero postconditions passes iff
+   it delivered its artifact.
+5. **No valid step without artifact.** Every step necessarily produces its declared artifact:
+   agents collaborate on artifacts, and artifacts are what the harness traces and checks. A
+   step is valid only if its declared artifact has an instance committed by that step's
+   session — agent reports are indicative, never evidence. The harness enforces this
+   itself, on every step, with **no opt-out field and no exception**: before the declared
+   postconditions it evaluates the built-in, harness-defined `stateCondition`
+
+   ```json
+   {
+     "kind": "postcondition", "slug": "harness-artifact-delivered",
+     "setSelector": {
+       "setQuery": "artifacts[artifact].filter(a, a.provenance.sessionId in stepSessionIds)"
+     },
+     "setPredicate": "selected.size() > 0"
+   }
+   ```
+
+   — at least one committed instance of the step's declared artifact kind whose
+   [provenance](#terminology) names one of the step's sessions (`stepSessionIds`, function 5,
+   invariant 2). It is reported and journaled exactly like a declared condition: the first
+   entry of `conditionChecks`, carrying this full condition object and its `outcome`, plus a
+   `failureMessage` naming the step, its artifact kind, and the step sessions when it fails;
+   it fails the aggregate like any other check. Its slug is reserved: a workflow declaring a
+   condition named `harness-artifact-delivered` is rejected at configuration load. Consequences:
+   - **Creation and update deliver alike** — an update-type step (editing an existing
+     instance, e.g. appending a confirm / no-change decision record to it) delivers by
+     committing its edit, which re-attributes the instance's provenance to the step's session;
+     an older instance of the kind by another session, or a user-seeded one, never does.
+   - **Several instances** committed in one step deliver (at least one is required).
+   - **A write must change committed state**: a byte-identical write creates no commit
+     (function 9, invariant 4), so it does not deliver.
+   - Workflows need not — and should not — declare their own "the step's artifact exists"
+     postcondition; declared postconditions assert the delivered artifact's content.
 
 ### 11. end-session
 
@@ -1443,7 +1536,9 @@ carries a dedicated check report. They are enforced where they structurally belo
 enforcement point (see [Configuration plane](#configuration-plane)): `ConfigLoader` parses and
 contract-validates every source as ONE act — an unvalidated parse never escapes — and applies
 the semantic rules JSON Schema cannot express (non-empty steps, unique step slugs, resolvable
-`stepCondition` references, unique condition slugs per step, acyclic step DAGs, at least one
+`stepCondition` references, unique condition slugs per step, no declared condition named
+`harness-artifact-delivered` — the built-in check's reserved slug (function 10, invariant 5;
+code `reserved-condition-slug`), acyclic step DAGs, at least one
 positive capability weight per step, an acyclic advisory workflow graph, every orchestrator
 agent facilitating at least one workflow, no two artifact kinds claiming the same layout
 path), the

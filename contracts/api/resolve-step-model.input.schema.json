@@ -3,6 +3,22 @@
   "$id": "gsmarc://saf/contracts/api/resolve-step-model.input/v1",
   "$ref": "gsmarc://saf/contracts/inquiry/v1",
   "title": "resolve-step-model input contract",
+  "required": [
+    "boundModels"
+  ],
+  "properties": {
+    "boundModels": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "A canonical model profile slug (model-profiles.conf.yaml `slug`)."
+      },
+      "description": "The canonical model profile slugs the host can run — the host binding's model map, supplied by the adapter, never authored by an agent. Function 4 ranks only catalogue profiles in this set; a slug the catalogue does not declare is ignored."
+    }
+  },
   "unevaluatedProperties": false,
-  "description": "Input contract for the resolve-step-model harness function: the shared input envelope, unextended — the step is deduced from the session, never named by the caller."
+  "description": "Input contract for the resolve-step-model harness function: the shared input envelope plus the host's bound models — the step is deduced from the session, never named by the caller."
 }

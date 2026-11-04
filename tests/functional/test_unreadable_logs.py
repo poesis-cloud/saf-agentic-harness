@@ -25,7 +25,7 @@ INQUIRIES: Mapping[str, Mapping[str, Any]] = {
     "resolve-workflow-instructions": {"sessionId": SESSION},
     "resolve-workflow-skills": {"sessionId": SESSION},
     "resolve-step": {"sessionId": SESSION, "workflowSlug": "planning"},
-    "resolve-step-model": {"sessionId": SESSION},
+    "resolve-step-model": {"sessionId": SESSION, "boundModels": ["fast-coder"]},
     "check-step-preconditions": {"sessionId": SESSION},
     "resolve-step-instructions": {"sessionId": SESSION},
     "resolve-step-skills": {"sessionId": SESSION},

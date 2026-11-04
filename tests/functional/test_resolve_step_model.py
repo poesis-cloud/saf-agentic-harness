@@ -18,6 +18,8 @@ from functional_fixtures import (
 )
 
 FUNCTION = "resolve-step-model"
+# The host binds every catalogue profile unless a test narrows the set itself.
+BOUND = ("deep-thinker", "fast-coder", "omega-twin", "pricey-twin", "alpha-twin")
 
 
 def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
@@ -28,6 +30,7 @@ def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
 def _dispatch_review(harness: FunctionalHarness, session_id: str) -> None:
     """Journal `draft` executed, then put the second step, `review`, in flight."""
     _dispatch_draft(harness, session_id)
+    harness.deliver_in_flight_step(session_id)
     harness.invoke("check-step-postconditions", sessionId=session_id)
     harness.invoke("resolve-step", sessionId=session_id, workflowSlug="planning")
 
@@ -44,7 +47,7 @@ class TestResolveStepModel:
         scores `fast-coder` 72 against `deep-thinker` 40."""
         _dispatch_draft(harness, orchestrator_session)
 
-        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "resolved"}
@@ -61,7 +64,7 @@ class TestResolveStepModel:
         `deep-reasoning: 9`, which routes to `deep-thinker` at 81."""
         _dispatch_review(harness, orchestrator_session)
 
-        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         report = assert_contract_round_trip(harness, run)
         assert report["profile"]["slug"] == "deep-thinker"
@@ -76,7 +79,7 @@ class TestResolveStepModel:
         harness.invoke("start-session", sessionId="tie-session", agent="orchestrator")
         _dispatch_draft(harness, "tie-session")
 
-        run = harness.invoke(FUNCTION, sessionId="tie-session")
+        run = harness.invoke(FUNCTION, sessionId="tie-session", boundModels=BOUND)
 
         report = assert_contract_round_trip(harness, run)
         assert report["profile"] == {
@@ -86,6 +89,44 @@ class TestResolveStepModel:
             "reason": report["profile"]["reason"],
         }
 
+    def test_only_a_model_the_host_binds_is_ever_returned(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 4, invariant 6): the candidates are the catalogue profiles the
+        host binds — `draft` scores `fast-coder` highest, but a host that cannot run it
+        is answered the best model it can, and a bound slug the catalogue lacks is
+        ignored."""
+        _dispatch_draft(harness, orchestrator_session)
+
+        run = harness.invoke(
+            FUNCTION,
+            sessionId=orchestrator_session,
+            boundModels=("deep-thinker", "host-only-model"),
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "resolved"}
+        assert report["profile"]["slug"] == "deep-thinker"
+        assert_report_journaled_byte_identically(harness, run, -1)
+
+    def test_a_host_binding_no_catalogue_model_is_refused_explicitly(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 4, invariant 6 / rule 1): with no catalogue model bound there
+        is nothing the host can run — a journaled `inquiry-error` (`no-bound-model`),
+        never an unbound profile the host would silently swap for another model."""
+        _dispatch_draft(harness, orchestrator_session)
+
+        run = harness.invoke(
+            FUNCTION, sessionId=orchestrator_session, boundModels=("host-only-model",)
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"]["status"] == "inquiry-error"
+        assert report["outcome"]["error"]["code"] == "no-bound-model"
+        assert "profile" not in report
+        assert_report_journaled_byte_identically(harness, run, -1)
+
     def test_the_binding_is_deterministic_and_journals_every_invocation(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
@@ -94,8 +135,8 @@ class TestResolveStepModel:
         (1 invocation = 1 entry)."""
         _dispatch_draft(harness, orchestrator_session)
 
-        first = harness.invoke(FUNCTION, sessionId=orchestrator_session)
-        second = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        first = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
+        second = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         assert assert_contract_round_trip(harness, second)["profile"] == (
             first.report["profile"]
@@ -115,7 +156,7 @@ class TestResolveStepModel:
         """Spec (function 4, precondition E + rule 2): with no in-flight step
         persisted state names no target — `not-applicable`, a success status carrying
         no payload and never journaled."""
-        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "not-applicable"}
@@ -131,7 +172,7 @@ class TestResolveStepModel:
         harness.invoke("check-step-postconditions", sessionId=orchestrator_session)
         before = harness.list_journaled_functions(orchestrator_session)
 
-        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         assert assert_contract_round_trip(harness, run)["outcome"] == {
             "status": "not-applicable"
@@ -144,7 +185,7 @@ class TestResolveStepModel:
         """Spec (function 4, precondition E + rule 4): the mediated-invocation
         backstop rejects an id resolving to no registered session, and there is no log
         to journal that rejection to."""
-        run = harness.invoke(FUNCTION, sessionId="ghost-session")
+        run = harness.invoke(FUNCTION, sessionId="ghost-session", boundModels=BOUND)
 
         assert_contract_round_trip(harness, run)
         assert run.status == "inquiry-error"
@@ -160,7 +201,7 @@ class TestResolveStepModel:
         harness.invoke("end-session", sessionId=orchestrator_session)
         before = harness.list_journaled_functions(orchestrator_session)
 
-        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session, boundModels=BOUND)
 
         assert_contract_round_trip(harness, run)
         assert run.status == "state-error"
@@ -172,7 +213,9 @@ class TestResolveStepModel:
     ) -> None:
         """Spec (rule 4): a contract-validation failure produces no report at all and
         surfaces at the command exit plane."""
-        run = harness.invoke(FUNCTION, sessionId="", parentSessionId="root")
+        run = harness.invoke(
+            FUNCTION, sessionId="", parentSessionId="root", boundModels=BOUND
+        )
 
         assert harness.validate_inquiry(FUNCTION, run.inquiry) != ()
         assert run.report is None

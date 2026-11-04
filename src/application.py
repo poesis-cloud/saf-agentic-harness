@@ -80,6 +80,7 @@ _FUNCTION_ARGUMENTS: Mapping[str, tuple[tuple[tuple[str, ...], str, bool], ...]]
                 (("--action",), "action", False),
             ),
             "check-step-artifact": ((("--artifact-path",), "artifactPaths", True),),
+            "resolve-step-model": ((("--bound-model",), "boundModels", True),),
         }
     )
 )

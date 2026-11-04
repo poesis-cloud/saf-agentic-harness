@@ -30,6 +30,19 @@ from tests.unit.services.model_resolution.conftest import (
 _DEEP_NINE = build_capabilities(deep_reasoning=9.0)
 _DEEP_SEVEN = build_capabilities(deep_reasoning=7.0)
 _SECOND_ORCHESTRATOR_SESSION = "orchestrator-2"
+# Every profile slug these tests' catalogs declare: the host binds them all unless a
+# test narrows the bound set itself.
+_BOUND = (
+    "model-a",
+    "model-b",
+    "deep-model",
+    "coding-model",
+    "expensive",
+    "cheap",
+    "zulu",
+    "alpha",
+    "coder",
+)
 
 
 class FailingInstanceViewSessionLogStore(SessionLogStore):
@@ -69,7 +82,7 @@ class TestStepModelResolver:
         resolver = _build_resolver(log_store)
 
         with pytest.raises(InquiryError) as raised:
-            resolver.resolve_step_model("../../etc/passwd", None)
+            resolver.resolve_step_model("../../etc/passwd", None, _BOUND)
 
         assert raised.value.code == "invalid-inquiry"
         assert raised.value.status == "inquiry-error"
@@ -83,7 +96,7 @@ class TestStepModelResolver:
         append_ending(log_store)
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "state-error"
         assert report.outcome.error is not None
@@ -100,7 +113,7 @@ class TestStepModelResolver:
         failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
         resolver = _build_resolver(failing_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "system-error"
         assert report.outcome.error is not None
@@ -117,7 +130,7 @@ class TestStepModelResolver:
         start_session_log(log_store)
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "not-applicable"
         assert report.outcome.error is None
@@ -135,7 +148,7 @@ class TestStepModelResolver:
         append_outcome(log_store)
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "not-applicable"
         assert len(read_entries(workspace_dir, ORCHESTRATOR_SESSION)) == 3
@@ -159,7 +172,7 @@ class TestStepModelResolver:
         )
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "not-applicable"
         assert report.profile is None
@@ -184,7 +197,7 @@ class TestStepModelResolver:
         )
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "resolved"
         assert report.profile is not None
@@ -202,7 +215,7 @@ class TestStepModelResolver:
             FailingInstanceViewSessionLogStore(workspace_dir),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert isinstance(report, ModelProfileReport)
         assert report.outcome.status == "resolved"
@@ -217,7 +230,7 @@ class TestStepModelResolver:
         append_resolution(log_store, workflow_instance_id=None)
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "state-error"
         assert report.outcome.error is not None
@@ -235,7 +248,7 @@ class TestStepModelResolver:
         append_resolution(log_store, workflow_instance_id=None)
         failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
 
-        report = _build_resolver(failing_store).resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = _build_resolver(failing_store).resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "state-error"
         assert report.outcome.error.code == "step-correlation-missing"
@@ -250,7 +263,7 @@ class TestStepModelResolver:
         append_resolution(log_store)
         resolver = _build_resolver(log_store, profiles=build_profiles())
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "configuration-error"
         assert report.outcome.error is not None
@@ -263,7 +276,7 @@ class TestStepModelResolver:
         """Precondition (E) / rule 4: `session-unregistered` returns a report with no log to journal to."""
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "inquiry-error"
         assert report.outcome.error is not None
@@ -285,7 +298,7 @@ class TestStepModelResolver:
             ),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.slug == "deep-model"
@@ -303,7 +316,7 @@ class TestStepModelResolver:
             profiles=build_profiles(("model-a", 3, _DEEP_NINE), ("model-b", 1, _DEEP_SEVEN)),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.slug == "model-a"
@@ -320,7 +333,7 @@ class TestStepModelResolver:
             profiles=build_profiles(("model-a", 3, _DEEP_NINE), ("model-b", 1, _DEEP_SEVEN)),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.score == 27.0
@@ -338,11 +351,52 @@ class TestStepModelResolver:
             profiles=build_profiles(("expensive", 5, _DEEP_NINE), ("cheap", 1, _DEEP_NINE)),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.slug == "cheap"
         assert report.profile.cost_rank == 1
+
+    def test_ranks_only_the_models_the_host_binds(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Invariant 6: the candidates are the catalogue profiles the host binds — the
+        catalogue's best model is never returned when the host cannot run it, and a bound
+        slug the catalogue does not declare is ignored."""
+        start_session_log(log_store)
+        append_resolution(log_store)
+        resolver = _build_resolver(log_store)
+
+        report = resolver.resolve_step_model(
+            ORCHESTRATOR_SESSION, None, ("model-b", "host-only-model")
+        )
+
+        assert report.outcome.status == "resolved"
+        assert report.profile is not None
+        assert report.profile.slug == "model-b"
+        [entry] = read_entries(workspace_dir, ORCHESTRATOR_SESSION)[-1:]
+        assert entry["report"]["profile"]["slug"] == "model-b"
+
+    def test_refuses_a_host_that_binds_no_catalogue_model(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Invariant 6 / rule 1: when no catalogue profile is bound there is nothing the
+        host can run — an explicit, journaled `inquiry-error` (`no-bound-model`), never an
+        unbound profile the host would silently swap for another model."""
+        start_session_log(log_store)
+        append_resolution(log_store)
+        resolver = _build_resolver(log_store)
+
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, ("host-only-model",))
+
+        assert report.outcome.status == "inquiry-error"
+        assert report.outcome.error is not None
+        assert report.outcome.error.code == "no-bound-model"
+        assert "host-only-model" in report.outcome.error.message
+        assert report.profile is None
+        entries = read_entries(workspace_dir, ORCHESTRATOR_SESSION)
+        assert len(entries) == 3
+        assert entries[-1]["report"]["outcome"]["error"]["code"] == "no-bound-model"
 
     def test_breaks_a_cost_rank_tie_toward_the_lowest_slug(
         self, log_store: SessionLogStore
@@ -355,7 +409,7 @@ class TestStepModelResolver:
             profiles=build_profiles(("zulu", 2, _DEEP_NINE), ("alpha", 2, _DEEP_NINE)),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.slug == "alpha"
@@ -379,8 +433,8 @@ class TestStepModelResolver:
         append_resolution(log_store)
         resolver = _build_resolver(log_store)
 
-        first = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
-        second = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        first = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
+        second = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert first.profile == second.profile
         assert first.to_dict()["profile"] == second.to_dict()["profile"]
@@ -393,7 +447,7 @@ class TestStepModelResolver:
         append_resolution(log_store, step_slug="retired-step")
         resolver = _build_resolver(log_store)
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "configuration-error"
         assert report.outcome.error is not None
@@ -409,7 +463,7 @@ class TestStepModelResolver:
         append_resolution(log_store)
         resolver = _build_resolver(log_store, clock=SequenceClock("2026-08-17T15:00:00Z"))
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.outcome.status == "resolved"
         assert report.context.function == "resolve-step-model"
@@ -434,7 +488,7 @@ class TestStepModelResolver:
             profiles=build_profiles(("coder", 1, build_capabilities(coding=8.0))),
         )
 
-        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None)
+        report = resolver.resolve_step_model(ORCHESTRATOR_SESSION, None, _BOUND)
 
         assert report.profile is not None
         assert report.profile.score == 40.0

@@ -32,6 +32,7 @@ class ResolveStepModelCommand(Command):
         return ResolveStepModelInquiry(
             session_id=data["sessionId"],
             parent_session_id=data.get("parentSessionId"),
+            bound_models=tuple(data["boundModels"]),
         )
 
     def execute_function(self, inquiry: ResolveStepModelInquiry) -> ModelProfileReport:
@@ -39,6 +40,7 @@ class ResolveStepModelCommand(Command):
         return self._model_resolver.resolve_step_model(
             session_id=inquiry.session_id,
             parent_session_id=inquiry.parent_session_id,
+            bound_models=inquiry.bound_models,
         )
 
 

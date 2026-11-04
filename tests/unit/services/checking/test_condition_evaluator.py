@@ -20,7 +20,7 @@ from errors import StateError
 from services.checking import ConditionEvaluator
 from stores.artifact_store import ArtifactStore
 
-SELECT_DECLARED_ARTIFACT = "artifacts['review-report'].filter(a, a.slug == artifact)"
+SELECT_DECLARED_ARTIFACT = "artifacts[artifact]"
 
 
 def _executed_view(step_slug: str):
@@ -111,11 +111,12 @@ class TestConditionEvaluator:
 
         assert checks[0].outcome == "pass"
 
-    def test_scopes_the_selector_to_the_steps_declared_artifact_constant(
+    def test_indexes_the_selector_by_the_steps_declared_artifact_constant(
         self, artifact_store: ArtifactStore, workspace: Path
     ) -> None:
-        """Function 5, invariant 2: the step's declared `artifact` ref is in scope as
-        a runtime constant — the selector filters to the step's declared artifact."""
+        """Function 5, invariant 2: the step's declared `artifact` slug is in scope as
+        a runtime constant — `artifacts[artifact]` is that kind's instance list, never
+        compared against an instance's own `slug`."""
         write_artifact(
             workspace, "review-report/r1.json", {"slug": "other-report", "status": "draft"}
         )
@@ -124,14 +125,14 @@ class TestConditionEvaluator:
             kind="precondition",
             slug="report-exists",
             set_selector={"setQuery": SELECT_DECLARED_ARTIFACT},
-            set_predicate="selected.size() == 1",
+            set_predicate="selected.size() == 1 && selected[0].slug == 'other-report'",
         )
 
         checks = evaluator.evaluate_conditions(
             (condition,), build_instance_view([]), "review-report"
         )
 
-        assert checks[0].outcome == "fail"
+        assert checks[0].outcome == "pass"
 
     def test_treats_a_false_predicate_as_a_fail_check_not_an_error(
         self, artifact_store: ArtifactStore

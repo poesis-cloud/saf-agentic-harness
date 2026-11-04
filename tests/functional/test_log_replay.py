@@ -145,6 +145,7 @@ def _drive_scenario(
         "resolve-step-instructions", sessionId=STEP_SESSION, parentSessionId=primary
     )
     harness.invoke("resolve-step-skills", sessionId=STEP_SESSION, parentSessionId=primary)
+    harness.deliver_in_flight_step(primary, step_session=STEP_SESSION)
     harness.invoke("end-session", sessionId=STEP_SESSION)
     harness.invoke("check-step-postconditions", sessionId=primary)
     harness.invoke("end-session", sessionId=primary)
@@ -198,6 +199,7 @@ class TestLogReplay:
             ("resolve-step", "step-resolution"),
             ("resolve-step-instructions", "resolved"),
             ("resolve-step-skills", "resolved"),
+            ("check-step-artifact", "valid"),
             ("check-step-postconditions", "pass"),
         )
 

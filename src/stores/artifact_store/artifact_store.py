@@ -7,18 +7,23 @@ import subprocess
 from itertools import chain
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, StateError, SystemFailureError
 from stores.artifact_store.artifact import Artifact
 from stores.artifact_store.finding import Finding
+from stores.artifact_store.provenance import Provenance
 from utils.json_loader import JsonLoader
 from utils.markdown_loader import MarkdownLoader
 from utils.schema_validator import SchemaValidator, ValidationErrorRecord
 
 _CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "contracts"
 _MARKDOWN_SUFFIX = ".md"
+# The commit trailer function 9 attributes every harness commit with; provenance
+# reads it back, so the writer and the reader share this one key.
+_SESSION_TRAILER = "session-id"
+_UNRESOLVABLE_RESOURCE = "unresolvable-resource"
 
 
 class ArtifactStore:
@@ -59,30 +64,42 @@ class ArtifactStore:
         )
 
     def discover_artifacts(self, selector: str) -> tuple[Artifact, ...]:
-        """Read committed artifacts under a selector, raising on any invalid one.
+        """Read committed artifacts under a path selector, raising on any invalid one.
 
         C6: `discover()` raises rather than yield a schema-invalid artifact, so
         every reader of committed state fails loudly on foreign corruption.
         """
-        artifacts: list[Artifact] = []
-        findings: list[Finding] = []
-        for artifact_path in self.scan_raw_paths(Path(selector)):
-            ref = artifact_path.as_posix()
-            kind = self._resolve_kind(ref)
-            committed = self._run_git("show", f"HEAD:{ref}")
-            path_findings, data = self._validate_document(ref, kind, committed)
-            if path_findings:
-                findings.extend(path_findings)
-                continue
-            artifacts.append(Artifact(ref=ref, kind=kind, data=data))
-        if findings:
-            first = findings[0]
+        return self._read_committed(
+            (path.as_posix(), self._resolve_kind(path.as_posix()))
+            for path in self.scan_raw_paths(Path(selector))
+        )
+
+    def discover_artifacts_by_kind(self, kind: str) -> tuple[Artifact, ...]:
+        """Read every committed instance of one artifact kind, raising on any invalid one.
+
+        Spec (function 5, invariant 2): `artifacts` maps an artifact (schema) slug to
+        its instances, so membership is the workspace layout's answer for each
+        committed path — never a path prefix. Paths the layout binds to no artifact
+        (the logs plane, foreign files) are not instances of any kind.
+        """
+        if kind not in self._schema_ids:
             raise StateError(
-                "artifact-invalid",
-                f"Committed artifact '{first.source}' is not valid: {first.message}",
+                "artifact-schema-unresolved",
+                f"No artifact schema is declared for the artifact slug '{kind}'.",
                 False,
             )
-        return tuple(sorted(artifacts, key=lambda artifact: artifact.ref))
+        refs: list[tuple[str, str]] = []
+        for path in self.scan_raw_paths(Path(".")):
+            ref = path.as_posix()
+            try:
+                resolved = self._workspace_layout.resolve_resource(ref)
+            except ConfigurationError as failure:
+                if failure.code != _UNRESOLVABLE_RESOURCE:
+                    raise
+                continue
+            if resolved == kind:
+                refs.append((ref, kind))
+        return self._read_committed(refs)
 
     def scan_raw_paths(self, scope: Path) -> Iterator[Path]:
         """Enumerate the raw universe of committed paths under a scope.
@@ -143,7 +160,7 @@ class ArtifactStore:
             "commit",
             "--only",
             "-m",
-            f"artifact: commit validated write set\n\nsession-id: {session_id}",
+            f"artifact: commit validated write set\n\n{_SESSION_TRAILER}: {session_id}",
             "--",
             *refs,
         )
@@ -165,6 +182,48 @@ class ArtifactStore:
         return Finding(
             source=ref, rule="deleted", message=f"Deleted newly staged '{ref}'."
         )
+
+    def _read_committed(self, refs: Iterable[tuple[str, str]]) -> tuple[Artifact, ...]:
+        """Validate and read committed `(ref, kind)` pairs with their provenance."""
+        artifacts: list[Artifact] = []
+        findings: list[Finding] = []
+        for ref, kind in refs:
+            committed = self._run_git("show", f"HEAD:{ref}")
+            path_findings, data = self._validate_document(ref, kind, committed)
+            if path_findings:
+                findings.extend(path_findings)
+                continue
+            artifacts.append(
+                Artifact(
+                    ref=ref, kind=kind, data=data, provenance=self._read_provenance(ref)
+                )
+            )
+        if findings:
+            first = findings[0]
+            raise StateError(
+                "artifact-invalid",
+                f"Committed artifact '{first.source}' is not valid: {first.message}",
+                False,
+            )
+        return tuple(sorted(artifacts, key=lambda artifact: artifact.ref))
+
+    def _read_provenance(self, ref: str) -> Provenance:
+        """Derive one committed path's provenance from the harness's own attribution.
+
+        The session is the `session-id` trailer of the latest `HEAD` commit touching
+        the path (function 9 invariant 3); a commit without it — a user-seeded or
+        foreign commit — attributes no session.
+        """
+        trailer = self._run_git(
+            "log",
+            "-1",
+            f"--format=%(trailers:key={_SESSION_TRAILER},valueonly)",
+            "HEAD",
+            "--",
+            ref,
+        )
+        session_id = trailer.splitlines()[0].strip() if trailer else ""
+        return Provenance(session_id=session_id or None)
 
     def _read_schema_id(self, schema_path: Path) -> str:
         """Read one artifact schema's `$id` URI, failing fast when absent."""
@@ -204,6 +263,21 @@ class ArtifactStore:
         except (json.JSONDecodeError, ValueError) as error:
             return (
                 (Finding(source=ref, rule="parse", message=f"{error}"),),
+                None,
+            )
+        if isinstance(data, Mapping) and Provenance.PROPERTY in data:
+            return (
+                (
+                    Finding(
+                        source=ref,
+                        rule="reserved",
+                        message=(
+                            f"'{Provenance.PROPERTY}' is a harness-owned property: the "
+                            f"harness derives it from its commit attribution, and an "
+                            f"artifact never supplies it."
+                        ),
+                    ),
+                ),
                 None,
             )
         records = self._validator.validate_instance(self._schema_ids[kind], data)

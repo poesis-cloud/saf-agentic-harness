@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Sequence
 
 from config import ModelProfiles, Step, WorkflowCatalog
 from errors import ConfigurationError, HarnessError, InquiryError, StateError, SystemFailureError
@@ -63,10 +64,11 @@ def _render_error_report(context: Context, failure: HarnessError) -> ModelProfil
 
 
 class StepModelResolver:
-    """Bind the in-flight step to the model profile its capability demand scores highest.
+    """Bind the in-flight step to the bound model profile its capability demand scores highest.
 
     Spec (function 4): independent of function 3 and of the acting agent — the profile is
-    a pure function of static configuration and the step deduced from the session's logs.
+    a pure function of static configuration, the step deduced from the session's logs, and
+    the models the host binds.
     """
 
     def __init__(
@@ -83,9 +85,12 @@ class StepModelResolver:
         self._clock = clock or Clock()
 
     def resolve_step_model(
-        self, session_id: str, parent_session_id: str | None
+        self,
+        session_id: str,
+        parent_session_id: str | None,
+        bound_models: Sequence[str],
     ) -> ModelProfileReport:
-        """Resolve the model profile serving this session's in-flight step."""
+        """Resolve the bound model profile serving this session's in-flight step."""
         _require_inquiry_slugs(session_id, parent_session_id)
         context = Context(
             function=_FUNCTION,
@@ -113,7 +118,7 @@ class StepModelResolver:
         )
         try:
             step = self._find_step(instance_id, resolution)
-            binding = self._bind_model_profile(step)
+            binding = self._bind_model_profile(step, bound_models)
         except HarnessError as failure:
             return self._journal_report(_render_error_report(context, failure))
 
@@ -180,16 +185,32 @@ class StepModelResolver:
             False,
         )
 
-    def _bind_model_profile(self, step: Step) -> ModelProfileBinding:
-        """Pick the highest-scoring profile, breaking ties on cost rank then slug.
+    def _bind_model_profile(
+        self, step: Step, bound_models: Sequence[str]
+    ) -> ModelProfileBinding:
+        """Pick the highest-scoring bound profile, breaking ties on cost rank then slug.
 
-        Spec (invariant 3): highest score wins; an exact tie breaks toward the lower
-        `costRank`, and a further tie toward the lexicographically lowest slug.
+        Spec (invariants 3 and 6): only catalogue profiles the host binds are candidates;
+        highest score wins; an exact tie breaks toward the lower `costRank`, and a further
+        tie toward the lexicographically lowest slug.
         """
         if not self._model_profiles.profiles:
             raise ConfigurationError(
                 "empty-model-catalog",
                 "The model catalog declares no profile to route to.",
+                False,
+            )
+        bound = frozenset(bound_models)
+        candidates = {
+            slug: profile
+            for slug, profile in self._model_profiles.profiles.items()
+            if slug in bound
+        }
+        if not candidates:
+            raise InquiryError(
+                "no-bound-model",
+                "The host binds no model the catalog declares (bound: "
+                f"{', '.join(repr(slug) for slug in sorted(bound)) or 'none'}).",
                 False,
             )
         ranked = sorted(
@@ -199,7 +220,7 @@ class StepModelResolver:
                     profile.cost_rank,
                     slug,
                 )
-                for slug, profile in self._model_profiles.profiles.items()
+                for slug, profile in candidates.items()
             )
         )
         negated_score, cost_rank, slug = ranked[0]

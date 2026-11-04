@@ -21,6 +21,16 @@ from functional_fixtures import (
 
 FUNCTION = "check-step-postconditions"
 
+# Function 10, invariant 5: the harness-defined check every step carries, first.
+ARTIFACT_DELIVERED_CONDITION: Mapping[str, Any] = {
+    "kind": "postcondition",
+    "slug": "harness-artifact-delivered",
+    "setSelector": {
+        "setQuery": "artifacts[artifact].filter(a, a.provenance.sessionId in stepSessionIds)"
+    },
+    "setPredicate": "selected.size() > 0",
+}
+
 REPORT_DELIVERED_CONDITION: Mapping[str, Any] = {
     "kind": "postcondition",
     "slug": "report-delivered",
@@ -120,7 +130,7 @@ class TestCheckStepPostconditions:
         per declared postcondition, logging the FULL condition object, appended to the
         DISPATCHING session's log."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
+        harness.deliver_in_flight_step(session)
 
         run = harness.invoke(FUNCTION, sessionId=session)
 
@@ -128,10 +138,11 @@ class TestCheckStepPostconditions:
         assert report["outcome"] == {"status": "pass"}
         checks = report["conditionChecks"]
         assert [check["condition"] for check in checks] == [
+            ARTIFACT_DELIVERED_CONDITION,
             UNBLOCKS_VERIFY_CONDITION,
             REPORT_DELIVERED_CONDITION,
         ]
-        assert [check["outcome"] for check in checks] == ["pass", "pass"]
+        assert [check["outcome"] for check in checks] == ["pass", "pass", "pass"]
         assert harness.list_journaled_functions(session) == (
             "start-session",
             "resolve-step",
@@ -153,29 +164,87 @@ class TestCheckStepPostconditions:
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "fail"}
         checks = report["conditionChecks"]
-        assert [check["outcome"] for check in checks] == ["pass", "fail"]
-        assert "report-delivered" in checks[1]["failureMessage"]
+        assert [check["outcome"] for check in checks] == ["fail", "pass", "fail"]
+        assert "delivered no 'report' artifact" in checks[0]["failureMessage"]
+        assert "report-delivered" in checks[2]["failureMessage"]
         assert assert_journal_contract(harness, session)[-1]["report"] == report
 
-    def test_a_step_declaring_zero_postconditions_passes_vacuously(
+    def test_a_step_declaring_zero_postconditions_still_carries_the_delivery_check(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
-        """Spec (function 10, invariant 4): a step declaring zero postconditions passes
-        vacuously — `pass` with an empty `conditionChecks`, journaled, and sufficient for
-        the cursor to count the step executed."""
+        """Spec (function 10, invariants 4-5): zero DECLARED postconditions never pass
+        vacuously — the built-in delivery check is always evaluated, so `conditionChecks`
+        holds exactly it, journaled, and its pass makes the step executed."""
         harness.invoke(
             "resolve-step", sessionId=orchestrator_session, workflowSlug="planning"
+        )
+        harness.deliver_in_flight_step(orchestrator_session)
+
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "pass"}
+        assert report["conditionChecks"] == [
+            {"condition": ARTIFACT_DELIVERED_CONDITION, "outcome": "pass"}
+        ]
+        assert (
+            assert_journal_contract(harness, orchestrator_session)[-1]["report"]
+            == report
+        )
+
+    def test_a_step_whose_session_committed_nothing_fails_despite_older_instances(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 10, invariant 5): no valid step without its artifact — an
+        instance of the step's artifact kind that another session (or the user)
+        committed is not this step's delivery, and the step's own report is never
+        evidence: with a step session that committed nothing, the step fails."""
+        harness.commit_artifact("report/seeded.json", {"slug": "seeded", "state": "done"})
+        harness.invoke("start-session", sessionId="earlier", agent="builder")
+        harness.workspace_dir.joinpath("report", "earlier.json").write_text(
+            '{"slug": "earlier", "state": "done"}', encoding="utf-8"
+        )
+        harness.invoke(
+            "check-step-artifact", sessionId="earlier", artifactPaths=["report/earlier.json"]
+        )
+        harness.invoke(
+            "resolve-step", sessionId=orchestrator_session, workflowSlug="planning"
+        )
+        harness.invoke(
+            "start-session",
+            sessionId="idle-builder",
+            parentSessionId=orchestrator_session,
+            agent="builder",
+        )
+
+        run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "fail"}
+        [check] = report["conditionChecks"]
+        assert check["condition"] == ARTIFACT_DELIVERED_CONDITION
+        assert check["outcome"] == "fail"
+        assert "'idle-builder'" in check["failureMessage"]
+
+    def test_a_step_updating_an_existing_instance_delivers_it(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (Artifact provenance + function 10, invariant 5): an update-type step
+        satisfies the check by committing its edit — the instance's provenance names the
+        session of the latest harness commit touching it."""
+        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "draft"})
+        harness.invoke(
+            "resolve-step", sessionId=orchestrator_session, workflowSlug="planning"
+        )
+        harness.deliver_in_flight_step(
+            orchestrator_session, "report/alpha.json", {"slug": "alpha", "state": "final"}
         )
 
         run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "pass"}
-        assert report["conditionChecks"] == []
-        assert (
-            assert_journal_contract(harness, orchestrator_session)[-1]["report"]
-            == report
-        )
+        assert harness.list_committed_paths() == (".gitignore", "report/alpha.json")
 
     def test_a_passing_outcome_advances_the_cursor_to_the_next_step(
         self, build_harness: Callable[..., FunctionalHarness]
@@ -184,7 +253,7 @@ class TestCheckStepPostconditions:
         function 3's cursor reads — a step whose latest outcome passes counts executed,
         so the next resolution answers the successor, in the same instance."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
+        harness.deliver_in_flight_step(session)
         instance = harness.read_log(session)[-1]["report"]["context"][
             "workflowInstanceId"
         ]
@@ -237,7 +306,7 @@ class TestCheckStepPostconditions:
         flight, so a re-delivered boundary finds no target and adds no second
         evaluation."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
+        harness.deliver_in_flight_step(session)
         harness.invoke(FUNCTION, sessionId=session)
         journaled_before = harness.read_log_lines(session)
 
@@ -254,13 +323,13 @@ class TestCheckStepPostconditions:
         """Spec (function 10, Postconditions): no artifact is touched — the invocation's
         own log entry is the only write, leaving the workspace tree clean."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
+        harness.deliver_in_flight_step(session)
         commits_before = harness.count_commits()
 
         harness.invoke(FUNCTION, sessionId=session)
 
         assert harness.count_commits() == commits_before
-        assert harness.list_committed_paths() == (".gitignore", "report/alpha.json")
+        assert harness.list_committed_paths() == (".gitignore", "report/produce.json")
         assert run_git(harness.workspace_dir, "status", "--porcelain") == ""
 
     def test_an_expression_failing_at_runtime_is_a_journaled_state_error(

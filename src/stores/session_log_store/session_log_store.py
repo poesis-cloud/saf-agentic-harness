@@ -21,6 +21,8 @@ _CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _INSTANCE_MINT_LENGTH = 6
 _SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _INSTANCE_MINT_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4,}$")
+_START_SESSION_FUNCTION = "start-session"
+_STARTED_STATUS = "started"
 
 _default_validator: SchemaValidator | None = None
 
@@ -174,6 +176,36 @@ class SessionLogStore:
         open_candidates.sort(key=lambda candidate: candidate[1])
         open_candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         return open_candidates[0][1]
+
+    def find_child_session_ids(
+        self, parent_session_id: str, agent: str, since: str
+    ) -> tuple[str, ...]:
+        """List the sessions `agent` opened under a parent at or after an instant.
+
+        Function 0 correlates a step session to its parent's in-flight step
+        resolution, so the sessions whose registration names this parent and actor,
+        written no earlier than that resolution, are the sessions executing it.
+        """
+        matched: list[str] = []
+        logs_dir = self._workspace_dir / "logs"
+        if not logs_dir.is_dir():
+            return ()
+        for path in sorted(logs_dir.glob(f"*{_LOG_FILE_SUFFIX}")):
+            entries = self._read_log_entries(path)
+            if not entries:
+                continue
+            first = entries[0]
+            context = first.report.context
+            session = first.report.payload.get("session") or {}
+            if (
+                context.function == _START_SESSION_FUNCTION
+                and first.report.outcome.status == _STARTED_STATUS
+                and context.parent_session_id == parent_session_id
+                and session.get("agent") == agent
+                and first.timestamp >= since
+            ):
+                matched.append(context.session_id)
+        return tuple(matched)
 
     def _resolve_log_path(self, session_id: str) -> Path:
         """Resolve one session's log file path under the workspace logs dir.

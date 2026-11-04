@@ -19,6 +19,10 @@
     "slug": {
       "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
       "description": "URL-safe, human-identifying slug for the artifact \u2014 the ONE generic display/identity field every artifact schema should rely on rather than locally re-defining an equivalent 'title' property."
+   },
+    "provenance": {
+      "not": {},
+      "description": "Reserved for the harness-owned artifact provenance (`provenance.sessionId`: the session whose harness commit last changed the instance). It is derived by the harness from its own commit attribution and exposed to condition expressions on every artifact kind; an artifact's own data never carries it, so a document supplying it is invalid (the harness refuses it as `reserved` before schema validation)."
     }
   }
 }

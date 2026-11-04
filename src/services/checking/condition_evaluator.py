@@ -12,10 +12,11 @@ from celpy import celtypes
 from config import StateCondition, StepCondition
 from errors import StateError
 from services.checking.condition_check import ConditionCheck
-from stores.artifact_store import ArtifactStore
+from stores.artifact_store import Artifact, ArtifactStore, Provenance
 from stores.session_log_store import WorkflowInstanceView
 
 _ARTIFACTS_REFERENCE = re.compile(r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]")
+_DECLARED_ARTIFACT_REFERENCE = re.compile(r"artifacts\[\s*artifact\s*\]")
 _PASS = "pass"
 _FAIL = "fail"
 
@@ -27,6 +28,14 @@ def _thaw(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_thaw(item) for item in value]
     return value
+
+
+def _to_cel_instance(entry: Artifact) -> dict[str, Any]:
+    """Render one instance for CEL: its data plus the harness-owned provenance."""
+    return {
+        **_thaw(entry.data),
+        Provenance.PROPERTY: entry.provenance.to_cel_data(),
+    }
 
 
 class ConditionEvaluator:
@@ -47,14 +56,16 @@ class ConditionEvaluator:
         conditions: Sequence[StepCondition | StateCondition],
         view: WorkflowInstanceView,
         artifact: str,
+        step_session_ids: Sequence[str] = (),
     ) -> tuple[ConditionCheck, ...]:
         """Evaluate every condition in order, one check per declared condition.
 
-        `artifact` is the step's declared artifact ref, in scope as a CEL runtime
-        constant (function 5, invariant 2).
+        `artifact` is the step's declared artifact slug and `step_session_ids` the
+        sessions that executed the in-flight step, both in scope as CEL runtime
+        constants (function 5, invariant 2) — the latter empty before dispatch.
         """
         return tuple(
-            self._evaluate_condition(condition, view, artifact)
+            self._evaluate_condition(condition, view, artifact, step_session_ids)
             for condition in conditions
         )
 
@@ -63,11 +74,12 @@ class ConditionEvaluator:
         condition: StepCondition | StateCondition,
         view: WorkflowInstanceView,
         artifact: str,
+        step_session_ids: Sequence[str],
     ) -> ConditionCheck:
         """Evaluate one condition into its check."""
         if isinstance(condition, StepCondition):
             return self._evaluate_step_condition(condition, view)
-        return self._evaluate_state_condition(condition, artifact)
+        return self._evaluate_state_condition(condition, artifact, step_session_ids)
 
     def _evaluate_step_condition(
         self, condition: StepCondition, view: WorkflowInstanceView
@@ -92,13 +104,19 @@ class ConditionEvaluator:
         )
 
     def _evaluate_state_condition(
-        self, condition: StateCondition, artifact: str
+        self,
+        condition: StateCondition,
+        artifact: str,
+        step_session_ids: Sequence[str],
     ) -> ConditionCheck:
         """Select persisted artifacts, then decide the predicate over `selected`."""
         set_query = condition.set_selector["setQuery"]
         activation: dict[str, Any] = {
-            "artifacts": self._load_artifacts(set_query),
+            "artifacts": self._load_artifacts(
+                f"{set_query}\n{condition.set_predicate}", artifact
+            ),
             "artifact": celtypes.StringType(artifact),
+            "stepSessionIds": celpy.json_to_cel(list(step_session_ids)),
         }
         selected = self._evaluate_expression(condition, set_query, activation)
         decided = self._evaluate_expression(
@@ -122,16 +140,23 @@ class ConditionEvaluator:
             ),
         )
 
-    def _load_artifacts(self, set_query: str) -> celtypes.Value:
-        """Load the committed instances of every artifact slug the query references."""
-        slugs = sorted(set(_ARTIFACTS_REFERENCE.findall(set_query)))
+    def _load_artifacts(self, expressions: str, artifact: str) -> celtypes.Value:
+        """Load the committed instances of every artifact kind the expressions reference.
+
+        Function 5, invariant 2: `artifacts` maps an artifact (schema) slug to its
+        instances — resolved by kind through the workspace layout, never by path —
+        each carrying the harness-owned `provenance` beside its own data.
+        """
+        slugs = set(_ARTIFACTS_REFERENCE.findall(expressions))
+        if _DECLARED_ARTIFACT_REFERENCE.search(expressions):
+            slugs.add(artifact)
         return celpy.json_to_cel(
             {
                 slug: [
-                    _thaw(entry.data)
-                    for entry in self._artifact_store.discover_artifacts(slug)
+                    _to_cel_instance(entry)
+                    for entry in self._artifact_store.discover_artifacts_by_kind(slug)
                 ]
-                for slug in slugs
+                for slug in sorted(slugs)
             }
         )
 

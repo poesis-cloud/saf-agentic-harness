@@ -87,11 +87,16 @@ class RecordingService:
         )
 
     def resolve_step_model(
-        self, session_id: str, parent_session_id: str | None
+        self,
+        session_id: str,
+        parent_session_id: str | None,
+        bound_models: tuple[str, ...],
     ) -> Report:
         """Stand in for `StepModelResolver` (function 4)."""
         return self._record_call(
-            session_id=session_id, parent_session_id=parent_session_id
+            session_id=session_id,
+            parent_session_id=parent_session_id,
+            bound_models=bound_models,
         )
 
     def check_step_preconditions(

@@ -1060,13 +1060,17 @@ harness command entry point.
    function belongs to a hook boundary, and a model-authored call to one is never legitimate.
 2. **Deny** any invocation whose command already carries session-attribution arguments
    (`--session-id`, `--parent-session-id`): model-authored attribution is never accepted.
+   Likewise **deny** one carrying `--bound-model`: the host's bound models are this binding's
+   answer (core function 4, invariant 6), never the agent's.
 3. Resolve `SessionTracker.resolve_current(sanitized(session_id))`. **Deny** if it returns
    `None` — never registered — there is no session to attribute this call to. (A resolved but
    already-closed session is not caught here — the adapter has no log access to know that; the
    harness core itself refuses it via C8 when the call actually runs — see Invariant 4.)
 4. Rewrite via `updatedInput`: inject `--session-id <the resolved current session>`
    (host-observed, adapter-resolved) into the command. The executed invocation's attribution
-   is then fully adapter-controlled — the model can neither choose nor forge it.
+   is then fully adapter-controlled — the model can neither choose nor forge it. For
+   `resolve-step-model`, also inject one `--bound-model <slug>` per canonical slug of
+   `models.yaml` `modelBindings` (sorted), so the core ranks only models this host can run.
 
 **Out** (stdout, exit 0)
 

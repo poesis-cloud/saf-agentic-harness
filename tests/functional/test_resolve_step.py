@@ -25,6 +25,7 @@ INSTANCE_ID_PATTERN = re.compile(r"^planning-[0-9A-HJKMNP-TV-Z]{4,}$")
 
 def _execute_in_flight_step(harness: FunctionalHarness, session_id: str) -> None:
     """Journal the in-flight step's passing outcome, so the cursor may move on."""
+    harness.deliver_in_flight_step(session_id)
     harness.invoke("check-step-postconditions", sessionId=session_id)
 
 

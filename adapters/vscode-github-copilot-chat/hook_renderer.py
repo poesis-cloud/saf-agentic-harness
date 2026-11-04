@@ -13,6 +13,7 @@ _ALLOWING_STATUSES = frozenset({"pass", "allowed"})
 _VALID_STATUS = "valid"
 _PASS_STATUS = "pass"
 _SESSION_ID_FLAG = "--session-id"
+_BOUND_MODEL_FLAG = "--bound-model"
 _INSTRUCTIONS_HEADER = "# Instructions"
 _SKILLS_HEADER = "# Skills"
 _LOAD_DIRECTIVE = "Read `{path}` before acting."
@@ -119,16 +120,23 @@ class HookRenderer:
         )
 
     def render_stamped_input(
-        self, tool_input: Mapping[str, Any], command_key: str, session_id: str
+        self,
+        tool_input: Mapping[str, Any],
+        command_key: str,
+        session_id: str,
+        bound_models: Sequence[str] = (),
     ) -> HookDecision:
         """Render H4's attribution stamp as a FULL rewritten `updatedInput`.
 
         Spec (adapter, H4 rule 4): the host validates `updatedInput` against the tool's
         input schema and the object must carry the whole `tool_input`, never a patch.
+        `resolve-step-model` also carries one `--bound-model` per model this host binds
+        (core function 4, invariant 6).
         """
         updated_input = dict(tool_input)
+        stamp = "".join(f" {_BOUND_MODEL_FLAG} {slug}" for slug in bound_models)
         updated_input[command_key] = (
-            f"{tool_input[command_key]} {_SESSION_ID_FLAG} {session_id}"
+            f"{tool_input[command_key]} {_SESSION_ID_FLAG} {session_id}{stamp}"
         )
         return _decide(
             {

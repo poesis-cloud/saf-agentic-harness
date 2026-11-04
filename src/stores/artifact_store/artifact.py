@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping
+
+from stores.artifact_store.provenance import Provenance
 
 
 def _freeze_data(value: Any) -> Any:
@@ -20,11 +22,16 @@ def _freeze_data(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class Artifact:
-    """Expose one artifact's workspace ref, its kind, and its immutable data."""
+    """Expose one artifact's workspace ref, its kind, its immutable data, and its provenance.
+
+    `provenance` is harness-owned: derived from the harness's commit attribution,
+    never part of `data` (an artifact supplying it is invalid).
+    """
 
     ref: str
     kind: str
     data: Mapping[str, Any]
+    provenance: Provenance = field(default_factory=Provenance)
 
     def __post_init__(self) -> None:
         """Deep-freeze `data`: a read of committed state is never mutable (C6)."""

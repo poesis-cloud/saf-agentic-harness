@@ -12,7 +12,7 @@ from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.workspace_layout import WorkspaceLayout
 from errors import StateError
-from stores.artifact_store import Artifact, ArtifactStore, Finding
+from stores.artifact_store import Artifact, ArtifactStore, Finding, Provenance
 from stores.session_log_store import Context, LogEntry, Outcome, Report, SessionLogStore
 
 
@@ -480,3 +480,67 @@ class TestArtifactStoreOverARealisticLayout:
                 data={"slug": "payments", "status": "approved"},
             ),
         )
+
+
+class TestDiscoverArtifactsByKind:
+    """Function 5, invariant 2: the `artifacts` runtime constant is keyed by KIND."""
+
+    def test_reads_every_committed_instance_the_layout_binds_to_the_kind(
+        self, workspace: Path, portfolio_store: ArtifactStore
+    ) -> None:
+        """Kind membership is the layout's answer per committed path — never a path
+        prefix — and paths the layout binds to nothing (`.gitignore`, `logs/`) are
+        instances of no kind."""
+        _stage(workspace, _EPIC_REF, "---\nslug: payments\nstatus: draft\n---\n\n# Payments\n")
+        _stage(workspace, _FEATURE_REF, '{"slug":"refunds","status":"draft"}\n')
+        _stage(workspace, "logs/01jx.log.jsonl", "{}\n")
+        _stage(workspace, ".gitignore", "tmp/\n")
+        _run_git(workspace, "add", "--", ".")
+        _run_git(workspace, "commit", "-m", "seed")
+
+        epics = portfolio_store.discover_artifacts_by_kind("epic")
+        features = portfolio_store.discover_artifacts_by_kind("feature")
+
+        assert [(artifact.ref, artifact.kind) for artifact in epics] == [(_EPIC_REF, "epic")]
+        assert [artifact.ref for artifact in features] == [_FEATURE_REF]
+        assert portfolio_store.discover_artifacts("epic") == ()
+
+    def test_refuses_a_kind_no_schema_declares(self, portfolio_store: ArtifactStore) -> None:
+        with pytest.raises(StateError) as raised:
+            portfolio_store.discover_artifacts_by_kind("story")
+
+        assert raised.value.code == "artifact-schema-unresolved"
+
+    def test_derives_provenance_from_the_harness_commit_attribution(
+        self, workspace: Path, portfolio_store: ArtifactStore
+    ) -> None:
+        """Artifact provenance: function 9's own commit (its `session-id` trailer)
+        attributes the instance; a commit without it attributes no session."""
+        _stage(workspace, _EPIC_REF, "---\nslug: payments\nstatus: draft\n---\n\n# Payments\n")
+        portfolio_store.commit_artifacts([Path(_EPIC_REF)], session_id="01jwriter")
+        _stage(workspace, _FEATURE_REF, '{"slug":"refunds","status":"draft"}\n')
+        _run_git(workspace, "add", "--", _FEATURE_REF)
+        _run_git(workspace, "commit", "-m", "user seed")
+
+        [epic] = portfolio_store.discover_artifacts_by_kind("epic")
+        [feature] = portfolio_store.discover_artifacts_by_kind("feature")
+
+        assert epic.provenance == Provenance(session_id="01jwriter")
+        assert feature.provenance == Provenance(session_id=None)
+        assert "provenance" not in epic.data
+
+    def test_refuses_a_staged_artifact_that_supplies_provenance(
+        self, workspace: Path, portfolio_store: ArtifactStore
+    ) -> None:
+        """Artifact provenance is harness-owned: function 9 rejects a write whose data
+        supplies it, so it is reverted and can never be committed."""
+        _stage(
+            workspace,
+            _FEATURE_REF,
+            '{"slug":"refunds","status":"draft","provenance":{"sessionId":"01jx"}}\n',
+        )
+
+        findings = portfolio_store.validate_artifact(Path(_FEATURE_REF))
+
+        assert [finding.rule for finding in findings] == ["reserved"]
+        assert "harness-owned" in findings[0].message

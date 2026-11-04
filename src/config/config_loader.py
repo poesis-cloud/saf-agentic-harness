@@ -12,6 +12,7 @@ from typing import Any, Iterator, Mapping, Sequence
 import celpy
 
 from config.access_control_list import AccessControlList
+from config.artifact_delivered_condition import ARTIFACT_DELIVERED_SLUG
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.framework_layout import FrameworkLayout
@@ -62,6 +63,9 @@ _ARTIFACTS_PROPERTY = re.compile(
 _CEL_MEMBERS = frozenset(
     {"all", "exists", "exists_one", "filter", "map", "size"}
 )
+# Harness-owned instance properties (spec, "Artifact provenance"): statically valid on
+# every artifact kind, whatever its schema declares.
+_HARNESS_ARTIFACT_PROPERTIES = frozenset({"provenance"})
 
 
 def _to_plain_data(value: Any) -> Any:
@@ -339,10 +343,22 @@ class ConfigLoader:
     def _require_unique_condition_slugs(
         self, slug: str, steps: Sequence[Mapping[str, Any]]
     ) -> None:
-        """Spec (function 6, invariant 3): condition slugs are unique within a step."""
+        """Spec (function 6, invariant 3): condition slugs are unique within a step.
+
+        Function 10, invariant 5: the built-in delivery check's slug is reserved, so
+        no declared condition can shadow it in the step's `conditionChecks`.
+        """
         for step in steps:
             seen: set[str] = set()
             for condition in step.get("conditions", ()):
+                if condition["slug"] == ARTIFACT_DELIVERED_SLUG:
+                    raise ConfigurationError(
+                        "reserved-condition-slug",
+                        f"Workflow '{slug}' step '{step['slug']}' declares the condition "
+                        f"slug '{ARTIFACT_DELIVERED_SLUG}', which the harness reserves for "
+                        f"its built-in artifact-delivery check.",
+                        False,
+                    )
                 if condition["slug"] in seen:
                     raise ConfigurationError(
                         "duplicate-condition-slug",
@@ -486,7 +502,7 @@ class ConfigLoader:
                 )
 
         for artifact_slug, member in _ARTIFACTS_PROPERTY.findall(expression):
-            if member in _CEL_MEMBERS:
+            if member in _CEL_MEMBERS or member in _HARNESS_ARTIFACT_PROPERTIES:
                 continue
             declared = artifact_schemas[artifact_slug].get("properties", {})
             if member not in declared:

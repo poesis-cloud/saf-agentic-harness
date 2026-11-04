@@ -183,7 +183,7 @@
         },
         "slug": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/conditionSlug",
-          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step."
+          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step. `harness-artifact-delivered` is reserved for the harness's built-in artifact-delivery check."
         },
         "step": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/stepSlug",
@@ -212,10 +212,10 @@
         },
         "slug": {
           "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/conditionSlug",
-          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step."
+          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step. `harness-artifact-delivered` is reserved for the harness's built-in artifact-delivery check."
         },
         "setSelector": {
-          "description": "The artifact-backed selector. Selection is artifact-backed: `setQuery` (CEL) references artifacts directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug -> matching instances, e.g. `artifacts['review-report']`) \u2014 no separate alias pre-declaration \u2014 to yield the `selected` set to assert on. The same CEL expression can reference the `artifact` runtime constant to scope to the step's declared artifact.",
+          "description": "The artifact-backed selector. Selection is artifact-backed: `setQuery` (CEL) references artifacts directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug -> matching instances, e.g. `artifacts['review-report']`) \u2014 no separate alias pre-declaration \u2014 to yield the `selected` set to assert on. `artifacts['<slug>']` holds every committed instance the workspace layout binds to that artifact kind; each instance also exposes the harness-owned `provenance.sessionId` (the session that last committed it). The same CEL expression can reference the `artifact` runtime constant (the step's declared artifact slug) and the `stepSessionIds` runtime constant (the sessions executing the in-flight step) to scope to the step's own work.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -225,7 +225,7 @@
             "setQuery": {
               "type": "string",
               "minLength": 1,
-              "description": "A CEL query referencing artifacts directly by their schema slug via the `artifacts` runtime constant (e.g. `artifacts['review-report'].filter(a, a.slug == artifact)`) to yield the `selected` set. The `artifact` runtime constant (the step's declared artifact slug) is in scope to filter to the step's declared artifact."
+              "description": "A CEL query referencing artifacts directly by their schema slug via the `artifacts` runtime constant (e.g. `artifacts[artifact].filter(a, a.status == 'approved')`) to yield the `selected` set. The `artifact` runtime constant (the step's declared artifact slug) and `stepSessionIds` (the in-flight step's sessions, matched by `a.provenance.sessionId in stepSessionIds`) are in scope. Whether the step delivered its artifact at all is the harness's built-in `harness-artifact-delivered` check, never a declared condition."
             }
           }
         },

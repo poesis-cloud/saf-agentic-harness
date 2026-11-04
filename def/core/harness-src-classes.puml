@@ -206,7 +206,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_catalog : WorkflowCatalog
         -_profiles : ModelProfiles
         -_clock : Clock
-        +resolve_step_model(session_id: str, parent_session_id: str | None) : ModelProfileReport
+        +resolve_step_model(session_id: str, parent_session_id: str | None, bound_models: Sequence[str]) : ModelProfileReport
       }
       class ModelProfileReport <<dataclass>> {
         +profile : ModelProfileBinding
@@ -373,6 +373,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_workspace_layout : WorkspaceLayout
         -_validator : SchemaValidator
         +discover_artifacts(selector: str) : tuple[Artifact, ...]
+        +discover_artifacts_by_kind(kind: str) : tuple[Artifact, ...]
         +scan_raw_paths(scope: Path) : Iterator[Path]
         +validate_artifact(artifact_path: Path) : tuple[Finding, ...]
         +is_staging_clean(artifact_path: Path) : bool
@@ -383,6 +384,10 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +ref : str
         +kind : str
         +data : Mapping[str, Any]
+        +provenance : Provenance
+      }
+      class Provenance <<dataclass>> {
+        +session_id : str | None
       }
       class Finding <<dataclass>> {
         +source : str
@@ -416,6 +421,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +create_session_log(entry: LogEntry) : Log
         +mint_workflow_instance_id(workflow_slug: str) : str
         +find_latest_open_instance(workflow_slug: str) : str | None
+        +find_child_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
         +load_session_log(session_id: str) : Log
         +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
         +append_log_entry(session_id: str, entry: LogEntry) : None

@@ -23,7 +23,7 @@ AFTER_DRAFT_CONDITION = {"kind": "precondition", "slug": "after-draft", "step": 
 REPORT_EXISTS_CONDITION = {
     "kind": "precondition",
     "slug": "report-exists",
-    "setSelector": {"setQuery": "artifacts['report']"},
+    "setSelector": {"setQuery": "artifacts['report'].filter(a, a.state == 'drafted')"},
     "setPredicate": "size(selected) > 0",
 }
 
@@ -36,6 +36,7 @@ def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
 def _dispatch_review(harness: FunctionalHarness, session_id: str) -> None:
     """Journal `draft` executed, then put the conditioned step, `review`, in flight."""
     _dispatch_draft(harness, session_id)
+    harness.deliver_in_flight_step(session_id)
     harness.invoke("check-step-postconditions", sessionId=session_id)
     harness.invoke("resolve-step", sessionId=session_id, workflowSlug="planning")
 
@@ -124,7 +125,11 @@ class TestCheckStepPreconditions:
         harness.invoke(FUNCTION, sessionId=orchestrator_session)
 
         assert harness.count_commits() == commits_before
-        assert harness.list_committed_paths() == (".gitignore", "report/alpha.json")
+        assert harness.list_committed_paths() == (
+            ".gitignore",
+            "report/alpha.json",
+            "report/draft.json",
+        )
 
     def test_a_session_with_no_in_flight_step_is_not_applicable_and_unjournaled(
         self, harness: FunctionalHarness, orchestrator_session: str

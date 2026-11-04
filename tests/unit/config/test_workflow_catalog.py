@@ -304,6 +304,32 @@ class TestConditionExpressionStaticValidation:
 
         assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
 
+    def test_admits_the_harness_owned_provenance_property_on_every_kind(
+        self, config_loader, framework_root
+    ) -> None:
+        """Spec (Artifact provenance): `provenance` is harness-owned, defined for every
+        artifact kind by the harness, so no org schema declares it — yet it is statically
+        valid on any `artifacts['<slug>']`."""
+        write_yaml(
+            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
+            workflow_yaml(set_query="artifacts['epic'].provenance"),
+        )
+
+        assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
+
+    def test_rejects_a_declared_condition_using_the_built_in_checks_slug(
+        self, config_loader, framework_root
+    ) -> None:
+        """Spec (function 10, invariant 5): `harness-artifact-delivered` names the built-in
+        delivery check in every step's `conditionChecks`, so no declared condition may
+        take it — a journal line under that slug is always the harness's own."""
+        workflow = workflow_yaml().replace("slug: state-ready", "slug: harness-artifact-delivered")
+        write_yaml(framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml", workflow)
+
+        with pytest.raises(ConfigurationError, match="reserves") as raised:
+            config_loader.load_workflow_catalog(framework_root)
+        assert raised.value.code == "reserved-condition-slug"
+
     def test_admits_a_comprehension_variable_the_static_reach_cannot_follow(self, config_loader, framework_root) -> None:
         """Spec (function 5, invariant 2): static validation covers the direct access form.
 

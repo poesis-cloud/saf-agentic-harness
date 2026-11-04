@@ -794,6 +794,59 @@ class TestAdapter:
         )
         assert runner.calls == []
 
+    def test_stamps_the_hosts_bound_models_onto_a_model_resolution_request(
+        self, make_adapter, adapter_dir: Path, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        """Core function 4, invariant 6: the model is ranked only among the models this
+        host binds — the adapter stamps one `--bound-model` per `models.yaml` slug onto
+        `resolve-step-model`, and onto nothing else.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        bound = sorted(load_hook_binding(adapter_dir).model_ids)
+
+        decision = adapter.handle_hook_event(
+            _event(
+                _pre_tool_payload(
+                    "run_in_terminal", {"command": "harness.py resolve-step-model"}
+                )
+            )
+        )
+
+        command = assert_valid_stdout(decision.stdout)["hookSpecificOutput"][
+            "updatedInput"
+        ]["command"]
+        assert bound
+        assert command == (
+            f"harness.py resolve-step-model --session-id {TURN_SESSION}"
+            + "".join(f" --bound-model {slug}" for slug in bound)
+        )
+        assert runner.calls == []
+
+    def test_denies_a_command_carrying_model_authored_bound_models(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        """Core function 4, invariant 6: the bound set is the host binding's answer — an
+        agent widening it to a model the host cannot run is refused, never merged.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        decision = adapter.handle_hook_event(
+            _event(
+                _pre_tool_payload(
+                    "run_in_terminal",
+                    {"command": "harness.py resolve-step-model --bound-model gpt-5.5"},
+                )
+            )
+        )
+
+        rendered = assert_valid_stdout(decision.stdout)
+        assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "--bound-model" in rendered["hookSpecificOutput"]["permissionDecisionReason"]
+
     def test_checks_the_landed_write_once_per_tool_call_with_the_whole_path_set(
         self, make_adapter, tracker: SessionTracker, assert_valid_inquiry, assert_valid_stdout
     ) -> None:

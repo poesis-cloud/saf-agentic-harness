@@ -197,13 +197,25 @@ def read_entries(workspace: Path, session_id: str) -> list[dict[str, Any]]:
 
 
 def write_artifact(
-    workspace: Path, ref: str, data: Mapping[str, Any], *, commit: bool = True
+    workspace: Path,
+    ref: str,
+    data: Mapping[str, Any],
+    *,
+    commit: bool = True,
+    session_id: str | None = None,
 ) -> Path:
-    """Write one artifact into the workspace, optionally committing it into `HEAD`."""
+    """Write one artifact into the workspace, optionally committing it into `HEAD`.
+
+    A `session_id` attributes the commit the way function 9 does (its `session-id`
+    trailer); without one the commit is user-seeded and attributes no session.
+    """
     path = workspace / ref
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
     if commit:
+        message = f"add {ref}"
+        if session_id is not None:
+            message = f"artifact: commit validated write set\n\nsession-id: {session_id}"
         run_git(workspace, "add", "--", ref)
-        run_git(workspace, "commit", "-m", f"add {ref}")
+        run_git(workspace, "commit", "-m", message)
     return path

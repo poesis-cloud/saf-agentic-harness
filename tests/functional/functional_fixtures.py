@@ -63,8 +63,9 @@ _FLAG_SPELLINGS: Mapping[str, str] = {
     "artifactPath": "--artifact-path",
     "artifactPaths": "--artifact-path",
     "action": "--action",
+    "boundModels": "--bound-model",
 }
-_SET_VALUED_PROPERTIES = frozenset({"artifactPaths"})
+_SET_VALUED_PROPERTIES = frozenset({"artifactPaths", "boundModels"})
 
 _GIT_AUTHOR = ("-c", "user.name=Harness Fixture", "-c", "user.email=fixture@example.test")
 
@@ -158,7 +159,9 @@ PLANNING_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "precondition",
                     "slug": "report-exists",
-                    "setSelector": {"setQuery": "artifacts['report']"},
+                    "setSelector": {
+                        "setQuery": "artifacts['report'].filter(a, a.state == 'drafted')"
+                    },
                     "setPredicate": "size(selected) > 0",
                 },
             ],
@@ -383,6 +386,53 @@ class FunctionalHarness:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         run_git(self.workspace_dir, "add", "--", ref)
         run_git(self.workspace_dir, *_GIT_AUTHOR, "commit", "-q", "-m", f"artifact: add {ref}")
+
+    def deliver_in_flight_step(
+        self,
+        orchestrator_session: str,
+        ref: str | None = None,
+        data: Mapping[str, Any] | None = None,
+        *,
+        step_session: str | None = None,
+    ) -> str:
+        """Act the orchestrator's in-flight step as its dispatched actor, answering its session.
+
+        Spec (function 10, invariant 5): no valid step without its artifact — the step
+        session opens under the orchestrator (function 0), writes the step's artifact,
+        and commits it through function 9, so the harness attributes the commit to it.
+        An already-open `step_session` acts the step instead of a fresh one.
+        """
+        resolution = next(
+            entry["report"]
+            for entry in reversed(self.read_log(orchestrator_session))
+            if entry["report"]["context"]["function"] == "resolve-step"
+            and entry["report"]["outcome"]["status"] == "step-resolution"
+        )
+        step = resolution["step"]
+        if step_session is None:
+            step_session = f"{step['actor']}-{step['slug']}-{self._count_session_logs()}"
+            started = self.invoke(
+                "start-session",
+                sessionId=step_session,
+                parentSessionId=orchestrator_session,
+                agent=step["actor"],
+            )
+            assert started.status == "started", started.stdout
+        ref = ref or f"{step['artifact']}/{step['slug']}.json"
+        data = data or {"slug": step["slug"], "state": "delivered"}
+        path = self.workspace_dir / ref
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        committed = self.invoke(
+            "check-step-artifact", sessionId=step_session, artifactPaths=[ref]
+        )
+        assert committed.status == "valid", committed.stdout
+        return step_session
+
+    def _count_session_logs(self) -> int:
+        """Count the session logs on disk — a cheap unique suffix for step session ids."""
+        logs_dir = self.workspace_dir / "logs"
+        return len(list(logs_dir.glob(f"*{LOG_FILE_SUFFIX}"))) if logs_dir.is_dir() else 0
 
     def list_committed_paths(self) -> tuple[str, ...]:
         """List every path in the workspace's committed state."""

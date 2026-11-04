@@ -72,6 +72,25 @@ Full steps are in the
   and `FRAMEWORK_DIR` are recorded in each hook's `env`, and `FRAMEWORK_DIR/.env` is loaded.
 - **Release hygiene:** documentation was corrected, and pre-release tags now publish as
   GitHub pre-releases.
+- **`artifacts['<kind>']` resolves by kind:** conditions now see every committed instance
+  that `workspace_layout` binds to the artifact kind. Before, the slug was read as a
+  root-relative path, so `artifacts['epic']` was always empty.
+- **Artifact provenance:** every instance exposes the harness-owned
+  `provenance.sessionId`, the session whose harness commit last changed it. The harness
+  derives it from its own commit trailer. A document that supplies `provenance` itself is
+  refused as `reserved`, so provenance cannot be forged. Conditions also get the
+  `stepSessionIds` runtime constant.
+- **Mandatory built-in delivery check:** `check-step-postconditions` always evaluates
+  `harness-artifact-delivered` first. The step passes only if at least one instance of its
+  declared artifact kind was committed, created or updated, by the step's own sessions.
+  There is no opt-out: an agent's report is never evidence that it delivered. Workflows can
+  drop their per-step existence postconditions. The `harness-artifact-delivered` condition
+  slug is reserved.
+- **Host-bound model resolution (breaking contract change):** `resolve-step-model` requires
+  `boundModels`, the canonical model slugs the host binds, and ranks only those. If no
+  catalogue model is bound, it fails with `inquiry-error` / `no-bound-model` instead of
+  returning a model the host cannot run. The `vscode-github-copilot-chat` adapter supplies
+  `--bound-model` from its `models.yaml` and denies agent-authored `--bound-model` flags.
 
 ### Known alpha limitations
 

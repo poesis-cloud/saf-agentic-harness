@@ -322,6 +322,49 @@ class TestSessionLogStore:
         assert SessionLogStore.is_instance_of(instance_id, workflow_slug) is expected
 
 
+    def test_find_child_session_ids_lists_the_actors_sessions_opened_since_a_resolution(
+        self, tmp_path: Path
+    ) -> None:
+        """Spec (function 5, invariant 2 — `stepSessionIds`): the sessions executing an
+        in-flight resolution are those its actor registered under the resolving parent at
+        or after the resolution — not another actor's, another parent's, or an earlier
+        step's."""
+
+        def child(session_id: str, agent: str, parent: str, timestamp: str) -> LogEntry:
+            return LogEntry(
+                timestamp=timestamp,
+                report=Report(
+                    context=Context(
+                        function="start-session",
+                        session_id=session_id,
+                        parent_session_id=parent,
+                        workflow_instance_id=None,
+                    ),
+                    outcome=Outcome(status="started"),
+                    payload={
+                        "session": {
+                            "agent": agent,
+                            "sessionId": session_id,
+                            "parentSessionId": parent,
+                        }
+                    },
+                ),
+            )
+
+        store = SessionLogStore(tmp_path)
+        assert store.find_child_session_ids("orch", "agent-a", "2026-08-17T13:00:00.000000Z") == ()
+        store.create_session_log(_start_entry("orch", "2026-08-17T13:00:00.000000Z"))
+        store.create_session_log(child("early", "agent-a", "orch", "2026-08-17T13:00:01.000000Z"))
+        store.create_session_log(child("step-1", "agent-a", "orch", "2026-08-17T13:00:03.000000Z"))
+        store.create_session_log(child("step-2", "agent-a", "orch", "2026-08-17T13:00:04.000000Z"))
+        store.create_session_log(child("other-actor", "agent-b", "orch", "2026-08-17T13:00:05.000000Z"))
+        store.create_session_log(child("other-parent", "agent-a", "else", "2026-08-17T13:00:05.000000Z"))
+
+        assert store.find_child_session_ids(
+            "orch", "agent-a", "2026-08-17T13:00:02.000000Z"
+        ) == ("step-1", "step-2")
+
+
 class TestSessionLogStoreUnreadableLogs:
     """Spec (Outcomes rule 1): an unreadable log is the environment failing — `system-error`.
 

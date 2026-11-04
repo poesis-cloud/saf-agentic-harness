@@ -40,6 +40,9 @@ _STARTED_STATUS = "started"
 _NOT_APPLICABLE_STATUS = "not-applicable"
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
 _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
+# The host's bound models are the binding's answer (core function 4), never an agent's.
+_BOUND_MODEL_FLAG = "--bound-model"
+_MODEL_FUNCTION = "resolve-step-model"
 _HARNESS_COMMAND = re.compile(
     r"(?:^|[\s;&|(])(?:\S*/)?harness\.py\s+([a-z][a-z0-9-]*)"
 )
@@ -241,6 +244,11 @@ class Adapter:
             return self._renderer.render_denial(
                 f"model-authored session attribution ('{carried_flag}') is never accepted"
             )
+        if _BOUND_MODEL_FLAG in command:
+            return self._renderer.render_denial(
+                f"model-authored bound models ('{_BOUND_MODEL_FLAG}') are never accepted: "
+                "the adapter supplies the models this host binds"
+            )
         session_id = self._tracker.resolve_current(
             sanitize_identifier(event.raw_host_session_id)
         )
@@ -248,8 +256,11 @@ class Adapter:
             return self._renderer.render_denial(
                 "no registered agent session to attribute this harness command to"
             )
+        bound_models = (
+            tuple(sorted(self._binding.model_ids)) if function == _MODEL_FUNCTION else ()
+        )
         return self._renderer.render_stamped_input(
-            event.tool_input, command_key, session_id
+            event.tool_input, command_key, session_id, bound_models
         )
 
     def _handle_write_ended(self, event: HookEvent) -> HookDecision:

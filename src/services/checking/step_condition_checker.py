@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import ClassVar
 
-from config import Step, WorkflowCatalog
+from config import StateCondition, Step, StepCondition, WorkflowCatalog
 from errors import ConfigurationError, StateError
 from services.checking.checking_service import CheckingService
 from services.checking.condition_check import ConditionCheck
@@ -33,6 +33,8 @@ class StepConditionChecker(CheckingService, ABC):
     FUNCTION: ClassVar[str]
     CONDITION_KIND: ClassVar[str]
     REPORT_TYPE: ClassVar[type[ConditionCheckReport]]
+    # Harness-defined conditions checked ahead of the step's declared ones.
+    BUILT_IN_CONDITIONS: ClassVar[tuple[StepCondition | StateCondition, ...]] = ()
 
     def __init__(
         self,
@@ -70,18 +72,32 @@ class StepConditionChecker(CheckingService, ABC):
 
         instance_id = resolution.report.context.workflow_instance_id
         step = self._find_step(instance_id, resolution)
-        conditions = tuple(
+        conditions = self.BUILT_IN_CONDITIONS + tuple(
             condition
             for condition in step.conditions
             if condition.kind == self.CONDITION_KIND
         )
         view = self._session_log_store.load_workflow_instance_view(instance_id)
-        checks = self._evaluator.evaluate_conditions(conditions, view, step.artifact)
+        step_session_ids = self._session_log_store.find_child_session_ids(
+            session_id, step.actor, resolution.timestamp
+        )
+        checks = tuple(
+            self._explain_check(check, step, step_session_ids)
+            for check in self._evaluator.evaluate_conditions(
+                conditions, view, step.artifact, step_session_ids
+            )
+        )
         report = self._build_condition_report(
             session_id, parent_session_id, instance_id, checks
         )
         self._journal_report(session_id, report)
         return report
+
+    def _explain_check(
+        self, check: ConditionCheck, step: Step, step_session_ids: tuple[str, ...]
+    ) -> ConditionCheck:
+        """Let a subclass word a built-in check's failure; declared checks pass through."""
+        return check
 
     def _build_condition_report(
         self,

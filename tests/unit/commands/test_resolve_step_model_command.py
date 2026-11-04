@@ -18,15 +18,42 @@ class TestResolveStepModelCommand:
         self, schema_validator: SchemaValidator
     ) -> None:
         """Spec (Classes, `commands`): one function = one input type = one output type =
-        two contracts; function 4's inquiry is the bare envelope.
+        two contracts; function 4's inquiry is the envelope plus the host's bound models.
         """
         command = ResolveStepModelCommand(
             RecordingService("resolve-step-model"), schema_validator
         )
 
-        inquiry = command.parse_inquiry({"sessionId": "s1", "parentSessionId": "p1"})
+        inquiry = command.parse_inquiry(
+            {"sessionId": "s1", "parentSessionId": "p1", "boundModels": ["m-a", "m-b"]}
+        )
 
-        assert inquiry == ResolveStepModelInquiry(session_id="s1", parent_session_id="p1")
+        assert inquiry == ResolveStepModelInquiry(
+            session_id="s1", parent_session_id="p1", bound_models=("m-a", "m-b")
+        )
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"sessionId": "s1"},
+            {"sessionId": "s1", "boundModels": []},
+            {"sessionId": "s1", "boundModels": ["m-a", "m-a"]},
+        ],
+    )
+    def test_refuses_an_inquiry_without_a_bound_model_set(
+        self, schema_validator: SchemaValidator, data: dict[str, object]
+    ) -> None:
+        """Spec (function 4, Interface): the host's bound models are a required,
+        non-empty set — a model is only ever ranked among what the host can run.
+        """
+        command = ResolveStepModelCommand(
+            RecordingService("resolve-step-model"), schema_validator
+        )
+
+        with pytest.raises(InquiryError) as failure:
+            command.parse_inquiry(data)
+
+        assert failure.value.code == "invalid-inquiry"
 
     def test_refuses_an_inquiry_naming_the_model_it_wants(
         self, schema_validator: SchemaValidator
@@ -39,7 +66,9 @@ class TestResolveStepModelCommand:
         )
 
         with pytest.raises(InquiryError) as failure:
-            command.parse_inquiry({"sessionId": "s1", "profile": "fast-coder"})
+            command.parse_inquiry(
+                {"sessionId": "s1", "boundModels": ["m-a"], "profile": "fast-coder"}
+            )
 
         assert failure.value.code == "invalid-inquiry"
 
@@ -53,8 +82,12 @@ class TestResolveStepModelCommand:
         command = ResolveStepModelCommand(resolver, schema_validator)
 
         report = command.execute_function(
-            ResolveStepModelInquiry(session_id="s1", parent_session_id="p1")
+            ResolveStepModelInquiry(
+                session_id="s1", parent_session_id="p1", bound_models=("m-a",)
+            )
         )
 
-        assert resolver.calls == [{"session_id": "s1", "parent_session_id": "p1"}]
+        assert resolver.calls == [
+            {"session_id": "s1", "parent_session_id": "p1", "bound_models": ("m-a",)}
+        ]
         assert report is resolver.report
