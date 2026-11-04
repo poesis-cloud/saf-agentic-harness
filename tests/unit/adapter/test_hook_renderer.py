@@ -512,3 +512,30 @@ class TestHookRenderer:
         assert "do not surface step details to the user" in (
             rendered["hookSpecificOutput"]["additionalContext"]
         )
+
+    def test_renders_a_delivery_only_failure_with_its_reason(
+        self, renderer: HookRenderer, assert_valid_stdout
+    ) -> None:
+        """Adapter spec H6, Output construction: a step that fails only on delivery
+        (function 10, invariant 5) still shows `artifactDelivery.failureMessage`.
+        """
+        decision = renderer.render_step_outcome(
+            build_report(
+                "check-step-postconditions",
+                "fail",
+                conditionChecks=[],
+                artifactDelivery={
+                    "artifact": "review-report",
+                    "artifactPath": None,
+                    "outcome": "fail",
+                    "failureMessage": "step 'review' delivered no 'review-report' instance",
+                },
+            )
+        )
+
+        rendered = assert_valid_stdout(decision.stdout)
+        assert rendered["decision"] == "block"
+        assert rendered["reason"] == (
+            "check-step-postconditions fail: [artifact delivery] fail — "
+            "step 'review' delivered no 'review-report' instance"
+        )

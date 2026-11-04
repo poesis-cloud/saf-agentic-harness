@@ -254,7 +254,7 @@ def _describe_report(report: Mapping[str, Any]) -> str:
 
 
 def _describe_condition_checks(report: Mapping[str, Any]) -> str:
-    return "; ".join(
+    parts = [
         f"[{(check.get('condition') or {}).get('slug')}] {check.get('outcome')}"
         + (
             f" — {check['failureMessage']}"
@@ -262,7 +262,11 @@ def _describe_condition_checks(report: Mapping[str, Any]) -> str:
             else ""
         )
         for check in report.get("conditionChecks") or ()
-    )
+    ]
+    delivery = report.get("artifactDelivery") or {}
+    if delivery.get("outcome") == "fail":
+        parts.append(f"[artifact delivery] fail — {delivery.get('failureMessage')}")
+    return "; ".join(parts)
 
 
 def _describe_authorization(report: Mapping[str, Any]) -> str:

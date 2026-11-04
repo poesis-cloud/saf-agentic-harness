@@ -19,6 +19,12 @@ from cli_rig import (
 from harness_stub import build_failing_condition_check
 
 ARTIFACT = WORKSPACE + r"\portfolio\art\a1\f1.feature.md"
+# Function 10, invariant 5: a concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "feature",
+    "artifactPath": "portfolio/art/a1/f1.feature.md",
+    "outcome": "pass",
+}
 
 
 def _denied(decision) -> str:
@@ -306,12 +312,34 @@ def test_h6_evaluates_the_returned_step_in_the_dispatcher(rig: Rig) -> None:
         "check-step-postconditions",
         "fail",
         conditionChecks=[build_failing_condition_check("feature-written", "no feature file")],
+        artifactDelivery=DELIVERED,
     )
     decision = rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
     assert "no feature file" in decision["additionalContext"]
     assert rig.runner.inquiries("check-step-postconditions") == [
         {"sessionId": TURN_SESSION, "parentSessionId": None}
     ]
+
+
+def test_h6_shows_the_reason_of_a_delivery_only_failure(rig: Rig) -> None:
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.runner.script["check-step-postconditions"] = build_report(
+        "check-step-postconditions",
+        "fail",
+        conditionChecks=[],
+        artifactDelivery={
+            "artifact": "feature",
+            "artifactPath": None,
+            "outcome": "fail",
+            "failureMessage": "step 'draft' delivered no 'feature' instance",
+        },
+    )
+    decision = rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
+    assert (
+        "[artifact delivery] fail — step 'draft' delivered no 'feature' instance"
+        in decision["additionalContext"]
+    )
 
 
 def test_late_context_reaches_a_session_no_prompt_hook_could_inject(rig: Rig) -> None:
