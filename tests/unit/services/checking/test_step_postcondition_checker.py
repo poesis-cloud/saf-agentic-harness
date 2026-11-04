@@ -388,35 +388,6 @@ class TestStepPostconditionChecker:
 
         assert report.outcome.status == "pass"
 
-    def test_an_org_authored_outcome_entry_appended_to_an_existing_instance_delivers_it(
-        self,
-        artifact_store: ArtifactStore,
-        log_store: SessionLogStore,
-        workspace: Path,
-    ) -> None:
-        """Artifact provenance: a confirm / no-change step commits its decision INTO an
-        instance another session wrote (an org-owned `stepOutcomes` entry) — that commit
-        re-attributes the instance to this step's session, so the step delivered; the
-        org-owned list and the harness-owned `provenance` never collide."""
-        _open_session(log_store)
-        original = {"slug": "delivered", "status": "approved", "stepOutcomes": []}
-        write_artifact(workspace, DELIVERED_REF, original, session_id="01jdrafter")
-        _open_step_session(log_store)
-        write_artifact(
-            workspace,
-            DELIVERED_REF,
-            {
-                **original,
-                "stepOutcomes": [{"step": "planning/review", "outcome": "no-change"}],
-            },
-            session_id=STEP_SESSION,
-        )
-        checker = _build_checker(artifact_store, log_store, build_catalog())
-
-        report = checker.check_step_postconditions(ORCHESTRATOR_SESSION, None)
-
-        assert report.outcome.status == "pass"
-
     def test_several_instances_committed_by_the_step_deliver_it(
         self,
         artifact_store: ArtifactStore,

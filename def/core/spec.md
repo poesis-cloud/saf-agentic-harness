@@ -86,9 +86,7 @@ and implementation parts prescribe its realization.
   bytes carry it — an instance whose own data supplies a `provenance` property is invalid
   (function 9, invariant 6), so no agent can forge a session's authorship. An update counts
   exactly like a creation: the session that committed the latest change to an instance is its
-  provenance. Framework-owned per-step records written inside artifacts (e.g. a
-  `stepOutcomes` list) are ordinary, agent-authored artifact content under the framework's own
-  property names; they never stand in for provenance.
+  provenance.
 - **Log** — the harness's record: the append-only JSONL file of one session
   (`<workspace>/logs/<sessionId>.log.jsonl`), created by function 0 (`start-session`)'s entry —
   its first line. Every completed function invocation appends exactly one entry to the log of
@@ -1442,9 +1440,9 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
    it fails the aggregate like any other check. Its slug is reserved: a workflow declaring a
    condition named `harness-artifact-delivered` is rejected at configuration load. Consequences:
    - **Creation and update deliver alike** — an update-type step (editing an existing
-     instance, e.g. appending a confirm / no-change decision record to it) delivers by
-     committing its edit, which re-attributes the instance's provenance to the step's session;
-     an older instance of the kind by another session, or a user-seeded one, never does.
+     instance) delivers by committing its edit, which re-attributes the instance's provenance
+     to the step's session; an older instance of the kind by another session, or a
+     user-seeded one, never does.
    - **Several instances** committed in one step deliver (at least one is required).
    - **A write must change committed state**: a byte-identical write creates no commit
      (function 9, invariant 4), so it does not deliver.
