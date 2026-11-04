@@ -129,7 +129,9 @@ class ArtifactStore:
 
         Function 9 invariant 3: 1 validated set = 1 commit, attributed to the
         acting session. Invariant 4: a set byte-identical to `HEAD` stages
-        nothing and creates no commit.
+        nothing and creates no commit. The commit is scoped to the set
+        (`--only`): anything else already staged in the index stays staged
+        and out of the commit.
         """
         refs = tuple(Path(artifact_path).as_posix() for artifact_path in artifact_paths)
         if not refs:
@@ -139,8 +141,11 @@ class ArtifactStore:
             return
         self._run_git(
             "commit",
+            "--only",
             "-m",
             f"artifact: commit validated write set\n\nsession-id: {session_id}",
+            "--",
+            *refs,
         )
 
     def revert_artifact(self, artifact_path: Path) -> Finding:

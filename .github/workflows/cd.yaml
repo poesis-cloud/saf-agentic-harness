@@ -10,6 +10,9 @@
 #
 # Triggers:
 #   - push a tag v*      → gate, then publish a GitHub Release asset
+#                          (marked as a pre-release when the tag is a SemVer
+#                          pre-release: it contains -alpha, -beta, or -rc,
+#                          e.g. v1.0.0-alpha.1)
 #   - workflow_dispatch  → gate + build, upload a workflow artifact only
 
 name: cd
@@ -99,3 +102,9 @@ jobs:
                       ${{ needs.package.outputs.archive }}
                       ${{ needs.package.outputs.archive }}.sha256
                   generate_release_notes: true
+                  # SemVer pre-release tags (-alpha / -beta / -rc) publish
+                  # as GitHub pre-releases, never as the latest release.
+                  prerelease: >-
+                      ${{ contains(github.ref_name, '-alpha')
+                      || contains(github.ref_name, '-beta')
+                      || contains(github.ref_name, '-rc') }}

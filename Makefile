@@ -9,7 +9,8 @@
 # `check-step-preconditions`, …), invoked per-boundary by whatever embeds the harness — never in
 # the verification gate.
 
-PYTEST := PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -p no:cacheprovider
+PYTHON ?= python3
+PYTEST := PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -p no:cacheprovider
 HOOKS_DEST ?= $(FRAMEWORK_DIR)/.github/hooks
 
 .PHONY: verify test unit functional adapter install-hooks
@@ -42,7 +43,7 @@ test: verify
 ## agent-scoped UserPromptSubmit block (H0) that opens the session, and the workspace settings
 ## that make the host EXECUTE them — without `chat.useHooks` the other two are discovered and
 ## never run. Everything rendered into the first two is MACHINE-SPECIFIC (absolute dispatch
-## path + absolute framework root) and is never committed — re-run this after moving either
+## path, absolute framework root, absolute interpreter) and is never committed — re-run this after moving either
 ## checkout.
 ##
 ## PIPELINE ORDERING — a framework ships its agents through a host bundle, and the H0 block
@@ -67,13 +68,19 @@ test: verify
 ##   AGENTS_DIR     agent sources to read; set it with AGENTS_DEST for a framework whose agents
 ##                  reach the host some other way (e.g. the workspace .github/agents/ scope).
 ##   AGENTS_DEST    where the rendered agents land.
+##   HARNESS_PYTHON absolute interpreter the hooks run under; defaults to the interpreter
+##                  running the renderer ($(PYTHON) — run from an activated venv, or set
+##                  PYTHON). It must import requirements.txt (PyYAML, jsonschema, cel-python)
+##                  or the render is refused. Recorded with FRAMEWORK_DIR in every hook entry's
+##                  `env`: the host runs hooks with its own environment, not your shell's.
 ##   SETTINGS_DEST  directory holding the workspace settings file; defaults to the location the
 ##                  adapter's settings map names, under $(FRAMEWORK_DIR). That file is COMMITTED
 ##                  and hand-maintained, so the required keys are merged into it and everything
 ##                  else — other settings, comments, indentation — is left as it was.
 install-hooks:
-	python3 adapters/render_hooks.py \
+	$(PYTHON) adapters/render_hooks.py \
 		--env vscode-github-copilot-chat \
+		$(if $(HARNESS_PYTHON),--python "$(HARNESS_PYTHON)") \
 		--framework-dir "$(FRAMEWORK_DIR)" \
 		--dest "$(HOOKS_DEST)" \
 		--bundle-dir "$(BUNDLE_DIR)" \

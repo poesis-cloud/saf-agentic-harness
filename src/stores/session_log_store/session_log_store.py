@@ -7,7 +7,7 @@ import secrets
 from pathlib import Path
 from typing import Iterator, Sequence
 
-from errors import InquiryError, StateError
+from errors import InquiryError, StateError, SystemFailureError
 from stores.session_log_store.log import Log
 from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.workflow_instance_view import WorkflowInstanceView
@@ -20,6 +20,7 @@ _LOG_FILE_SUFFIX = ".log.jsonl"
 _CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _INSTANCE_MINT_LENGTH = 6
 _SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_INSTANCE_MINT_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4,}$")
 
 _default_validator: SchemaValidator | None = None
 
@@ -32,6 +33,15 @@ def _load_default_validator() -> SchemaValidator:
             sorted(_CONTRACTS_DIR.rglob("*.schema.json"))
         )
     return _default_validator
+
+
+def _log_write_failure(code: str, path: Path, failure: OSError) -> SystemFailureError:
+    """Classify a failing log write as the environment failing (rule 1, `system-error`)."""
+    return SystemFailureError(
+        code,
+        f"Session log 'logs/{path.name}' cannot be written: {failure.strerror or failure}.",
+        True,
+    )
 
 
 class SessionLogStore:
@@ -61,8 +71,11 @@ class SessionLogStore:
                 f"Session log for '{session_id}' already exists.",
                 False,
             )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._jsonl.append_entry(path, entry.to_dict())
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._jsonl.append_entry(path, entry.to_dict())
+        except OSError as failure:
+            raise _log_write_failure("log-creation-failed", path, failure) from failure
         return Log(session_id=session_id, entries=(entry,))
 
     def append_log_entry(self, session_id: str, entry: LogEntry) -> None:
@@ -75,7 +88,10 @@ class SessionLogStore:
                 False,
             )
         self._require_valid_entry(entry)
-        self._jsonl.append_entry(path, entry.to_dict())
+        try:
+            self._jsonl.append_entry(path, entry.to_dict())
+        except OSError as failure:
+            raise _log_write_failure("log-append-failed", path, failure) from failure
 
     def load_session_log(self, session_id: str) -> Log:
         """Hydrate one session's log in file order."""
@@ -86,8 +102,7 @@ class SessionLogStore:
                 f"No session log exists for '{session_id}'.",
                 False,
             )
-        entries = tuple(LogEntry.from_dict(raw) for raw in self._jsonl.load_entries(path))
-        return Log(session_id=session_id, entries=entries)
+        return Log(session_id=session_id, entries=self._read_log_entries(path))
 
     def mint_workflow_instance_id(self, workflow_slug: str) -> str:
         """Mint an instance id: the slug plus an uppercase Crockford-base32 mint."""
@@ -96,6 +111,21 @@ class SessionLogStore:
             for _ in range(_INSTANCE_MINT_LENGTH)
         )
         return f"{workflow_slug}-{mint}"
+
+    @staticmethod
+    def is_instance_of(workflow_instance_id: str, workflow_slug: str) -> bool:
+        """Tell whether an instance id belongs to this workflow — an exact slug match.
+
+        An instance id is `<workflowSlug>-<mint>`; the mint is uppercase Crockford
+        base32 and carries no hyphen, so the slug is everything before the last
+        hyphen. A bare prefix test would let `planning` claim `planning-review-…`.
+        """
+        slug, separator, mint = workflow_instance_id.rpartition("-")
+        return (
+            separator == "-"
+            and slug == workflow_slug
+            and _INSTANCE_MINT_PATTERN.match(mint) is not None
+        )
 
     def load_workflow_instance_view(self, workflow_instance_id: str) -> WorkflowInstanceView:
         """Assemble the cross-log instance view, timestamp-ordered."""
@@ -122,11 +152,10 @@ class SessionLogStore:
         open instances the latest entry `timestamp` wins; an identical latest
         `timestamp` breaks toward the lexicographically lowest instance id.
         """
-        prefix = f"{workflow_slug}-"
         grouped: dict[str, list[LogEntry]] = {}
         for entry in self._iter_all_entries():
             instance_id = entry.report.context.workflow_instance_id
-            if instance_id is not None and instance_id.startswith(prefix):
+            if instance_id is not None and self.is_instance_of(instance_id, workflow_slug):
                 grouped.setdefault(instance_id, []).append(entry)
 
         open_candidates: list[tuple[str, str]] = []
@@ -168,8 +197,32 @@ class SessionLogStore:
         if not logs_dir.is_dir():
             return
         for path in sorted(logs_dir.glob(f"*{_LOG_FILE_SUFFIX}")):
-            for raw in self._jsonl.load_entries(path):
-                yield LogEntry.from_dict(raw)
+            yield from self._read_log_entries(path)
+
+    def _read_log_entries(self, path: Path) -> tuple[LogEntry, ...]:
+        """Read one log file's entries, or fail as the environment failing.
+
+        Spec (Outcomes rule 1): an unreadable log is `system-error`. This is the one
+        seam every log read funnels through, so no raw I/O or parse exception escapes
+        the store: a file the process cannot open is retryable, bytes that are not
+        JSONL log entries are not.
+        """
+        name = f"logs/{path.name}"
+        try:
+            return tuple(LogEntry.from_dict(raw) for raw in self._jsonl.load_entries(path))
+        except OSError as failure:
+            raise SystemFailureError(
+                "log-unreadable",
+                f"Session log '{name}' cannot be read: {failure.strerror or failure}.",
+                True,
+            ) from failure
+        except (ValueError, KeyError, TypeError, AttributeError) as failure:
+            raise SystemFailureError(
+                "log-unreadable",
+                f"Session log '{name}' does not hold well-formed JSONL log entries: "
+                f"{type(failure).__name__}: {failure}.",
+                False,
+            ) from failure
 
     def _require_valid_entry(self, entry: LogEntry) -> None:
         """Reject an entry the log-entry contract does not admit."""

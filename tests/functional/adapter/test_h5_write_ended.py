@@ -137,3 +137,20 @@ class TestWriteEndedHook:
         assert run.exit_code == 0
         assert run.is_silent
         assert harness_stub.calls == ()
+
+    def test_a_landed_declared_write_naming_no_extractable_path_blocks(
+        self,
+        open_turn: Callable[[], HookRun],
+        dispatch: Callable[..., HookRun],
+        harness_stub: HarnessStub,
+    ) -> None:
+        """Adapter spec H5 (fail closed): a landed DECLARED write whose paths cannot be
+        extracted is never silently accepted — it blocks, and no commit is attempted.
+        """
+        open_turn()
+
+        run = dispatch("PostToolUse", post_tool_use("apply_patch", {"input": "no header"}))
+
+        assert run.exit_code == 0
+        assert run.decision()["decision"] == "block"
+        assert harness_stub.find_calls("check-step-artifact") == ()

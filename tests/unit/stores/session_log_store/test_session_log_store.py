@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from errors import InquiryError, StateError
+from errors import InquiryError, StateError, SystemFailureError
 from stores.session_log_store import (
     Context,
     Error,
@@ -19,6 +19,7 @@ from stores.session_log_store import (
     SessionLogStore,
     WorkflowInstanceView,
 )
+from utils.jsonl_store import JsonlStore
 
 _CAPABILITIES = {
     "deep-reasoning": 1,
@@ -281,6 +282,112 @@ class TestSessionLogStore:
         store.append_log_entry("sess-1", _resolution("2026-08-17T13:00:03Z", "flow-01AB", "alpha"))
         store.append_log_entry("sess-1", _resolution("2026-08-17T13:00:04Z", "flow-01AC", "alpha"))
         assert store.find_latest_open_instance("flow", workflow_steps=("alpha",)) == "flow-01AC"
+
+    def test_find_latest_open_instance_never_claims_another_workflows_instance(
+        self, tmp_path: Path
+    ) -> None:
+        """Spec (function 3, invariant 8 / Logging — instance views): an instance id is
+        `<workflowSlug>-<mint>`, so a workflow owns exactly the ids whose slug part equals
+        its slug. `planning` must not claim `planning-review-01AB` merely because the id
+        starts with `planning-`."""
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry("sess-1", "2026-08-17T13:00:00Z"))
+        store.append_log_entry(
+            "sess-1", _resolution("2026-08-17T13:00:01Z", "planning-review-01AB", "alpha")
+        )
+
+        assert store.find_latest_open_instance("planning", workflow_steps=("alpha",)) is None
+        assert (
+            store.find_latest_open_instance("planning-review", workflow_steps=("alpha",))
+            == "planning-review-01AB"
+        )
+
+    @pytest.mark.parametrize(
+        ("instance_id", "workflow_slug", "expected"),
+        [
+            ("planning-01J9XQ", "planning", True),
+            ("planning-review-01J9XQ", "planning", False),
+            ("planning-review-01J9XQ", "planning-review", True),
+            ("planning-01J9XQ", "planning-review", False),
+            ("planning-review", "planning", False),
+            ("planning-", "planning", False),
+            ("planning-01l9xq", "planning", False),
+        ],
+    )
+    def test_is_instance_of_matches_the_slug_exactly(
+        self, instance_id: str, workflow_slug: str, expected: bool
+    ) -> None:
+        """Spec (function 3 — instance ids are `<workflowSlug>-<Crockford base32 mint>`):
+        ownership is an exact match on the slug part plus a well-formed mint."""
+        assert SessionLogStore.is_instance_of(instance_id, workflow_slug) is expected
+
+
+class TestSessionLogStoreUnreadableLogs:
+    """Spec (Outcomes rule 1): an unreadable log is the environment failing — `system-error`.
+
+    The store is the one seam every log read and write funnels through, so no raw I/O or
+    parse exception escapes it: each surfaces as `SystemFailureError`, which every
+    service already renders into its report.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        ['{"timestamp": "2026-08-17T13:00:00Z", "report": ', "[1, 2, 3]", '{"not": "an entry"}'],
+    )
+    def test_load_session_log_classifies_malformed_bytes_as_log_unreadable(
+        self, tmp_path: Path, line: str
+    ) -> None:
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry())
+        with (tmp_path / "logs" / "sess-1.log.jsonl").open("a", encoding="utf-8") as file:
+            file.write(line + "\n")
+
+        with pytest.raises(SystemFailureError) as raised:
+            store.load_session_log("sess-1")
+
+        assert raised.value.status == "system-error"
+        assert raised.value.code == "log-unreadable"
+        assert raised.value.retryable is False
+        assert "logs/sess-1.log.jsonl" in raised.value.message
+
+    def test_load_session_log_classifies_an_unopenable_file_as_retryable(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / "logs" / "sess-1.log.jsonl").mkdir(parents=True)
+
+        with pytest.raises(SystemFailureError) as raised:
+            SessionLogStore(tmp_path).load_session_log("sess-1")
+
+        assert raised.value.code == "log-unreadable"
+        assert raised.value.retryable is True
+
+    def test_cross_log_scans_classify_a_foreign_unreadable_log(self, tmp_path: Path) -> None:
+        """Instance views and latest-open deduction scan every log — one unreadable log
+        fails the scan as `system-error`, never as a raw parse exception."""
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry())
+        (tmp_path / "logs" / "other.log.jsonl").write_text("not json\n", encoding="utf-8")
+
+        with pytest.raises(SystemFailureError) as scan:
+            store.find_latest_open_instance("flow", workflow_steps=("alpha",))
+        with pytest.raises(SystemFailureError) as view:
+            store.load_workflow_instance_view("flow-01AB")
+
+        assert scan.value.code == view.value.code == "log-unreadable"
+
+    def test_a_failing_append_is_a_retryable_system_failure(self, tmp_path: Path) -> None:
+        store = SessionLogStore(tmp_path, jsonl_store=_FailingAppendJsonlStore())
+
+        with pytest.raises(SystemFailureError) as created:
+            store.create_session_log(_start_entry())
+
+        assert created.value.code == "log-creation-failed"
+        assert created.value.retryable is True
+
+
+class _FailingAppendJsonlStore(JsonlStore):
+    def append_entry(self, path, entry) -> None:
+        raise OSError(28, "No space left on device")
 
 
 class TestSessionLogStoreSlugConstraint:

@@ -102,8 +102,9 @@ class TestHookRenderer:
 
         assert "{{" not in rendered
         assert "}}" not in rendered
-        assert "FRAMEWORK_DIR" not in rendered
+        assert "{{FRAMEWORK_DIR" not in rendered
         assert "ADAPTERS_DIR" not in rendered
+        assert "{{HARNESS_PYTHON" not in rendered
 
     def test_rendered_command_is_absolute_and_names_this_harness_dispatch_script(
         self, repo_root: Path, framework_root: Path, dest: Path
@@ -166,6 +167,103 @@ class TestHookRenderer:
             assert cwd.is_absolute()
             assert cwd.is_dir()
             assert cwd == framework_root.resolve()
+
+    def test_every_rendered_entry_records_its_bootstrap_environment(
+        self, repo_root: Path, framework_root: Path, dest: Path
+    ):
+        """Adapter spec (Rendering guarantees, bootstrap): the host runs a hook with ITS
+        environment, not the operator's shell — so every entry records the framework
+        anchor and the interpreter the harness was installed with (the renderer's own by
+        default) in its `env`, and a hook bootstraps from the registration alone."""
+        result = _render(
+            repo_root,
+            "--env",
+            ADAPTER_ENV,
+            "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
+            "--dest",
+            str(dest),
+            env_overrides={"FRAMEWORK_DIR": "/nonexistent/wrong/anchor"},
+        )
+
+        assert result.returncode == 0, result.stderr
+        hooks = json.loads((dest / RENDERED_FILENAME).read_text(encoding="utf-8"))["hooks"]
+        for event in EXPECTED_WORKSPACE_HOOKS:
+            assert hooks[event][0]["env"] == {
+                "FRAMEWORK_DIR": str(framework_root.resolve()),
+                "SAF_HARNESS_PYTHON": sys.executable,
+            }
+
+    def test_an_explicit_interpreter_is_recorded_as_given(
+        self, repo_root: Path, framework_root: Path, dest: Path
+    ):
+        """Adapter spec (Rendering guarantees, bootstrap): `--python` names the harness
+        interpreter explicitly (e.g. a venv's), recorded unresolved — a venv interpreter
+        is a symlink whose location is what selects the venv."""
+        result = _render(
+            repo_root,
+            "--env",
+            ADAPTER_ENV,
+            "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
+            "--dest",
+            str(dest),
+            "--python",
+            sys.executable,
+        )
+
+        assert result.returncode == 0, result.stderr
+        hooks = json.loads((dest / RENDERED_FILENAME).read_text(encoding="utf-8"))["hooks"]
+        assert hooks["PreToolUse"][0]["env"]["SAF_HARNESS_PYTHON"] == sys.executable
+
+    @pytest.mark.parametrize(
+        "interpreter, reason",
+        [
+            ("relative/python", "absolute"),
+            ("/nonexistent/python", "does not exist"),
+            ("FAKE", "cannot import"),
+        ],
+    )
+    def test_an_interpreter_that_cannot_run_the_harness_is_refused_before_writing(
+        self,
+        repo_root: Path,
+        framework_root: Path,
+        dest: Path,
+        tmp_path: Path,
+        interpreter: str,
+        reason: str,
+    ):
+        """Adapter spec (Rendering guarantees, bootstrap): an interpreter that is not an
+        absolute existing file, or that cannot import the harness dependencies
+        (`requirements.txt`), would fail every hook at the first firing — the renderer
+        refuses it at install time and writes nothing."""
+        if interpreter == "FAKE":
+            fake = tmp_path / "bare-python"
+            fake.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            fake.chmod(0o755)
+            interpreter = str(fake)
+
+        result = _render(
+            repo_root,
+            "--env",
+            ADAPTER_ENV,
+            "--framework-dir",
+            str(framework_root),
+            "--bundle-dir",
+            str(framework_root),
+            "--dest",
+            str(dest),
+            "--python",
+            interpreter,
+        )
+
+        assert result.returncode != 0
+        assert reason in result.stderr
+        assert not (dest / RENDERED_FILENAME).exists()
 
     def test_rendered_map_registers_exactly_the_five_workspace_events(
         self, repo_root: Path, framework_root: Path, dest: Path

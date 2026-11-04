@@ -9,14 +9,17 @@ only the process boundary faked, so a wrong path fails here instead of at a depl
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import pytest
 
 import command_runner
-from adapter import build_default_adapter, run_hook_entry
+import adapter
+from adapter import AdapterBootstrapError, build_default_adapter, run_hook_entry
 from conftest import build_report
 
 HOST_SESSION = "chat-session-guid"
@@ -183,3 +186,114 @@ def test_layout_directories_still_come_from_the_framework(
     injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
     assert INSTRUCTION_BODY in injected
     assert str(framework_dir / "skills" / "code-review.skill.md") in injected
+
+
+def test_the_harness_runs_under_the_adapter_own_interpreter(
+    framework_dir: Path, recorded_argv: list[Sequence[str]]
+) -> None:
+    """Spec (adapter, Rendered registration — bootstrap): the harness command runs under
+    the SAME interpreter the hook entry bootstrapped, never a `python3` inherited from
+    whatever PATH the host process happens to carry (which may lack the dependencies).
+    """
+    _fire_session_started()
+
+    assert recorded_argv[0][0] == sys.executable
+
+
+def test_refuses_to_bootstrap_without_a_framework_dir(
+    framework_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec (adapter, Bootstrap failure): `FRAMEWORK_DIR` is the one anchor every layout
+    path derives from; guessing it (e.g. the harness checkout) would govern the wrong
+    tree, so its absence is a bootstrap refusal, never a fallback.
+    """
+    monkeypatch.delenv("FRAMEWORK_DIR")
+
+    with pytest.raises(AdapterBootstrapError, match="FRAMEWORK_DIR"):
+        build_default_adapter()
+
+
+def test_reads_the_layout_from_the_framework_env_file_when_the_hook_env_carries_none(
+    framework_dir: Path,
+    recorded_argv: list[Sequence[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spec (adapter, Bootstrap): the rendered hook carries only `FRAMEWORK_DIR`; the
+    layout variables come from `FRAMEWORK_DIR/.env` exactly as the core loads them (the
+    process environment taking precedence) — never from a developer's exported shell.
+    """
+    for variable in (
+        "FRAMEWORK_WORKSPACE_DIR",
+        "FRAMEWORK_INSTRUCTIONS_DIR",
+        "FRAMEWORK_SKILLS_DIR",
+    ):
+        monkeypatch.delenv(variable)
+    (framework_dir / ".env").write_text(
+        "# layout\nFRAMEWORK_WORKSPACE_DIR=workspace\n"
+        "FRAMEWORK_INSTRUCTIONS_DIR=instructions\nFRAMEWORK_SKILLS_DIR=skills\n",
+        encoding="utf-8",
+    )
+
+    stdout = _fire_session_started()
+
+    injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+    assert INSTRUCTION_BODY in injected
+    assert str(framework_dir / "skills" / "code-review.skill.md") in injected
+
+
+def test_the_process_environment_takes_precedence_over_the_env_file(
+    framework_dir: Path, recorded_argv: list[Sequence[str]]
+) -> None:
+    """Spec (adapter, Bootstrap): as in the core config loader, a variable the process
+    environment declares wins over the `.env` file's.
+    """
+    (framework_dir / ".env").write_text(
+        "FRAMEWORK_INSTRUCTIONS_DIR=nowhere\n", encoding="utf-8"
+    )
+
+    stdout = _fire_session_started()
+
+    assert INSTRUCTION_BODY in json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_a_malformed_env_file_is_a_bootstrap_refusal(framework_dir: Path) -> None:
+    """Spec (adapter, Bootstrap failure): an unreadable layout is refused, not guessed."""
+    (framework_dir / ".env").write_text("not a key value line\n", encoding="utf-8")
+
+    with pytest.raises(AdapterBootstrapError, match=".env"):
+        build_default_adapter()
+
+
+def test_the_host_entry_fails_closed_with_a_visible_diagnostic(
+    framework_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Spec (adapter, Bootstrap failure): an adapter that cannot bootstrap answers exit 2
+    with its diagnostic on stderr — the host's one blocking channel — never a crash exit
+    the host would treat as non-blocking and fail open on.
+    """
+    monkeypatch.delenv("FRAMEWORK_DIR")
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        io.StringIO(
+            json.dumps(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "UserPromptSubmit",
+                    "session_id": HOST_SESSION,
+                    "prompt": "…",
+                }
+            )
+        ),
+    )
+
+    exit_code = adapter.main(
+        ["hook", "--event", "UserPromptSubmit", "--agent", "product-manager"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "FRAMEWORK_DIR" in captured.err

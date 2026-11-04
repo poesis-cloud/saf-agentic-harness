@@ -167,7 +167,9 @@ class ContextResolver(ABC):
         if outcome.error is not None and outcome.error.code in _UNJOURNALED_CODES:
             return report
         failure = self._append_entry(session_id, report)
-        if failure is None:
+        if failure is None or outcome.error is not None:
+            # An error report whose own entry is lost keeps its primary error (rule 1:
+            # the report is still returned, the entry is lost — best-effort).
             return report
         return self._build_report(context, _error_outcome(failure), None)
 

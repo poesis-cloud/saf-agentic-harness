@@ -44,6 +44,17 @@ _HARNESS_COMMAND = re.compile(
     r"(?:^|[\s;&|(])(?:\S*/)?harness\.py\s+([a-z][a-z0-9-]*)"
 )
 _TOKEN_TRIM = "'\"();|&<>"
+_FRAMEWORK_DIR_VARIABLE = "FRAMEWORK_DIR"
+_LAYOUT_ENV_FILENAME = ".env"
+_EXIT_FAIL_CLOSED = 2
+
+
+class AdapterBootstrapError(RuntimeError):
+    """The hook cannot bootstrap; the host must see a blocking failure, never fail open.
+
+    Spec (adapter, Bootstrap failure): a missing framework anchor or an unreadable layout
+    is refused rather than guessed — a guessed root would govern the wrong tree.
+    """
 
 
 class Adapter:
@@ -177,22 +188,27 @@ class Adapter:
         """H3 — authorize every artifact path of the call before the write lands."""
         host_id = sanitize_identifier(event.raw_host_session_id)
         session_id = self._tracker.resolve_current(host_id)
-        artifact_paths = self._binding.extract_artifact_paths(event.tool_input)
-        action = self._binding.resolve_write_action(str(event.tool_name))
-        if session_id is None or not artifact_paths or action is None:
+        tool_name = str(event.tool_name)
+        if session_id is None or self._binding.resolve_write_action(tool_name) is None:
             return self._renderer.render_pass_through()
+        path_actions = self._binding.resolve_path_actions(tool_name, event.tool_input)
+        if not path_actions:
+            return self._renderer.render_denial(_unextractable_write_reason(tool_name))
         inquiry = {
             "sessionId": session_id,
             "parentSessionId": self._tracker.resolve_parent(host_id),
-            "action": action,
         }
         try:
             reports = tuple(
                 self._command_runner.run_function(
                     "check-step-authorization",
-                    {**inquiry, "artifactPath": self._relativize_path(path)},
+                    {
+                        **inquiry,
+                        "action": action,
+                        "artifactPath": self._relativize_path(path),
+                    },
                 )
-                for path in artifact_paths
+                for path, action in path_actions
             )
         except Exception as failure:
             return self._renderer.render_denial(
@@ -240,9 +256,15 @@ class Adapter:
         """H5 — the commit gate: validate the landed write set, or report its revert."""
         host_id = sanitize_identifier(event.raw_host_session_id)
         session_id = self._tracker.resolve_current(host_id)
-        artifact_paths = self._binding.extract_artifact_paths(event.tool_input)
-        if session_id is None or not artifact_paths:
+        if session_id is None:
             return self._renderer.render_pass_through()
+        artifact_paths = self._binding.extract_artifact_paths(event.tool_input)
+        if not artifact_paths:
+            return self._renderer.render_block(
+                _unextractable_write_reason(str(event.tool_name)),
+                "The write went unvalidated. Redo it with a tool call that names its "
+                "artifact paths.",
+            )
         try:
             report = self._command_runner.run_function(
                 "check-step-artifact",
@@ -351,8 +373,9 @@ def build_default_adapter() -> Adapter:
     """Build the adapter the host entry uses, from this adapter's own sources."""
     adapter_dir = Path(__file__).resolve().parent
     harness_dir = adapter_dir.parents[1]
-    framework_dir = Path(os.environ.get("FRAMEWORK_DIR", harness_dir))
-    workspace_dir = _resolve_layout_dir(framework_dir, "FRAMEWORK_WORKSPACE_DIR")
+    framework_dir = _resolve_framework_dir()
+    layout = _load_layout_file(framework_dir / _LAYOUT_ENV_FILENAME)
+    workspace_dir = _resolve_layout_dir(framework_dir, layout, "FRAMEWORK_WORKSPACE_DIR")
     binding = load_hook_binding(
         adapter_dir,
         guarded_path_markers=(f"{workspace_dir.name}/", "logs/"),
@@ -362,8 +385,10 @@ def build_default_adapter() -> Adapter:
         classifier=HookClassifier(binding),
         tracker=SessionTracker(_resolve_state_dir(adapter_dir) / _SESSION_RECORD_NAME),
         renderer=HookRenderer(
-            instructions_dir=_resolve_layout_dir(framework_dir, "FRAMEWORK_INSTRUCTIONS_DIR"),
-            skills_dir=_resolve_layout_dir(framework_dir, "FRAMEWORK_SKILLS_DIR"),
+            instructions_dir=_resolve_layout_dir(
+                framework_dir, layout, "FRAMEWORK_INSTRUCTIONS_DIR"
+            ),
+            skills_dir=_resolve_layout_dir(framework_dir, layout, "FRAMEWORK_SKILLS_DIR"),
         ),
         command_runner=SubprocessCommandRunner(
             harness_entrypoint=harness_dir / _HARNESS_ENTRYPOINT_NAME
@@ -390,13 +415,25 @@ def run_hook_entry(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the host entry `dispatch.sh` execs."""
-    return run_hook_entry(
-        argv=list(argv) if argv is not None else sys.argv[1:],
-        stdin_text=sys.stdin.read(),
-        write_stdout=sys.stdout.write,
-        build_adapter=build_default_adapter,
-    )
+    """Run the host entry `dispatch.sh` runs.
+
+    Spec (adapter, Bootstrap failure): any failure escaping the hook handling — a refused
+    bootstrap, a refused binding, an unexpected crash — answers exit 2 with a stderr
+    diagnostic (the host's blocking channel), never an exit the host fails open on.
+    """
+    try:
+        return run_hook_entry(
+            argv=list(argv) if argv is not None else sys.argv[1:],
+            stdin_text=sys.stdin.read(),
+            write_stdout=sys.stdout.write,
+            build_adapter=build_default_adapter,
+        )
+    except Exception as failure:
+        _report_diagnostic(
+            f"adapter.py: the hook failed — failing closed: "
+            f"{type(failure).__name__}: {failure}"
+        )
+        return _EXIT_FAIL_CLOSED
 
 
 def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -407,8 +444,48 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(argv))
 
 
-def _resolve_layout_dir(framework_dir: Path, variable: str) -> Path:
-    declared = os.environ.get(variable)
+def _resolve_framework_dir() -> Path:
+    declared = os.environ.get(_FRAMEWORK_DIR_VARIABLE)
+    if not declared:
+        raise AdapterBootstrapError(
+            f"{_FRAMEWORK_DIR_VARIABLE} is not set — every rendered hook entry records it "
+            "in its env; re-run `make install-hooks FRAMEWORK_DIR=<framework root>`"
+        )
+    framework_dir = Path(declared)
+    if not framework_dir.is_dir():
+        raise AdapterBootstrapError(
+            f"{_FRAMEWORK_DIR_VARIABLE} names no directory: {declared}"
+        )
+    return framework_dir
+
+
+def _load_layout_file(path: Path) -> Mapping[str, str]:
+    """Read the framework's `.env` KEY=VALUE layout file, as the core config loader does."""
+    if not path.is_file():
+        return {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as failure:
+        raise AdapterBootstrapError(f"{path} cannot be read: {failure}") from failure
+    declared: dict[str, str] = {}
+    for line_number, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if separator == "" or key.strip() == "":
+            raise AdapterBootstrapError(
+                f"{path} line {line_number} is malformed: expected KEY=VALUE"
+            )
+        declared[key.strip()] = value.strip()
+    return declared
+
+
+def _resolve_layout_dir(
+    framework_dir: Path, layout: Mapping[str, str], variable: str
+) -> Path:
+    """Resolve one layout directory; the process environment wins over `.env`."""
+    declared = os.environ.get(variable, layout.get(variable))
     return framework_dir / declared if declared else framework_dir
 
 
@@ -423,6 +500,13 @@ def _resolve_state_dir(adapter_dir: Path) -> Path:
     declared = os.environ.get(_STATE_HOME_VARIABLE)
     state_home = Path(declared) if declared else Path.home() / ".local" / "state"
     return state_home / _STATE_NAMESPACE / adapter_dir.name
+
+
+def _unextractable_write_reason(tool_name: str) -> str:
+    return (
+        f"write tool '{tool_name}' names no artifact path the adapter can extract: "
+        "an unauthorizable write fails closed"
+    )
 
 
 def _read_status(report: Mapping[str, Any]) -> str:

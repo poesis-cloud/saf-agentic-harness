@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from config import Workflow, WorkflowCatalog
 from errors import InquiryError
 from services.step_resolution import StepResolutionReport, StepResolver
 from stores.session_log_store import Context, LogEntry, Outcome, SessionLogStore
@@ -471,6 +472,98 @@ class TestStepResolver:
         assert entry.timestamp == "2026-08-17T15:00:00Z"
         assert entry.report.to_dict() == report.to_dict()
 
+
+def _build_two_workflow_resolver(log_store: SessionLogStore) -> StepResolver:
+    """Build a resolver over `planning` and `planning-review` — one slug prefixes the other."""
+    return StepResolver(
+        session_log_store=log_store,
+        workflow_catalog=WorkflowCatalog(
+            workflows={
+                "planning": Workflow(
+                    slug="planning", facilitator=FACILITATOR, steps=(build_step("draft"),)
+                ),
+                "planning-review": Workflow(
+                    slug="planning-review",
+                    facilitator=FACILITATOR,
+                    steps=(build_step("review"),),
+                ),
+            }
+        ),
+        clock=SequenceClock("2026-08-17T15:00:00Z"),
+    )
+
+
+class TestOneInstancePerOrchestratorSession:
+    """Function 3, invariant 9: an orchestrator session drives at most one instance."""
+
+    def test_refuses_a_second_workflow_while_the_first_ones_step_is_in_flight(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Invariant 9: once a session drives an instance, a resolve-step naming another
+        workflow is refused — `state-error`/`session-instance-bound`, journaled with no
+        instance attached (it resolves no instance), never a second resolution."""
+        start_session_log(log_store)
+        resolver = _build_two_workflow_resolver(log_store)
+
+        first = resolver.resolve_step(ORCHESTRATOR_SESSION, None, "planning")
+        second = resolver.resolve_step(ORCHESTRATOR_SESSION, None, "planning-review")
+
+        assert first.outcome.status == "step-resolution"
+        assert second.outcome.status == "state-error"
+        assert second.outcome.error is not None
+        assert second.outcome.error.code == "session-instance-bound"
+        assert first.context.workflow_instance_id in second.outcome.error.message
+        assert second.context.workflow_instance_id is None
+        assert second.step is None
+        journaled = read_entries(workspace_dir, ORCHESTRATOR_SESSION)
+        assert len(journaled) == 3
+        assert journaled[-1]["report"]["outcome"]["error"]["code"] == "session-instance-bound"
+
+    def test_refuses_a_second_workflow_after_the_first_instance_has_no_next_step(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 9: "over its whole lifetime" — finishing the bound instance does not
+        free the session to drive another one; one workflow end = one return to the user."""
+        start_session_log(log_store)
+        start_session_log(log_store, session_id=STEP_SESSION, agent="qa-engineer")
+        resolver = _build_two_workflow_resolver(log_store)
+        first = resolver.resolve_step(ORCHESTRATOR_SESSION, None, "planning")
+        append_outcome(
+            log_store,
+            "2026-08-17T15:01:00Z",
+            "pass",
+            workflow_instance_id=first.context.workflow_instance_id,
+        )
+
+        second = resolver.resolve_step(ORCHESTRATOR_SESSION, None, "planning-review")
+
+        assert second.outcome.status == "state-error"
+        assert second.outcome.error.code == "session-instance-bound"
+
+    def test_a_slug_that_prefixes_another_never_continues_the_others_open_instance(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 8: latest-open-wins among THAT workflow's instances only. An open
+        `planning-review-…` instance driven elsewhere is not a `planning` instance — a
+        fresh session asking for `planning` opens a new `planning` instance."""
+        start_session_log(log_store, session_id="driver-review", agent=FACILITATOR)
+        start_session_log(log_store)
+        append_resolution(
+            log_store,
+            "2026-08-17T13:01:00Z",
+            "review",
+            session_id="driver-review",
+            workflow_instance_id="planning-review-0AAAAA",
+        )
+        resolver = _build_two_workflow_resolver(log_store)
+
+        report = resolver.resolve_step(ORCHESTRATOR_SESSION, None, "planning")
+
+        assert report.outcome.status == "step-resolution"
+        assert report.step.slug == "draft"
+        instance_id = report.context.workflow_instance_id
+        assert instance_id is not None
+        assert SessionLogStore.is_instance_of(instance_id, "planning")
 
 class TestStepResolutionReport:
     """Cover the report the step resolution service returns."""

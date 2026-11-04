@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 _CAMEL_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
-_PYTHON_EXECUTABLE = "python3"
+# The harness runs under the interpreter this adapter bootstrapped with (the one the rendered
+# registration records) — never a `python3` inherited from the host's PATH.
+_PYTHON_EXECUTABLE = sys.executable
 
 
 class HarnessCommandError(RuntimeError):

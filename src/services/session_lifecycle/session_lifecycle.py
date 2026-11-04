@@ -121,17 +121,31 @@ class SessionLifecycle:
             parent_session_id=parent_session_id,
             workflow_instance_id=None,
         )
-        log = self._find_session_log(session_id)
-        if log is not None:
-            return self._replay_registration(context, log, agent)
-        if not self._admits_session(agent, parent_session_id):
-            return SessionStartReport(context=context, outcome=Outcome(status="not-applicable"))
+        try:
+            log = self._find_session_log(session_id)
+            if log is not None:
+                return self._replay_registration(context, log, agent)
+            if not self._admits_session(agent, parent_session_id):
+                return SessionStartReport(
+                    context=context, outcome=Outcome(status="not-applicable")
+                )
+        except HarnessError as error:
+            return SessionStartReport(context=context, outcome=_error_outcome(error))
         return self._register_session(context, agent)
 
     def end_session(self, session_id: str) -> SessionEndReport:
         """Close the session's log with its final entry, idempotently (C8-exempt)."""
         _require_valid_inquiry(session_id, None)
-        log = self._find_session_log(session_id)
+        try:
+            log = self._find_session_log(session_id)
+        except HarnessError as error:
+            context = Context(
+                function=_END_FUNCTION,
+                session_id=session_id,
+                parent_session_id=None,
+                workflow_instance_id=None,
+            )
+            return SessionEndReport(context=context, outcome=_error_outcome(error))
         session_ref = _find_session_ref(log) if log is not None else None
         context = Context(
             function=_END_FUNCTION,

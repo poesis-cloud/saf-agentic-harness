@@ -257,9 +257,9 @@ statuses; which condition produces which status is fixed by kind, never per-func
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
 | `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
-| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives another workflow's instance (`session-instance-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
-| `system-error` | The environment fails: Git index lock, disk full, an unreadable log, log creation or append failing (the report is still returned; the entry is lost — best-effort) | Yes, when the log is writable |
+| `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
 
 Three of these apply uniformly to **every** function and are not repeated per function:
 contract validation of the inquiry (`inquiry-error`/`invalid-inquiry` — surfacing at the
@@ -269,8 +269,8 @@ refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-er
 the codes named in this specification
 (`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
 `session-kind-mismatch`, `not-facilitator`,
-`unknown-workflow`, `step-in-flight`, `step-correlation-missing`,
-`condition-evaluation-failed`, `artifact-schema-unresolved`) are normative; implementations
+`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `step-correlation-missing`,
+`condition-evaluation-failed`, `artifact-schema-unresolved`, `log-unreadable`) are normative; implementations
 may add codes but never repurpose these. Statuses, codes, and structured fields are the
 normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
 tests assert their presence and key facts, never exact wording.
@@ -299,7 +299,12 @@ id is a valid slug) but has no log to journal to; and a **contract-validation fa
 when the inquiry's own `sessionId` is missing or malformed, so the failure surfaces at the
 **command exit plane** (stderr + nonzero exit), exactly like a crashed invocation (see
 [Logging](#logging)). A completed invocation whose log append
-fails still returns its report and surfaces `system-error` at the trigger plane.
+fails still returns its report and surfaces `system-error` at the trigger plane. No exception
+crosses the command boundary: a failure no service classified (a defect, not an outcome) is
+caught at the command dispatch backstop and surfaces at the command exit plane as
+`harness: system-error: …` on stderr with **exit 4**, no report — beside exit 1 (contract
+validation), exit 2 (usage: no or unknown function) and exit 3 (configuration invalid at
+load).
 
 **5. The precondition classification rule.** Every precondition in this specification is one
 of: **(E) enforced** — the function checks it and **names its violation outcome inline**, in
@@ -637,6 +642,10 @@ Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contra
   (`unknown-workflow`), journaled.
 - (E) The session's agent is the named workflow's facilitator — violation: `inquiry-error`
   (`not-facilitator`), journaled.
+- (E) The session drives no instance yet, or drives an instance of the named workflow
+  (invariant 9) — violation: `state-error` (`session-instance-bound`), journaled with no
+  `workflowInstanceId` in its `context` (the refusal resolves no instance and is no entry of
+  the bound one).
 - (O) The user assented to the workflow (per the selection instruction) — not persisted
   state, so never asserted by the harness (C2): a caller obligation carried by the
   orchestrator's injected instructions. Instance continuation or
@@ -700,7 +709,10 @@ Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contra
    a step's resolution
    and its journaled outcome it resolves no other step — a resolve-step call arriving while a
    step is in flight is refused (`state-error`, `step-in-flight`, journaled), never silently
-   re-resolved. Running concurrent instances — whether
+   re-resolved. The session's instance is the one its own log already carries: a
+   resolve-step call naming a DIFFERENT workflow — in flight or not, even after
+   `no-next-step` — is refused (`state-error`, `session-instance-bound`, journaled without a
+   `workflowInstanceId`); naming the same workflow continues that instance. Running concurrent instances — whether
    of the same workflow or different workflows — is a deliberate non-goal for now. The log still
    carries `workflowInstanceId`, so a later concurrent model can be added without changing the
    identity of past entries.
@@ -1247,7 +1259,9 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
    to the acting session (its `sessionId` in the commit message) so Git history and the
    session log correlate. The commit and the discard are the harness's only deliberate Git
    actions: the discard is recorded inside the validation entry's report (the revert records);
-   the commit's record is the Git history itself, correlated by session id.
+   the commit's record is the Git history itself, correlated by session id. The commit carries
+   exactly the validated set: any other content already staged in the index stays staged and
+   never enters it.
 4. A staged path byte-identical to `HEAD` validates vacuously and stages nothing: a set of
    only such paths reports `valid` and creates no commit — `valid` asserts validity, not that
    a commit occurred.
@@ -1923,8 +1937,11 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
     function 0's registration entry — the file's first line; `mint_workflow_instance_id` mints
     an instance id — prefixed by its `workflow_slug` plus an uppercase Crockford-base32 mint
     of at least four characters (e.g. `verification-01J9XQ`) — no file;
+    `is_instance_of(workflow_instance_id, workflow_slug)` answers instance ownership by an
+    EXACT match of the slug part (everything before the last hyphen) plus a well-formed mint,
+    never a bare prefix test — `planning` does not own `planning-review-01J9XQ`;
     `find_latest_open_instance(workflow_slug)` backs function 3's invariant 8: scans
-    `<workspace>/logs/` for that prefix, groups entries per instance, and returns the most
+    `<workspace>/logs/` for that workflow's instances, groups entries per instance, and returns the most
     recently active still-open instance (or `None`), see [Logging](#logging); `load_session_log`
     hydrates a `Log`; `load_workflow_instance_view`
     assembles the cross-log `WorkflowInstanceView` — discovery scan + `timestamp`-ordered assembly,
@@ -2133,7 +2150,9 @@ session logs.
   receives an instance id (function 3, invariant 8): a minted `workflowInstanceId` is always
   prefixed by its `workflowSlug` plus an uppercase Crockford-base32 mint of at least four
   characters (e.g. `verification-01J9XQ`), so `find_latest_open_instance`
-  filters candidate entries by that prefix, groups them per instance, and — among instances
+  filters candidate entries whose instance id belongs to that workflow — an exact match of the
+  slug part (everything before the mint's hyphen), never a bare prefix test, since one
+  workflow slug may prefix another (`planning` / `planning-review`) — groups them per instance, and — among instances
   still *open* (function 3, invariant 1: at least one step not journaled executed) — returns
   the one whose latest entry (by `timestamp`) is most recent; none open (or none found) means
   a new instance opens. This is a discovery scan, not an index — same cost class as instance-view

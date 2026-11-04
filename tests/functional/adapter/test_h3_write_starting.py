@@ -169,21 +169,47 @@ class TestWriteStartingHook:
         assert authorization.value("--parent-session-id") == TURN_SESSION_ID
         assert authorization.value("--action") == "create"
 
-    def test_a_write_naming_no_path_reaches_no_harness_function(
+    def test_a_declared_write_naming_no_extractable_path_is_denied(
         self, open_turn: Callable[[], HookRun], dispatch: Callable[..., HookRun],
         harness_stub: HarnessStub,
     ) -> None:
-        """Adapter spec H3, Harness invocation: path extraction probes `pathKeys` and the
-        nested expressions only — a call reaching no artifact path invokes nothing, so the
-        harness never sees a write it has no path for.
+        """Adapter spec H3, invariant 3 (fail closed): a DECLARED write tool whose call
+        yields no extractable artifact path is denied — the harness never sees it, and it
+        never lands unauthorized.
         """
         open_turn()
 
         run = dispatch("PreToolUse", pre_tool_use("create_file", {"content": "text"}))
 
         assert run.exit_code == 0
-        assert run.is_silent
+        assert run.decision()["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert harness_stub.find_calls("check-step-authorization") == ()
+
+    def test_a_patch_is_authorized_per_header_path_with_its_own_action(
+        self,
+        open_turn: Callable[[], HookRun],
+        dispatch: Callable[..., HookRun],
+        harness_stub: HarnessStub,
+        framework: Framework,
+    ) -> None:
+        """Adapter spec H3 / I8: `apply_patch` names its paths only in its patch text —
+        every file header is authorized, relativized, with the action it performs.
+        """
+        open_turn()
+        patch = (
+            "*** Begin Patch\n"
+            f"*** Add File: {framework.workspace_path('portfolio/new.md')}\n+n\n"
+            f"*** Update File: {framework.workspace_path('portfolio/kept.md')}\n@@\n-a\n+b\n"
+            "*** End Patch\n"
+        )
+
+        run = dispatch("PreToolUse", pre_tool_use("apply_patch", {"input": patch}))
+
+        assert run.exit_code == 0
+        authorizations = harness_stub.find_calls("check-step-authorization")
+        assert [
+            (call.value("--artifact-path"), call.value("--action")) for call in authorizations
+        ] == [("portfolio/new.md", "create"), ("portfolio/kept.md", "update")]
 
     def test_a_write_of_an_unregistered_conversation_passes_through(
         self,
