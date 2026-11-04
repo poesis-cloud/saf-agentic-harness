@@ -14,10 +14,16 @@ from typing import Any, Mapping
 import pytest
 
 from harness_stub import HarnessStub, build_error_report, build_report
+from model_catalogue import write_bound_catalogue, write_catalogue
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUB_ENTRYPOINT = REPO_ROOT / "tests" / "functional" / "adapter" / "stub_harness_entrypoint.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "copilot-app-windows-1.0.102.jsonl"
+# The standalone CLI (Linux, `copilot -p`, org bundle loaded with `--plugin-dir`): singular
+# preToolUse shape and plugin-namespaced agent identities.
+CLI_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "copilot-cli-linux-1.0.105.jsonl"
+CLI_FRAMEWORK = "/home/user/saf-agentic-organization"
+CLI_HARNESS = "/home/user/saf-agentic-harness/harness.py"
 LAYOUT = ("agents", "artifacts", "instructions", "skills", "templates", "workflows", "workspace")
 ORCHESTRATOR = "release-train-engineer"
 HOST = "1d793d07-adc6-4f25-bec3-5b03b44e949e"
@@ -77,6 +83,7 @@ def host(tmp_path: Path) -> Host:
         REPO_ROOT / "contracts" / "conf" / "adapters", root / "contracts" / "conf" / "adapters"
     )
     shutil.copy2(STUB_ENTRYPOINT, root / "harness.py")
+    write_bound_catalogue(root, root / "adapters" / "github-copilot-cli" / "models.yaml")
     for name in LAYOUT:
         (root / name).mkdir()
     (root / "instructions" / "reports-handling.instructions.md").write_text("x\n", encoding="utf-8")
@@ -96,8 +103,21 @@ def host(tmp_path: Path) -> Host:
     return Host(root=root, environment=environment, stub=stub)
 
 
-def _captured() -> list[dict[str, Any]]:
-    return [json.loads(line) for line in FIXTURES.read_text(encoding="utf-8").splitlines() if line]
+def _captured(fixtures: Path = FIXTURES) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in fixtures.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _relocated(value: Any, host: Host) -> Any:
+    """Answer a captured CLI payload with its machine paths moved onto this test host."""
+    if isinstance(value, dict):
+        return {key: _relocated(item, host) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relocated(item, host) for item in value]
+    if isinstance(value, str):
+        return value.replace(CLI_HARNESS, str(host.root / "harness.py")).replace(
+            CLI_FRAMEWORK, str(host.root)
+        )
+    return value
 
 
 def test_the_captured_app_session_replays_silently_when_ungoverned(host: Host) -> None:
@@ -110,6 +130,51 @@ def test_the_captured_app_session_replays_silently_when_ungoverned(host: Host) -
         else:
             assert run.decision is None, (record["hookType"], run.stdout)
     assert host.stub.functions == ()
+
+
+def test_the_captured_standalone_cli_session_replays_silently_when_ungoverned(host: Host) -> None:
+    for record in _captured(CLI_FIXTURES):
+        run = host.fire(record["hookType"], _relocated(record["input"], host))
+        assert run.code == 0, run.stderr
+        if record["hookType"] == "sessionStart":
+            assert "harness.py" in run.decision["additionalContext"]
+        elif run.decision is not None:
+            # The one harness request of the capture: outside a governed session it is refused.
+            assert run.decision["permissionDecision"] == "deny"
+            assert "no governed harness session" in run.decision["permissionDecisionReason"]
+    assert host.stub.functions == ()
+
+
+def test_the_captured_standalone_cli_session_is_governed_through_plugin_agent_names(
+    host: Host,
+) -> None:
+    """Live CLI capture: singular preToolUse, and a plugin agent named '<plugin>:<agent>'."""
+    records = [
+        (record["hookType"], _relocated(record["input"], host))
+        for record in _captured(CLI_FIXTURES)
+    ]
+    main = records[0][1]["sessionId"]
+    opened = host.fire("userPromptSubmitted", {**records[1][1]}, ORCHESTRATOR)
+    assert opened.code == 0 and host.stub.functions[-1] == "start-session"
+    outcomes = {}
+    for event, payload in records:
+        run = host.fire(event, payload)
+        assert run.code == 0, run.stderr
+        outcomes.setdefault(event, []).append(run.decision)
+    harness_reply, dispatch, *_ = outcomes["preToolUse"]
+    assert harness_reply["permissionDecisionReason"].startswith("SAFe agentic harness RESULT")
+    assert dispatch is None
+    (resolve,) = host.stub.find_calls("resolve-step")
+    assert resolve.value("--session-id").startswith(main)
+    step_open = host.stub.find_calls("start-session")[-1]
+    assert step_open.value("--agent") == "product-manager"
+    assert step_open.value("--parent-session-id").startswith(main)
+    authorized = [call.value("--artifact-path")
+                  for call in host.stub.find_calls("check-step-authorization")]
+    assert authorized[0] == "portfolio/products/acme/product-vision.md"
+    assert len(authorized) == 2
+    assert "check-step-postconditions" in host.stub.functions
+    assert host.stub.functions[-1] == "end-session"
 
 
 def test_a_governed_turn_runs_every_boundary(host: Host) -> None:
@@ -173,6 +238,15 @@ def test_a_malformed_framework_env_fails_closed(host: Host) -> None:
     run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": [
         {"id": "a", "name": "view", "args": {"path": "C:\\x"}}]})
     assert (run.code, run.stdout) == (2, "") and "malformed" in run.stderr
+
+
+def test_a_catalogue_profile_the_binding_does_not_bind_fails_every_hook_closed(host: Host) -> None:
+    """Core fn 4: an unroutable catalogue dies at load — on every hook, never cached."""
+    write_catalogue(host.root, ["claude-haiku-4.5", "not-a-host-model"])
+    run = host.fire("sessionStart", {"sessionId": HOST, "source": "new", "timestamp": 1})
+    assert run.code == 2 and run.stdout == ""
+    assert "not-a-host-model" in run.stderr and "models.yaml" in run.stderr
+    assert host.stub.calls == ()
 
 
 def test_an_unextractable_write_is_denied(host: Host) -> None:

@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from hook_binding import BindingContractError, HookBinding, load_hook_binding
+from model_catalogue import write_bound_catalogue, write_catalogue
 
 
 @pytest.fixture
@@ -340,3 +341,17 @@ class TestHookBindingPatchExtraction:
         """
         assert binding.extract_artifact_paths({"input": "no path here"}) == ()
         assert binding.resolve_path_actions("apply_patch", {"input": "no path here"}) == ()
+
+
+def test_a_catalogue_naming_an_unbound_profile_is_refused(
+    tmp_path: Path, adapter_dir: Path
+) -> None:
+    """Core fn 4: the binding load refuses an unroutable framework catalogue."""
+    write_catalogue(tmp_path, ["claude-haiku-4.5", "not-a-host-model"])
+    with pytest.raises(BindingContractError, match="does not bind: not-a-host-model"):
+        load_hook_binding(adapter_dir, framework_dir=tmp_path)
+
+
+def test_a_fully_bound_catalogue_loads(tmp_path: Path, adapter_dir: Path) -> None:
+    write_bound_catalogue(tmp_path, adapter_dir / "models.yaml")
+    load_hook_binding(adapter_dir, framework_dir=tmp_path)

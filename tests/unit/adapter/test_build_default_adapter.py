@@ -21,6 +21,10 @@ import command_runner
 import adapter
 from adapter import AdapterBootstrapError, build_default_adapter, run_hook_entry
 from conftest import build_report
+from hook_binding import BindingContractError
+from model_catalogue import write_bound_catalogue, write_catalogue
+
+_MODELS_YAML = Path(adapter.__file__).resolve().parent / "models.yaml"
 
 HOST_SESSION = "chat-session-guid"
 TURN_SESSION = "chat-session-guid-t2026-07-11t14-32-07-000z"
@@ -37,6 +41,7 @@ def framework_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (framework / "instructions" / "reports-handling.instructions.md").write_text(
         f"{INSTRUCTION_BODY}\n", encoding="utf-8"
     )
+    write_bound_catalogue(framework, _MODELS_YAML)
     monkeypatch.setenv("FRAMEWORK_DIR", str(framework))
     monkeypatch.setenv("FRAMEWORK_WORKSPACE_DIR", "workspace")
     monkeypatch.setenv("FRAMEWORK_INSTRUCTIONS_DIR", "instructions")
@@ -298,3 +303,35 @@ def test_the_host_entry_fails_closed_with_a_visible_diagnostic(
     assert exit_code == 2
     assert captured.out == ""
     assert "FRAMEWORK_DIR" in captured.err
+
+
+def test_a_catalogue_profile_models_yaml_does_not_bind_is_a_bootstrap_refusal(
+    framework_dir: Path,
+) -> None:
+    """Spec (core fn 4; adapter, Bootstrap): an unroutable catalogue dies at load."""
+    write_catalogue(framework_dir, ["claude-haiku-4.5", "not-a-host-model"])
+
+    with pytest.raises(BindingContractError, match="not-a-host-model") as refusal:
+        build_default_adapter()
+
+    assert "models.yaml" in str(refusal.value)
+
+
+def test_a_missing_catalogue_is_a_bootstrap_refusal(framework_dir: Path) -> None:
+    (framework_dir / "conf" / "model-profiles.conf.yaml").unlink()
+
+    with pytest.raises(BindingContractError, match="model-profiles.conf.yaml"):
+        build_default_adapter()
+
+
+def test_the_catalogue_is_rechecked_on_every_load_never_cached(framework_dir: Path) -> None:
+    """The host's model list (and so `models.yaml`) can evolve after install: no cache."""
+    build_default_adapter()
+    write_catalogue(framework_dir, ["claude-haiku-4.5", "retired-model"])
+
+    with pytest.raises(BindingContractError, match="retired-model"):
+        build_default_adapter()
+
+    write_bound_catalogue(framework_dir, _MODELS_YAML)
+    build_default_adapter()
+

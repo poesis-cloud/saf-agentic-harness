@@ -1451,8 +1451,16 @@ VS Code hook engine (permissionDecision / decision:block / additionalContext; ne
   refuses an empty probe list a declared gate depends on (`toolKeys`, `inputKeys`,
   `hostSessionKeys`; `pathKeys`/`nestedPathKeys`/`patchKeys` when write tools are
   declared; `mediatedCommandKeys` when command tools are declared) — an empty probe would classify
-  every firing as a pass-through, a silent fail-open. A refused binding is a bootstrap
-  failure: the hook exits 2 with the diagnostic on stderr (see
+  every firing as a pass-through, a silent fail-open. On the same load it reads the
+  framework model catalogue (`FRAMEWORK_DIR/conf/model-profiles.conf.yaml`) and refuses
+  one naming a profile slug `models.yaml` does not bind, listing the unbound slugs: such a
+  slug could be resolved by `resolve-step-model` yet never run on this host — an
+  unroutable configuration, which dies at load (harness core spec, function 4). A missing
+  or unreadable catalogue is refused too, since the check cannot be made. The check runs on
+  every hook and nothing is cached from install time: the host's model list can evolve
+  after the harness install, so **`models.yaml` must track the models the host currently
+  offers**, and the framework catalogue may only name models it binds. A refused binding is
+  a bootstrap failure: the hook exits 2 with the diagnostic on stderr (see
   [Bootstrap failure](#bootstrap-failure-fail-closed)).
 - **Seam 3 splits between this adapter and the harness core, with exactly ONE edge
   crossing it.** The event→boundary→functions orchestration is this adapter's OWN code

@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from cli_rig import HOST, ORCHESTRATOR, Rig, load_script, pre_tool_use
+from cli_rig import ADAPTER_DIR, HOST, ORCHESTRATOR, Rig, load_script, pre_tool_use
+from model_catalogue import write_bound_catalogue, write_catalogue
 
 ENTRY = load_script("copilot_cli_adapter_entry", "adapter.py")
 
@@ -72,6 +73,7 @@ def _framework(tmp_path: Path, env_text: str | None) -> Path:
     framework.mkdir()
     if env_text is not None:
         (framework / ".env").write_text(env_text, encoding="utf-8")
+    write_bound_catalogue(framework, ADAPTER_DIR / "models.yaml")
     return framework
 
 
@@ -120,6 +122,7 @@ def test_the_default_build_wires_the_workspace_override(tmp_path: Path, monkeypa
         ),
         encoding="utf-8",
     )
+    write_bound_catalogue(framework, ADAPTER_DIR / "models.yaml")
     elsewhere = tmp_path / "portfolio-root"
     elsewhere.mkdir()
     for variable in ("FRAMEWORK_DIR", "FRAMEWORK_WORKSPACE_DIR"):
@@ -130,3 +133,42 @@ def test_the_default_build_wires_the_workspace_override(tmp_path: Path, monkeypa
 
     decision = adapter.handle(HookInput("sessionStart", {"sessionId": "x"}, binding, None))
     assert f"(FRAMEWORK_WORKSPACE_DIR): {elsewhere}" in decision["additionalContext"]
+
+
+def _bootstrap_session_start(tmp_path: Path, monkeypatch, framework: Path) -> tuple[int, str, str]:
+    monkeypatch.setenv("FRAMEWORK_DIR", str(framework))
+    monkeypatch.delenv("FRAMEWORK_WORKSPACE_DIR", raising=False)
+    monkeypatch.setenv("SAF_HARNESS_STATE_DIR", str(tmp_path / "state"))
+    return _run(["hook", "--event", "sessionStart"], {"sessionId": "x"}, ENTRY.build_adapter)
+
+
+def test_a_catalogue_profile_models_yaml_does_not_bind_fails_the_load_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Spec (core fn 4 / adapter binding): an unroutable catalogue dies at load."""
+    framework = _framework(tmp_path, "# comment only\n")
+    write_catalogue(framework, ["claude-haiku-4.5", "not-a-host-model"])
+    code, out, err = _bootstrap_session_start(tmp_path, monkeypatch, framework)
+    assert (code, out) == (2, "")
+    assert "not-a-host-model" in err and "models.yaml" in err
+    assert "claude-haiku-4.5" not in err.split("does not bind:")[1]
+
+
+def test_a_missing_catalogue_fails_the_load_closed(tmp_path: Path, monkeypatch) -> None:
+    framework = _framework(tmp_path, "# comment only\n")
+    (framework / "conf" / "model-profiles.conf.yaml").unlink()
+    code, out, err = _bootstrap_session_start(tmp_path, monkeypatch, framework)
+    assert (code, out) == (2, "") and "model-profiles.conf.yaml" in err
+
+
+def test_the_catalogue_is_rechecked_on_every_load_never_cached(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The host's model list (and so `models.yaml`) can evolve after install: no cache."""
+    framework = _framework(tmp_path, "# comment only\n")
+    assert _bootstrap_session_start(tmp_path, monkeypatch, framework)[0] == 0
+    write_catalogue(framework, ["claude-haiku-4.5", "retired-model"])
+    code, _, err = _bootstrap_session_start(tmp_path, monkeypatch, framework)
+    assert code == 2 and "retired-model" in err
+    write_bound_catalogue(framework, ADAPTER_DIR / "models.yaml")
+    assert _bootstrap_session_start(tmp_path, monkeypatch, framework)[0] == 0

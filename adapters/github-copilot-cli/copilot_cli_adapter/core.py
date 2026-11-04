@@ -219,6 +219,7 @@ class Adapter:
         actor = self._binding.probe(hook.payload, self._binding.host_step_actor_keys)
         if agent_id is None or actor is None:
             return None
+        actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
         report = self._run_safely(
             "start-session",

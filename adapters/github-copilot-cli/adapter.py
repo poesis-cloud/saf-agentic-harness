@@ -50,7 +50,7 @@ def build_adapter(
 ) -> tuple[Adapter, Any]:
     """Build the adapter and its binding from this directory and the framework layout."""
     layout = resolve_layout(framework_dir, workspace_dir=workspace_dir)
-    binding = load_tool_binding(ADAPTER_DIR)
+    binding = load_tool_binding(ADAPTER_DIR, framework_dir=layout.framework_dir)
     adapter = Adapter(
         binding=binding,
         tracker=SessionTracker(resolve_state_dir(ADAPTER_ID)),

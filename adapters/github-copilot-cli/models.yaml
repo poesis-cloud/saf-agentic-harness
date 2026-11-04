@@ -3,9 +3,10 @@
 #
 # `hostModelId` is the exact string this runtime accepts as the `task` tool's `model` argument
 # and as a custom agent's frontmatter `model:` — the runtime's own model ids (identical to the
-# canonical slugs for the models below). Scope: the models selectable in the GitHub Copilot app
-# on 2026-07 that also appear in conf/model-profiles.conf.yaml. A canonical slug absent here is
-# not offered by this host: resolve-step-model's fallback chain must name a bound model.
+# canonical slugs for the models below). Scope: models this runtime offered (2026-07) that also
+# appear in the framework catalogue. This file MUST track the models the host currently offers,
+# which can change after install: every hook load refuses a framework catalogue
+# (conf/model-profiles.conf.yaml) naming a profile slug this file does not bind.
 modelBindings:
   claude-fable-5:
     hostModelId: claude-fable-5

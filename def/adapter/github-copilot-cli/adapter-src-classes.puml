@@ -57,7 +57,9 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +powershell_command_tools
       +tool_calls_keys / tool_keys / input_keys ...
       +host_session_keys / host_step_session_keys ...
+      +agent_namespace_separator : str | None
       +probe(payload, keys) : Any
+      +agent_name(host_agent) : str
       +resolve_write_action(tool, args) : str | None
       +extract_write_targets(tool, args) : tuple[(str, str), ...]
       +is_dispatch_tool(tool) : bool

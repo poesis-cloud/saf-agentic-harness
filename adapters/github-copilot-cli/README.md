@@ -1,8 +1,9 @@
 # Adapter — `github-copilot-cli`
 
 This adapter binds the harness to the **GitHub Copilot CLI agent runtime**. The **GitHub
-Copilot app** embeds the same runtime, so the adapter covers the app (Windows, macOS, Linux)
-and the `copilot` CLI alike. The full specification, including the hook → boundary table and
+Copilot app** embeds the same runtime, so the adapter covers the standalone `copilot` CLI and
+the app (Windows, macOS, Linux) alike. Where the two hosts were observed to differ, the
+adapter accepts both forms (see the spec's host facts). The full specification, including the hook → boundary table and
 the limits of this runtime, is
 [`def/adapter/github-copilot-cli/spec.md`](../../def/adapter/github-copilot-cli/spec.md).
 
@@ -28,8 +29,12 @@ adapters/github-copilot-cli/
 - The framework's **Copilot plugin bundle**, rendered by the framework itself. For
   `saf-agentic-organization`, that is `builds/github-copilot-cli/`. The bundle carries the
   agents and skills; this installer adds the hooks to it.
-- The **framework folder trusted** in the app. Repository hooks and agent-scoped hooks do not
-  run in an untrusted folder, and they fail silently. Without them no harness session opens.
+- With `--hooks-target repo` only: the **folder trusted** (the app's trust, or the CLI's trust
+  prompt / `--trust-folder`). Repository hooks silently do not run in an untrusted folder.
+  Plugin hooks, including a plugin agent's scoped hooks, run regardless (observed on the
+  standalone CLI).
+- A **`models.yaml` that binds every profile** of the framework's model catalogue (see
+  [Model binding](#model-binding)).
 
 ## Install — Windows (PowerShell)
 
@@ -84,7 +89,7 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
 
 **`--framework-dir` is the framework CHECKOUT, not the rendered bundle.** It is where `.env`,
-`workflows/`, `instructions/` and `skills/` live. The bundle is only the package the app
+`workflows/`, `instructions/` and `skills/` live. The bundle is only the package the host
 loads.
 
 Other targets for the global hook file:
@@ -99,16 +104,23 @@ Other options: `--hook-style shell` writes `powershell`/`bash` command strings i
 absolute machine paths: **generated, never committed**. Re-run the installer after moving
 either checkout or recreating the venv.
 
-## Using it in the GitHub Copilot app
+## Using it (CLI or app)
 
-1. **Load the bundle through a local marketplace**:
+1. **Load the bundle.** On the standalone CLI the simplest is
+   `copilot --plugin-dir <bundle> --agent <plugin-name>:<orchestrator>`: the bundle is read
+   live from that directory, with no install step. Otherwise (CLI or app), load it through a
+   local marketplace:
    `copilot plugin marketplace add <bundle marketplace dir>`, then install the plugin from it.
    A path-sourced plugin in a local marketplace is read **live**, so re-running `install.py`
    takes effect at the next session. A direct `copilot plugin install <path>` **copies** the
    bundle instead; after every re-run of `install.py` you must then run
-   `copilot plugin update <plugin>`, or the app keeps the old copy without hooks.
-2. **Trust the framework folder** in the app, and open the session in it.
+   `copilot plugin update <plugin>`, or the host keeps the old copy without hooks.
+2. **Open the session in the framework folder.** Trust it if you installed repository hooks.
 3. **Select an orchestrator agent** (e.g. the Release Train Engineer) and give it its task.
+   A plugin agent is named `<plugin-name>:<agent>` by the runtime (for
+   `saf-agentic-organization`: `poesis-saf-agentic-organization:release-train-engineer`), and
+   so is the `agent_type` of every `task` dispatch of a plugin agent; a bare name is refused
+   by the runtime. The adapter strips that namespace before opening the step session.
    Its scoped hook opens the harness session. Every session also receives a short context
    from `sessionStart` naming the framework root, the workspace, and the exact harness command
    lines.
@@ -119,20 +131,32 @@ either checkout or recreating the venv.
    **The shell does not run this command, and the adapter never edits it.** The
    `preToolUse` hook recognizes the request, runs the function itself for the agent's own
    session (taken from the hook payload), and returns the report as the tool response. The
-   app shows it as a hook denial whose reason starts with
+   host shows it as a hook denial (the CLI hands the model `Denied by preToolUse hook: …`) whose reason starts with
    `SAFe agentic harness RESULT (resolve-step): …` followed by the JSON report. That is the
    successful answer: the agent must act on it and not re-issue the command. Only a reason
    starting with `SAFe agentic harness REJECTED` means the request was refused (it names
-   the problem and the accepted line). Because the hook decides before the app's permission
+   the problem and the accepted line). Because the hook decides before the host's permission
    layer, **no permission rule or interactive approval is needed** for harness commands,
    including in autopilot, and agent shells need no `FRAMEWORK_*` variables.
 5. Steps are dispatched with `task`, synchronously; `mode: background` is denied. Writes go
    through `create`/`edit`, which the harness authorizes (H3) and validates (H5). `skill`,
-   `ask_user` (the human gate), `view`, `grep` and `glob` are never gated.
+   `ask_user` (the human gate), `view`, `grep` and `glob` are never gated. The CLI's
+   non-interactive prompt mode (`copilot -p`) offers no `ask_user` at all: run a framework
+   that needs a human gate interactively.
+
+## Model binding
+
+`models.yaml` maps every model-profile slug of the framework catalogue
+(`<fw>/conf/model-profiles.conf.yaml`) to a model id the host offers. **It must track the
+models the host currently offers**, which can change after install. Every hook re-reads the
+catalogue and `models.yaml` on load, never from an install-time cache, and refuses a catalogue
+that names a slug `models.yaml` does not bind: the hook exits 2 and names the unbound slugs.
+The runtime gives hooks no model list, so keeping `models.yaml` current is the operator's job.
 
 **Failure is closed and visible.** If a hook cannot bootstrap, it exits 2 with a stderr
 diagnostic. That happens when the framework root is gone, `.env` is malformed, the binding is
-off-contract, or the payload is unreadable. The app then denies the tool call (`preToolUse`)
+off-contract, the model catalogue names a slug `models.yaml` does not bind (or is missing),
+or the payload is unreadable. The host then denies the tool call (`preToolUse`)
 or shows a warning (other events). A broken install therefore blocks tool use wherever the
 plugin's hooks fire. Repair it by re-running `install.py`, or by disabling the plugin.
 
@@ -144,13 +168,18 @@ both. Hook diagnostics go to stderr.
 
 These are detailed, with their fallbacks, in the spec's *Limited or unsupported boundaries*.
 
-- **Folder trust.** In an untrusted folder, scoped hooks never run, so no harness session
-  opens. Harness commands are then denied with a diagnosis.
+- **Folder trust.** In an untrusted folder, repository hooks never run, so the boundaries they
+  register never fire. Harness commands are then denied with a diagnosis. Plugin hooks are
+  not affected.
 - **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget.
 - **Shell writes are not mediated.** The adapter denies shell commands that name the
   workspace or `logs/`, but a determined command can evade a textual check. The core's
   commit-set check is the backstop. Agents must write through `create`/`edit`.
-- **Batching.** A harness command must be the only tool call in its batch.
+- **Batching (app).** A harness command must be the only tool call in its batch. The CLI fires
+  `preToolUse` once per call.
+- **Plugin agent names.** Agents and dispatches must use the runtime's
+  `<plugin-name>:<agent>` names; the framework bundle's prose has to say so.
+- **No `ask_user` in `copilot -p`.**
 - **The harness answer arrives as a "denial".** The runtime has no other channel for a
   `preToolUse` hook to answer the agent without running or editing its command. The reason
   prefix and the session hint say it is the result; a model that still retries just gets the
@@ -158,5 +187,10 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
   without the hook environment, and the harness refuses it (`FRAMEWORK_DIR is unset`).
 - **Latency.** Plugin hooks start Python for every tool call in every folder. Ungoverned
   sessions return after one state lookup.
-- **Not yet byte-verified in the app:** `exec` entries (fall back to `--hook-style shell`),
-  the exact wrapper around a deny reason, and scoped hooks inside subagents.
+- **Verified live on the standalone CLI** (1.0.105, Linux, `-p`, offline BYOK with a scripted
+  model): `exec` entries, plugin and scoped hooks, the singular `preToolUse` shape, the
+  hook-executed H4 result, H0, and H1–H3 for a plugin subagent, the model-catalogue refusal.
+  **Not yet verified live:** a GitHub-authenticated CLI session with real models; the CLI
+  on Windows/macOS; the interactive CLI (`ask_user`, trust prompt); marketplace installs on
+  the CLI; and, in the app, `exec` entries, the deny-reason wrapper, and scoped hooks inside
+  subagents.

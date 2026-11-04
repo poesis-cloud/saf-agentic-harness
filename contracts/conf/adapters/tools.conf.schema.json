@@ -75,6 +75,11 @@
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the step session's acting agent identity."
     },
+    "hostAgentNamespaceSeparator": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Separator the host prefixes package-delivered agent identities with (e.g. ':' in '<plugin>:<agent>'). When set, the adapter keeps only the part after the LAST separator as the acting agent, so a plugin-delivered agent still resolves to its framework agent name."
+    },
     "dispatchTools": {
       "description": "Host tool names that start a child step-session (subagent dispatch).",
       "type": "array",

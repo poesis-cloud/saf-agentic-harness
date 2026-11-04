@@ -11,7 +11,10 @@ This document specifies only what differs for this host. The class model is
 
 **Why the id `github-copilot-cli`.** The app and the CLI run one runtime, with one hook
 engine, one tool vocabulary and one custom-agent/plugin format. The adapter binds that
-runtime, not a window around it. A user of the CLI alone installs the same adapter.
+runtime, not a window around it. A user of the CLI alone installs the same adapter. Nothing in
+the binding is app-only: the facts below that were observed to differ between the standalone
+CLI and the app are host-conditional, and the adapter accepts both forms (each is
+replayed from a live capture in the process tests).
 
 ## Sources
 
@@ -21,6 +24,7 @@ runtime, not a window around it. A user of the CLI alone installs the same adapt
 | Custom agents (`*.agent.md`, frontmatter `tools`, `model`, `hooks`) | [Custom agents configuration](https://docs.github.com/en/copilot/reference/custom-agents-configuration) |
 | Plugins (`plugin.json`, `hooks.json`, marketplaces) | [CLI plugin reference](https://docs.github.com/en/copilot/reference/cli-plugin-reference) |
 | **Actual** payload shapes, tool names, subagent identity (authoritative where they differ from the docs) | Payloads captured in the GitHub Copilot app on Windows, runtime **1.0.102**: [`tests/functional/adapter_copilot_cli/fixtures/copilot-app-windows-1.0.102.jsonl`](../../../tests/functional/adapter_copilot_cli/fixtures/copilot-app-windows-1.0.102.jsonl) |
+| The same, on the **standalone CLI** (Linux, `copilot -p`, framework bundle loaded with `--plugin-dir`, runtime **1.0.105**) | [`tests/functional/adapter_copilot_cli/fixtures/copilot-cli-linux-1.0.105.jsonl`](../../../tests/functional/adapter_copilot_cli/fixtures/copilot-cli-linux-1.0.105.jsonl) |
 
 ## Host facts the design rests on
 
@@ -40,28 +44,42 @@ runtime, not a window around it. A user of the CLI alone installs the same adapt
    `additionalContext` is capped at 10 KB.
 3. **Failure semantics.** A crash or a non-zero exit DENIES at `preToolUse`. A **timeout fails
    OPEN**.
-4. **`preToolUse` is BATCHED** (observed; the docs show a single call):
-   `{"sessionId", "cwd", "toolCalls": [{"id", "name", "args"}…]}`. One firing may carry several
-   calls, and there is no timestamp. `postToolUse` / `postToolUseFailure` are single-call:
-   `toolName`, `toolArgs`, `toolResult{resultType, textResultForLlm}` or `error`, plus
-   `timestamp`.
-5. **Tools (app, 1.0.102).**
+4. **`preToolUse` shape is host-conditional.**
+   - Standalone CLI (1.0.105): the documented SINGLE-call shape
+     `{"sessionId", "timestamp", "cwd", "toolName", "toolArgs"}`, one firing per tool call,
+     even for parallel calls.
+   - App (1.0.102): BATCHED, `{"sessionId", "cwd", "toolCalls": [{"id", "name", "args"}…]}`.
+     One firing may carry several calls, and there is no timestamp.
+   - The binding reads both (`toolKeys`/`inputKeys` and `toolCallsKeys`). `postToolUse` /
+     `postToolUseFailure` are single-call in both: `toolName`, `toolArgs`,
+     `toolResult{resultType, textResultForLlm}` or `error`, plus `timestamp`.
+5. **Tools.**
    - Files: `view`, `create` (`path`, `file_text`), `edit` (`path`, `old_str`, `new_str`).
-   - Shell: `powershell` on Windows, `bash` elsewhere (`command`, `description`).
+   - Shell: `powershell` on Windows, `bash` elsewhere (`command`, `description`), plus
+     `read_bash`/`stop_bash`/`list_bash` on the CLI.
    - Search: `grep`, `glob`.
    - Dispatch: `task` (`agent_type`, `name`, `description`, `prompt`, optional `model`/`mode`).
-   - Also `skill`, `ask_user`, and MCP tools.
-   - **No `apply_patch`.** Paths are absolute host paths (`C:\Users\…`).
+   - Also `skill`, MCP tools, and `ask_user` in an interactive session. The standalone CLI's
+     non-interactive prompt mode (`copilot -p`) offers **no `ask_user`** (observed, 1.0.105).
+   - **No `apply_patch`** in either. Paths are absolute host paths (`C:\Users\…`, `/home/…`).
 6. **Subagents.** `subagentStart`/`subagentStop` carry the DISPATCHER's `sessionId` and the
-   subagent's `agentId`/`agentType`. Inside the subagent, EVERY event carries
-   `sessionId = agentId`, plus `parentAgentId`. Observed order at a step's return: subagent
-   `agentStop`, then `subagentStop`, then the dispatcher's `postToolUse(task)`. The `task`
-   result text is elided by the runtime.
-7. **Background sessions.** The app spawns short title-summarizer sessions in the same folder.
-   They fire only the global hooks (`sessionStart`, `userPromptSubmitted`, `agentStop`,
-   `sessionEnd`), with prompts such as "Summarize this assistant message".
-8. **Folder trust.** Repository hooks and agent-scoped hooks run only in a folder the app
-   trusts. In an untrusted folder they silently do not run.
+   subagent's `agentId`/`agentType`/`agentName`. Inside the subagent, EVERY event carries
+   `sessionId = agentId`, plus `parentAgentId`. Observed order at a step's return (both hosts):
+   subagent `agentStop`, then `subagentStop`, then the dispatcher's `postToolUse(task)`. The
+   `task` result text is elided by the runtime.
+   **Plugin agents are namespaced** `<plugin-name>:<agent>`: in `task` `agent_type` (a bare
+   name is refused as "Unknown agent_type"), in `agentType`/`agentName`, and in `--agent`.
+   Only `agentDisplayName` is bare. The binding's `hostAgentNamespaceSeparator: ":"` makes H1
+   open the step session for the framework agent (the part after the last `:`), never for
+   the namespaced id. Repository agents (`.github/agents/`) carry no namespace.
+7. **Background sessions (app only).** The app spawns short title-summarizer sessions in the
+   same folder. They fire only the global hooks (`sessionStart`, `userPromptSubmitted`,
+   `agentStop`, `sessionEnd`), with prompts such as "Summarize this assistant message". None
+   were observed in the standalone CLI. Either way they are ungoverned pass-throughs.
+8. **Folder trust (both hosts).** Repository hooks (`.github/hooks/`) load only in a trusted
+   folder: the app's trust, or the CLI's trust prompt / `--trust-folder`. In an untrusted
+   folder they silently do not run. Plugin hooks and a plugin agent's scoped hooks DO run in
+   an untrusted folder (observed, standalone CLI 1.0.105, `-p`).
 
 ## Hook → boundary binding
 
@@ -229,6 +247,9 @@ own permission flow still applies to what the harness lets through.
   - a missing or non-directory framework root (`--framework-dir`, else `FRAMEWORK_DIR`);
   - an unreadable or malformed `<fw>/.env` (parsed exactly as the core `EnvLoader` does);
   - an off-contract or empty-probe binding (`adapters/binding_contract.py`);
+  - a framework model catalogue (`<fw>/conf/model-profiles.conf.yaml`) that is missing,
+    unreadable, or names a profile slug `models.yaml` does not bind (see
+    [Model binding](#model-binding));
   - an unparsable payload;
   - an unexpected crash.
 
@@ -243,6 +264,19 @@ own permission flow still applies to what the harness lets through.
   "check-step-authorization unavailable" and deny the write. The raw text goes to stderr only.
   Error reports (`inquiry-error`, `state-error`, `system-error`) deny, and the core's own
   `code — message` is relayed, as in the VS Code adapter.
+
+## Model binding
+
+[`models.yaml`](../../../adapters/github-copilot-cli/models.yaml) maps every model-profile slug
+to a model id this host offers. On **every** hook load, the bootstrap reads the framework model
+catalogue (`<fw>/conf/model-profiles.conf.yaml`) and refuses a catalogue that names a profile
+slug `models.yaml` does not bind (core function 4: unroutable configurations die at load). The
+refusal is a bootstrap failure (exit 2, the unbound slugs listed on stderr), so `preToolUse`
+denies. A missing or unreadable catalogue is refused the same way. Nothing is cached from
+install time: the host's model list can change after install, so `models.yaml` must track
+the models the host currently offers, and the check re-reads both files on each firing. The
+runtime passes no model list to hooks (none in any captured payload), so the adapter cannot
+check `models.yaml` against the live host list itself.
 
 ## Rendered registration — `install.py`
 
@@ -266,7 +300,7 @@ committed.
   `cwd: <fw>`, and `env` holding `FRAMEWORK_DIR` plus every `FRAMEWORK_*_DIR` (from
   `<fw>/.env`, overridden by the process environment and `--workspace-dir`),
   `SAF_HARNESS_PYTHON=<python>`, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, and `timeoutSec`.
-  The hook therefore bootstraps from its registration alone, because the app runs hooks with
+  The hook therefore bootstraps from its registration alone, because the host runs hooks with
   its own environment and not the operator's shell (no `setx`).
 - **Scoped block:** inserted inside the frontmatter, between the managed markers
   `# >>> safe-harness copilot-cli H0 … >>>` and `# <<< safe-harness copilot-cli H0 <<<`.
@@ -282,15 +316,17 @@ committed.
 | --- | --- | --- |
 | Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Harness calls are local and fast. H5 still validates and reverts after the fact. |
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
-| Folder trust | Repository and agent-scoped hooks do not run in an untrusted folder. H0 never fires, so the session stays ungoverned. | Install prerequisite: trust the framework folder. Prefer plugin hooks (global boundaries) over repository hooks. A harness command in an ungoverned session is denied with a diagnosis. |
+| Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | It is not verified whether agent-scoped hooks fire for an orchestrator dispatched as a subagent. | H1 opens the step session from the global `subagentStart` anyway. The hint is part of every governed context. |
 | H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). | C6 commit-set remediation. |
-| H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call; the exact wrapper the runtime puts around the reason is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
+| H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
-| `apply_patch` | Not offered by the app (1.0.102). | Bound anyway. Unparseable patch → deny. |
+| `apply_patch` | Not offered (app 1.0.102, CLI 1.0.105). | Bound anyway. Unparseable patch → deny. |
 | `task` `mode: background` | The step returns before it ends, so H6 cannot evaluate it. | Denied in governed sessions. |
 | H6 enforcement | `postToolUse` can only inform, not undo, a returned step. | The `additionalContext` directive to re-resolve. Future: `subagentStop` `decision: block` + `reason` can force the subagent to continue. |
-| `exec` entries | Documented, but not yet observed executing in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
+| `exec` entries | Observed executing in the standalone CLI (1.0.105, plugin `hooks.json`); not yet observed in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
+| Plugin agent names | The runtime namespaces plugin agents `<plugin>:<agent>`. | `hostAgentNamespaceSeparator` strips the namespace before `start-session`. Agents must dispatch the namespaced `agent_type`; that is the framework bundle's prose, not the adapter's. |
+| Human gate in `copilot -p` | Non-interactive prompt mode offers no `ask_user`. | None in the adapter: a framework whose steps need a human gate must run interactively. |
 | Latency | Plugin hooks start Python on every tool call in every folder. | Ungoverned firings return after one state lookup. Use a repository or project-scoped install when this matters. |
 
 ## Mediated-attribution status

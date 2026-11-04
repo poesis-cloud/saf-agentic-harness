@@ -22,6 +22,7 @@ from binding_contract import (  # noqa: E402
     TOOLS_CONTRACT,
     BindingContractError,
     load_contract_bound_yaml,
+    require_catalogue_bound,
     require_non_empty,
 )
 
@@ -81,6 +82,7 @@ class ToolBinding:
     mediated_command_keys: tuple[str, ...]
     guarded_shell_tools: frozenset[str]
     model_bindings: Mapping[str, str] = field(default_factory=dict)
+    agent_namespace_separator: str | None = None
 
     def probe(self, payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
         """Answer the first present, non-empty value among `keys` (first hit wins)."""
@@ -89,6 +91,13 @@ class ToolBinding:
             if value not in (None, ""):
                 return value
         return None
+
+    def agent_name(self, host_agent: str) -> str:
+        """Answer the framework agent a host agent identity names (plugin namespace dropped)."""
+        separator = self.agent_namespace_separator
+        if separator and separator in host_agent:
+            return host_agent.rsplit(separator, 1)[1]
+        return host_agent
 
     def resolve_write_action(self, tool_name: str, args: Any) -> str | None:
         """Answer the ACL action a call performs, or None when it is not a write."""
@@ -198,8 +207,13 @@ _GATING_PROBES = (
 )
 
 
-def load_tool_binding(adapter_dir: Path) -> ToolBinding:
-    """Load this adapter's binding, contract-validated at load (fail fast, never empty)."""
+def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -> ToolBinding:
+    """Load this adapter's binding, contract-validated at load (fail fast, never empty).
+
+    Given the framework root (the hook bootstrap always passes it), the framework model
+    catalogue is checked against `models.yaml` on this very load: an unbound profile slug
+    is refused (core function 4 — unroutable configurations die at load).
+    """
     tools_path = adapter_dir / TOOLS_FILENAME
     raw = _read_yaml(tools_path, TOOLS_CONTRACT)
     for key, why in _GATING_PROBES:
@@ -219,7 +233,14 @@ def load_tool_binding(adapter_dir: Path) -> ToolBinding:
             read_only=frozenset(spec.get("readOnly") or ()),
             actions=dict(spec.get("actions") or {}),
         )
-    models = _read_yaml(adapter_dir / MODELS_FILENAME, MODELS_CONTRACT).get("modelBindings") or {}
+    models_path = adapter_dir / MODELS_FILENAME
+    models_document = _read_yaml(models_path, MODELS_CONTRACT)
+    if framework_dir is not None:
+        try:
+            require_catalogue_bound(models_document, framework_dir, source=str(models_path))
+        except BindingContractError as failure:
+            raise BindingError(str(failure)) from failure
+    models = models_document.get("modelBindings") or {}
     return ToolBinding(
         write_tools={str(name): str(action) for name, action in write_tools.items()},
         delete_tools=frozenset(_strings(raw, "deleteTools")),
@@ -248,6 +269,7 @@ def load_tool_binding(adapter_dir: Path) -> ToolBinding:
         mediated_command_tools=frozenset(_strings(raw, "mediatedCommandTools")),
         mediated_command_keys=_strings(raw, "mediatedCommandKeys"),
         guarded_shell_tools=frozenset(_strings(raw, "guardedShellTools")),
+        agent_namespace_separator=raw.get("hostAgentNamespaceSeparator") or None,
         model_bindings={
             str(slug): str((binding or {}).get("hostModelId"))
             for slug, binding in models.items()

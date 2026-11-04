@@ -33,8 +33,10 @@ pinned.
     `adapter.py` through the recorded venv interpreter (`exec` + `args`), with no bash. Its
     `install.py` (or `make install-hooks-copilot-cli`) adds the hooks to a framework's
     Copilot plugin bundle: a global `hooks.json` plus the orchestrators' agent-scoped H0
-    block. It handles the runtime's batched `preToolUse`, and a batch is denied when any of
-    its calls is. Agent harness commands are hook-executed: the `preToolUse` hook runs one
+    block. It handles both `preToolUse` shapes: the standalone CLI's one call per firing and
+    the app's batch, which is denied when any of its calls is. Plugin agents, which the
+    runtime names `<plugin>:<agent>`, are governed under their framework agent name. The
+    standalone CLI (1.0.105) was verified live with a scripted model. Agent harness commands are hook-executed: the `preToolUse` hook runs one
     plain `resolve-step`/`resolve-step-model` request itself, for the session named by the
     payload, and returns the report as the deny reason (`SAFe agentic harness RESULT …`).
     It never edits or runs the command, and needs no permission rule. Anything else that
@@ -74,6 +76,10 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 - **Hook bootstrap fails closed:** every rendered hook records `FRAMEWORK_DIR` and its
   validated interpreter. A hook that cannot bootstrap exits 2, which the host treats as
   blocking.
+- **Unroutable model catalogue fails closed:** on every hook load, both adapters refuse a
+  framework model catalogue (`conf/model-profiles.conf.yaml`) that is missing or names a
+  profile slug the adapter's `models.yaml` does not bind. Nothing is cached from install, so
+  `models.yaml` must track the models the host currently offers.
 
 ### Fixed since `v1.0.0-beta.1`
 
@@ -113,14 +119,15 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   Copilot CLI. VS Code hooks are a preview feature, so settings and events may drift;
   adapter spec I13 lists the open host verifications.
 - **Copilot app / CLI:** the following limits apply.
-  - Hooks run only in a **trusted folder**.
+  - Repository hooks run only in a **trusted folder**; plugin hooks run regardless.
   - A timed-out `preToolUse` **fails open**.
   - **Shell writes** are guarded textually only. The core's commit-set check is the
     backstop.
   - The harness answer to an agent reaches it as a hook denial whose reason starts with
     `SAFe agentic harness RESULT`.
   - `exec` hook entries and scoped hooks inside subagents are not yet byte-verified in the
-    app.
+    app. The standalone CLI was verified live only on Linux, offline with a scripted model.
+  - The CLI's non-interactive `copilot -p` offers no `ask_user` (no human gate).
   - See the adapter spec's *Limited or unsupported boundaries*.
 - **Session attribution:** no adapter edits an agent's command. Both hooks run the agent's
   harness request themselves, so the core's former tool-boundary-stamp exception is retired

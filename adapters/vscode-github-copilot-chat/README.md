@@ -33,6 +33,11 @@ inconsistencies it surfaced against the core spec (I1–I15). The harness core i
   bash-free [`github-copilot-cli`](../github-copilot-cli/README.md) adapter instead.
 - A framework checkout with its `.env` layout (`FRAMEWORK_*_DIR` keys) and workflow catalog
   (`conf/workflows/*.workflow.conf.yaml` naming each `orchestrator:`).
+- A `models.yaml` that binds every profile slug of the framework's model catalogue
+  (`conf/model-profiles.conf.yaml`). It **must track the models the host currently offers**,
+  which can change after install. Every hook re-reads the catalogue and `models.yaml` on load
+  (no install-time cache) and fails closed (exit 2, the unbound slugs on stderr) when the
+  catalogue names a slug `models.yaml` does not bind, or when the catalogue is missing.
 
 ## Install
 

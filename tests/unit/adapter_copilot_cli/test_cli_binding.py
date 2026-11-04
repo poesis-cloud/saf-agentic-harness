@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import yaml
 
 from cli_rig import ADAPTER_DIR, REPO_ROOT
 from contract_assertions import contract_validator
+from model_catalogue import bound_slugs, write_bound_catalogue, write_catalogue
 from copilot_cli_adapter.binding import (
     BindingError,
     TargetExtractionError,
@@ -59,6 +61,20 @@ def test_str_replace_editor_view_is_not_a_write(binding: ToolBinding) -> None:
     assert binding.resolve_write_action("str_replace_editor", {"command": "str_replace"}) == "update"
 
 
+def test_a_plugin_namespaced_agent_names_its_framework_agent(binding: ToolBinding) -> None:
+    """The runtime names plugin agents '<plugin>:<agent>' (live, standalone CLI 1.0.105)."""
+    assert binding.agent_name("poesis-saf-agentic-organization:product-manager") == (
+        "product-manager"
+    )
+    assert binding.agent_name("product-manager") == "product-manager"
+    assert binding.agent_name("a:b:product-manager") == "product-manager"
+
+
+def test_without_a_namespace_separator_the_host_agent_is_kept_whole(binding: ToolBinding) -> None:
+    unbound = dataclasses.replace(binding, agent_namespace_separator=None)
+    assert unbound.agent_name("plugin:product-manager") == "plugin:product-manager"
+
+
 def test_model_bindings_map_every_profile_slug(binding: ToolBinding) -> None:
     assert binding.model_bindings
     assert all(isinstance(value, str) and value for value in binding.model_bindings.values())
@@ -69,3 +85,36 @@ def test_a_broken_binding_is_refused(tmp_path: Path) -> None:
     (tmp_path / "models.yaml").write_text("{}\n", encoding="utf-8")
     with pytest.raises(BindingError):
         load_tool_binding(tmp_path)
+
+
+def test_a_fully_bound_catalogue_loads(tmp_path: Path) -> None:
+    write_bound_catalogue(tmp_path, ADAPTER_DIR / "models.yaml")
+    binding = load_tool_binding(ADAPTER_DIR, framework_dir=tmp_path)
+    assert set(binding.model_bindings) == set(bound_slugs(ADAPTER_DIR / "models.yaml"))
+
+
+def test_a_catalogue_subset_of_the_binding_loads(tmp_path: Path) -> None:
+    # The binding may offer more than the framework catalogue asks for — never less.
+    write_catalogue(tmp_path, bound_slugs(ADAPTER_DIR / "models.yaml")[:1])
+    load_tool_binding(ADAPTER_DIR, framework_dir=tmp_path)
+
+
+def test_a_catalogue_naming_an_unbound_profile_is_refused(tmp_path: Path) -> None:
+    write_catalogue(tmp_path, ["zeta-unbound", "claude-haiku-4.5", "alpha-unbound"])
+    with pytest.raises(BindingError, match="does not bind: alpha-unbound, zeta-unbound"):
+        load_tool_binding(ADAPTER_DIR, framework_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "catalogue_text",
+    [None, "modelProfiles: [\n", "modelProfiles: {}\n", "modelProfiles:\n  - costRank: 1\n"],
+    ids=["missing", "unparsable", "not-a-list", "profile-without-slug"],
+)
+def test_an_unreadable_catalogue_is_refused(tmp_path: Path, catalogue_text: str | None) -> None:
+    if catalogue_text is not None:
+        (tmp_path / "conf").mkdir()
+        (tmp_path / "conf" / "model-profiles.conf.yaml").write_text(
+            catalogue_text, encoding="utf-8"
+        )
+    with pytest.raises(BindingError, match="model-profiles.conf.yaml"):
+        load_tool_binding(ADAPTER_DIR, framework_dir=tmp_path)

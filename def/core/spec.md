@@ -1598,11 +1598,11 @@ surfaces:
   event builds the session attribution fields from the event payload and its own private
   bookkeeping — never the harness's stores or config; this surface triggers functions 0–2 and
   5–10 at their natural boundaries.
-- **Mediated agent invocation** — an agent asks for a harness command within an
-  already-opened session, and a trusted surface outside the model runs it on the agent's
-  behalf. This surface is available only where that surface can attach host-observed session
-  attribution outside model-authored arguments. It may serve functions 3–4. A host that
-  cannot prove such attribution MUST NOT expose this surface for session-bound functions.
+- **Mediated agent invocation** — an agent asks through a trusted surface into a harness
+  command, within an already-opened session. This surface is available only where that
+  surface can attach host-observed session attribution outside model-authored arguments. It
+  may serve functions 3–4. A host that cannot prove such attribution MUST NOT expose this
+  surface for session-bound functions.
 
 **Session attribution.** Every journaling invocation carries the `sessionId` of the session it
 runs in, and the id always comes from the surrounding mechanism — never self-reported by an

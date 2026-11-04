@@ -444,6 +444,7 @@ def build_default_adapter() -> Adapter:
     binding = load_hook_binding(
         adapter_dir,
         guarded_path_markers=(f"{workspace_dir.name}/", "logs/"),
+        framework_dir=framework_dir,
     )
     return Adapter(
         binding=binding,
