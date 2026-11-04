@@ -122,6 +122,7 @@ class Rig:
     tracker: SessionTracker
     binding: ToolBinding
     diagnostics: list[str]
+    folders: list[str] = field(default_factory=list)
 
     def fire(
         self, event: str, payload: Mapping[str, Any], agent: str | None = None
@@ -215,6 +216,7 @@ def rig(tmp_path: Path, binding: ToolBinding) -> Rig:
     runner = FakeRunner()
     tracker = SessionTracker(tmp_path / "state")
     diagnostics: list[str] = []
+    folders: list[str] = []
     adapter = Adapter(
         binding=binding,
         tracker=tracker,
@@ -223,8 +225,9 @@ def rig(tmp_path: Path, binding: ToolBinding) -> Rig:
         workspace_dir=WORKSPACE,
         invocation=make_invocation(),
         diagnostic=diagnostics.append,
+        make_folders=folders.append,
     )
-    return Rig(adapter, runner, tracker, binding, diagnostics)
+    return Rig(adapter, runner, tracker, binding, diagnostics, folders)
 
 
 __all__ = [

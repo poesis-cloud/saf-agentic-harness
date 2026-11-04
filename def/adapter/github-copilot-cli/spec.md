@@ -196,6 +196,16 @@ own permission flow still applies to what the harness lets through.
    Otherwise run `check-step-authorization` for every target path, relativized to the
    workspace (Windows drive letters and separators are normalized; the comparison is
    case-insensitive). Any `denied` → deny.
+
+   **Host adaptation (missing folders).** `create` refuses a missing parent folder and no
+   tool every model gets creates one, so an actor would fall back to a shell `mkdir`, which
+   I9 denies. When the WHOLE firing is allowed, the hook creates the missing parent folders
+   of each `create`/`str_replace_editor create` target the harness answered `allowed`,
+   resolved against `cwd`, only inside the workspace and only for a path of the local OS
+   flavor. It writes folders only: no content, no commit (git does not track empty folders),
+   and the write itself still goes through the tool, H5 and the core. Patch targets are
+   skipped (`*** Add File:` creates its own). A folder that cannot be created is a hook
+   diagnostic; the tool then fails as it would have.
 5. **H4 (hook-executed):** a `powershell`/`bash` command mentioning `harness.py` is a request
    to the hook, never a command to run. It must FULLMATCH one plain invocation:
    `[&] <interpreter> [-3[.x]] <harness.py> <function> [--flag value]…`, with no `;`, `|`,
@@ -348,6 +358,7 @@ committed.
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
 | `apply_patch` | Offered instead of `create`/`edit` to GPT-5.x models only (CLI 1.0.105); `toolArgs` is the raw patch string. | Bound as a patch tool: every header target is authorized; an unparseable patch → deny. |
+| Missing parent folders | `create` refuses a missing parent folder; `edit` needs an existing file. | Host adaptation at H3: the hook creates the folders of an allowed `create` target inside the workspace (folders only, no commit). |
 | `task` `mode: background` | The step returns before it ends, so H6 cannot evaluate it. | Denied in governed sessions. |
 | H6 enforcement | `postToolUse` can only inform, not undo, a returned step. | The `additionalContext` directive to re-resolve. Future: `subagentStop` `decision: block` + `reason` can force the subagent to continue. |
 | `exec` entries | Observed executing in the standalone CLI (1.0.105, plugin `hooks.json`); not yet observed in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |

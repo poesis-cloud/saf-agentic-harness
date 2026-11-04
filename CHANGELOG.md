@@ -146,6 +146,11 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 - **Hook-executed H4 attribution:** both adapters pass the tracked parent session with a
   `resolve-step`/`resolve-step-model` request, so a step session's request is journaled under
   its parent instead of `parentSessionId: null`.
+- **`github-copilot-cli`, missing folders (H3 host adaptation):** the runtime's `create`
+  refuses a missing parent folder, and only GPT-5.x models get `apply_patch`, which creates
+  one. Once the harness has allowed a `create` and the whole firing is allowed, the hook
+  creates the missing parent folders inside the workspace: folders only, no content, no
+  commit. Actors no longer need a shell `mkdir`, which I9 denies.
 
 ### Known alpha limitations
 

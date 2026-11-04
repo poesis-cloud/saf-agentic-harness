@@ -174,7 +174,11 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
 - **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget.
 - **Shell writes are not mediated.** The adapter denies shell commands that name the
   workspace or `logs/`, but a determined command can evade a textual check. The core's
-  commit-set check is the backstop. Agents must write through `create`/`edit`.
+  commit-set check is the backstop. Agents must write through `create`/`edit` (or
+  `apply_patch`, which GPT-5.x models get instead).
+- **Missing folders.** The runtime's `create` refuses a missing parent folder. The hook
+  creates the missing folders of a `create` the harness allowed inside the workspace (folders
+  only, no commit), so agents need no shell `mkdir`.
 - **Batching (app).** A harness command must be the only tool call in its batch. The CLI fires
   `preToolUse` once per call.
 - **Plugin agent names.** Agents and dispatches must use the runtime's

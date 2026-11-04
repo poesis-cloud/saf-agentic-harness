@@ -26,6 +26,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import PurePath
 from typing import Any, Callable, Mapping, Sequence
 
 from . import renderer
@@ -68,7 +69,8 @@ _STARTED = "started"
 _RESOLVED = "resolved"
 _NOT_APPLICABLE = "not-applicable"
 _VALID = "valid"
-_ALLOWING = frozenset({"pass", "allowed"})
+_ALLOWED = "allowed"
+_ALLOWING = frozenset({"pass", _ALLOWED})
 _PASSING_STEP = frozenset({"pass", _NOT_APPLICABLE})
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
 _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
@@ -116,6 +118,10 @@ def _stderr(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _make_folders(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
 class Adapter:
     """Orchestrate one host firing across the harness command API."""
 
@@ -128,6 +134,7 @@ class Adapter:
         workspace_dir: str,
         invocation: HarnessInvocation,
         diagnostic: Diagnostic = _stderr,
+        make_folders: Callable[[str], None] = _make_folders,
     ) -> None:
         self._binding = binding
         self._tracker = tracker
@@ -136,6 +143,7 @@ class Adapter:
         self._workspace_dir = workspace_dir
         self._invocation = invocation
         self._diagnostic = diagnostic
+        self._make_folders = make_folders
         self._workspace_name = host_basename(workspace_dir) if workspace_dir else ""
         self._handlers: Mapping[str, Callable[[HookInput], Decision]] = {
             SESSION_START: self._announce_harness,
@@ -279,8 +287,9 @@ class Adapter:
             return renderer.deny([f"unreadable tool-call payload: {failure}"])
         reasons: list[str] = []
         requests: list[HarnessRequest] = []
+        creations: list[str] = []
         for call in calls:
-            reason, request = self._gate_tool_call(hook, record, call)
+            reason, request = self._gate_tool_call(hook, record, call, creations)
             if reason:
                 reasons.append(reason)
             if request is not None:
@@ -294,7 +303,26 @@ class Adapter:
             return renderer.deny(reasons)
         if requests:
             return self._answer_harness_request(record, requests[0])
+        self._prepare_parent_folders(hook, creations)
         return None
+
+    def _prepare_parent_folders(self, hook: HookInput, paths: Sequence[str]) -> None:
+        """H3 host adaptation — the runtime's `create` refuses a missing parent folder, and
+        no other tool offered to every model creates one. Once the WHOLE firing is allowed,
+        create the missing folders of each harness-allowed `create` target inside the
+        workspace: folders only, no content, no commit (git does not track empty folders)."""
+        for raw in paths:
+            if not is_within(raw, hook.cwd, self._workspace_dir):
+                continue
+            resolved = resolve_host_path(raw, hook.cwd, self._workspace_dir)
+            if type(resolved) is not type(PurePath()):
+                continue
+            try:
+                self._make_folders(str(resolved.parent))
+            except OSError as failure:
+                self._diagnostic(
+                    f"[{ADAPTER_ID}] could not create the folder of '{raw}': {failure}"
+                )
 
     def _gate_ungoverned(self, hook: HookInput) -> Decision:
         """Outside a governed session everything passes — except a harness command, which
@@ -320,12 +348,12 @@ class Adapter:
         return None
 
     def _gate_tool_call(
-        self, hook: HookInput, record: SessionRecord, call: ToolCall
+        self, hook: HookInput, record: SessionRecord, call: ToolCall, creations: list[str]
     ) -> tuple[str | None, HarnessRequest | None]:
         if self._binding.is_dispatch_tool(call.name):
             return self._gate_dispatch(record, call), None
         if self._binding.resolve_write_action(call.name, call.args) is not None:
-            return self._gate_write(hook, record, call), None
+            return self._gate_write(hook, record, call, creations), None
         if self._binding.is_mediated_command_tool(call.name) or self._binding.is_guarded_shell_tool(
             call.name
         ):
@@ -352,8 +380,13 @@ class Adapter:
             return None
         return renderer.describe_report(report)
 
-    def _gate_write(self, hook: HookInput, record: SessionRecord, call: ToolCall) -> str | None:
-        """H3 — authorize EVERY target of the write; unextractable targets are denied."""
+    def _gate_write(
+        self, hook: HookInput, record: SessionRecord, call: ToolCall, creations: list[str]
+    ) -> str | None:
+        """H3 — authorize EVERY target of the write; unextractable targets are denied.
+
+        Each `allowed` `create` target of a non-patch tool is collected into `creations`
+        (a patch's `*** Add File:` creates its own folders)."""
         try:
             targets = self._binding.extract_write_targets(call.name, call.args)
         except TargetExtractionError as failure:
@@ -373,6 +406,12 @@ class Adapter:
                 reasons.append("check-step-authorization unavailable")
             elif read_status(report) not in _ALLOWING:
                 reasons.append(renderer.describe_report(report))
+            elif (
+                action == "create"
+                and read_status(report) == _ALLOWED
+                and call.name not in self._binding.patch_tools
+            ):
+                creations.append(path)
         return "; ".join(reasons) or None
 
     def _gate_shell(
