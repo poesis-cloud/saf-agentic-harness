@@ -167,12 +167,27 @@ class Adapter:
         Agent-scoped: only an orchestrator's own frontmatter hook carries `--agent`, so a
         background session the app spawns (title summarizers) never reaches here with an
         agent and creates no state.
+
+        A step session is H1's, never H0's: an orchestrator agent dispatched as a step actor
+        still fires its scoped hook, but it is neither re-registered nor given workflow
+        context. Nor does H0 open a root session for an agent a GOVERNED session dispatched:
+        that agent was opened by its dispatcher's action, so it is a step (H1) or, when H1
+        could not open it, ungoverned.
         """
         host_id = hook.host_id
         if not hook.scoping_agent or not host_id:
             return None
         record = self._tracker.read(host_id)
+        if record is not None and record.origin == STEP_ORIGIN:
+            return None
         if record is None:
+            dispatcher = hook.parent_host_id
+            if dispatcher and dispatcher != host_id and self._tracker.read(dispatcher):
+                self._diagnostic(
+                    f"[{ADAPTER_ID}] {hook.event}: '{hook.scoping_agent}' was dispatched by a "
+                    "governed session but holds no step session; it stays ungoverned"
+                )
+                return None
             record = self._register_turn(hook, host_id)
             if record is None:
                 return None
@@ -211,7 +226,7 @@ class Adapter:
 
     def _open_step(self, hook: HookInput) -> Decision:
         """H1 — register the dispatched step under its dispatcher; prepend its context."""
-        parent_host = hook.host_id
+        parent_host = hook.dispatcher_host_id
         parent = self._tracker.read(parent_host) if parent_host else None
         if parent is None:
             return None

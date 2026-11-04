@@ -35,8 +35,9 @@ pathKeys: [path]
 nestedPathKeys: []
 
 # Session identity (host-observed, never model-authored). Inside a subagent EVERY event carries
-# sessionId = that subagent's agentId and parentAgentId = its dispatcher's id; subagentStart /
-# subagentStop carry the DISPATCHER's sessionId and the subagent's agentId / agentType.
+# sessionId = that subagent's agentId and parentAgentId = its dispatcher's id. subagentStart /
+# subagentStop carry the subagent's agentId / agentType and the dispatcher in parentAgentId;
+# their sessionId is the dispatcher only at the first level (nested: an unrelated id).
 hostSessionKeys: [sessionId]
 hostParentSessionKeys: [parentAgentId]
 hostStepSessionKeys: [agentId]

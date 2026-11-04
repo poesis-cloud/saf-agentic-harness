@@ -42,6 +42,8 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +scoping_agent : str | None
       +host_id : str | None
       +raw_parent_host_session_id : str | None
+      +parent_host_id : str | None
+      +dispatcher_host_id : str | None
       +timestamp : str | None
       +cwd : str | None
       +read_tool_calls() : tuple[ToolCall, ...]

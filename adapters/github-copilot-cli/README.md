@@ -192,5 +192,8 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
   hook-executed H4 result, H0, and H1–H3 for a plugin subagent, the model-catalogue refusal.
   **Not yet verified live:** a GitHub-authenticated CLI session with real models; the CLI
   on Windows/macOS; the interactive CLI (`ask_user`, trust prompt); marketplace installs on
-  the CLI; and, in the app, `exec` entries, the deny-reason wrapper, and scoped hooks inside
-  subagents.
+  the CLI; and, in the app, `exec` entries and the deny-reason wrapper.
+- **Nested dispatch** (observed in the app): an orchestrator subagent that dispatches a step
+  fires a `subagentStart` whose `sessionId` is unrelated. The dispatcher is read from
+  `parentAgentId`. An orchestrator acting a step still fires its scoped hook. That hook
+  leaves the step session alone and never opens a root turn under a governed dispatcher.

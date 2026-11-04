@@ -129,6 +129,12 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   4–5). Zero postconditions no longer pass vacuously. Delivery is a harness invariant, not a
   condition: it has no slug and cannot be configured. Function 10 reads it from the step
   session's log and reports it as `artifactDelivery` in the same journaled entry.
+- **`github-copilot-cli`, nested step dispatch:** a step dispatched by an orchestrator that
+  is itself a subagent now opens under that orchestrator's session. H1 reads the dispatcher
+  from the host-observed `parentAgentId`. The nested `subagentStart` `sessionId` is an
+  unrelated id. The scoped H0 of an orchestrator acting a step no longer re-registers the
+  step as a root turn, and injects no workflow context into it. Before this fix, the actor's
+  commits landed in a stray root session, and function 10 found no delivery.
 
 ### Known alpha limitations
 
