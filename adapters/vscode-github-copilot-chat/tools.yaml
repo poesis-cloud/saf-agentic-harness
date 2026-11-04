@@ -2,12 +2,12 @@
 # The harness core stays env-agnostic and reads this map; another host (Claude Code, Cursor, …)
 # ships its own adapters/<env>/tools.yaml. `writeTools`/`deleteTools` map a host tool name to its
 # action; the `*Keys` lists name the payload fields to probe (first hit wins). Payload field
-# names are the host's native snake_case hook envelope (see def/spec.md — Host hook engine).
+# names are the host's native snake_case hook envelope (see def/adapter/vscode-github-copilot-chat/spec.md — Host hook engine).
 writeTools:
   create_file: create
   create_directory: create
   replace_string_in_file: update
-  multi_replace_string_in_file: update # replacements[].filePath — one path per replacement (fan-out; see def/spec.md I8)
+  multi_replace_string_in_file: update # replacements[].filePath — one path per replacement (fan-out; see the adapter spec I8)
   edit_notebook_file: update
   apply_patch: update
 deleteTools: []
@@ -17,6 +17,9 @@ inputKeys: [tool_input]
 pathKeys: [filePath, dirPath]
 # multi_replace_string_in_file nests its paths in an array — no flat key reaches them:
 nestedPathKeys: ["replacements[].filePath"]
+# apply_patch carries its paths only in its patch text (`input`): each `*** Add/Update/Delete
+# File:` / `*** Move to:` header names one path, with its own action (see the adapter spec H3/I8).
+patchKeys: [input]
 # Session identity (host-observed, never model-authored):
 # - top-level session: session_id (the chat session id) — SessionStart / PreToolUse / PostToolUse
 # - step session: agent_id (SubagentStart) with session_id as its parent
@@ -30,7 +33,7 @@ dispatchTools: [runSubagent]
 dispatchAgentKeys: [agentName]
 dispatchModelKeys: [model]
 # Adapter-mediated agent invocation surface (functions 3–4) — accepted under the core's narrow
-# tool-boundary-stamp exception (def/spec.md Invocation surfaces + def/adapter/.../spec.md H4/I4):
+# tool-boundary-stamp exception (def/core/spec.md Invocation surfaces + def/adapter/vscode-github-copilot-chat/spec.md H4/I4):
 # fixed framework-authored shape, deny-on-model-authored-attribution, harness-side backstop,
 # explicit interim status. Investigated and set aside: a dedicated custom/MCP tool would not
 # actually be stronger — no host-native channel passes trustworthy session identity to it either.

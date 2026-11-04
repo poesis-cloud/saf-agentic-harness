@@ -556,6 +556,34 @@ class TestApplication:
         assert exit_code != 0
         assert capsys.readouterr().out == ""
 
+    def test_no_unclassified_exception_crosses_the_command_boundary(
+        self,
+        framework_root: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Spec (Outcomes rule 4 / Invocation surfaces): no exception crosses the
+        command boundary. A failure no service classified is the environment failing:
+        it surfaces at the exit plane as `system-error` — stderr, exit 4, no report.
+        """
+        application = Application(framework_root)
+
+        def fail(_inquiry: object) -> object:
+            raise RuntimeError("disk vanished")
+
+        monkeypatch.setattr(application._commands["start-session"], "execute_function", fail)
+
+        exit_code = application.dispatch_command(
+            ["start-session", "--session-id", "s1", "--agent", "facilitator"]
+        )
+
+        captured = capsys.readouterr()
+        assert exit_code == 4
+        assert captured.out == ""
+        assert "system-error" in captured.err
+        assert "disk vanished" in captured.err
+        assert "Traceback" not in captured.err
+
     def test_reads_the_session_attribution_the_surrounding_mechanism_supplies(
         self, framework_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

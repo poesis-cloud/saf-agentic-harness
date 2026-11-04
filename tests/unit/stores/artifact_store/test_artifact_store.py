@@ -139,6 +139,25 @@ class TestArtifactStore:
         assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before + 1
         assert "sess-1" in _run_git(workspace, "log", "-1", "--pretty=%B")
 
+    def test_commit_artifacts_commits_only_the_validated_set_not_foreign_staged_content(
+        self, workspace: Path, store: ArtifactStore
+    ) -> None:
+        """Function 9, invariant 3: "1 validated set = 1 commit" — the commit carries
+        exactly the validated set. Content someone else staged in the index is not part
+        of that set: it must stay staged and must not enter the commit."""
+        (workspace / "foreign.txt").write_text("not an artifact\n", encoding="utf-8")
+        _run_git(workspace, "add", "foreign.txt")
+        (workspace / "sample").mkdir()
+        (workspace / "sample" / "a.json").write_text(
+            '{"slug":"a","kind":"sample"}\n', encoding="utf-8"
+        )
+
+        store.commit_artifacts((Path("sample/a.json"),), session_id="sess-1")
+
+        committed = _run_git(workspace, "show", "--name-only", "--pretty=", "HEAD")
+        assert committed.splitlines() == ["sample/a.json"]
+        assert _run_git(workspace, "diff", "--cached", "--name-only") == "foreign.txt"
+
     def test_commit_artifacts_creates_no_commit_for_a_byte_identical_set(
         self, workspace: Path, store: ArtifactStore
     ) -> None:

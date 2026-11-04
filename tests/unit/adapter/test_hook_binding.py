@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
-from hook_binding import HookBinding, load_hook_binding
+from hook_binding import BindingContractError, HookBinding, load_hook_binding
 
 
 @pytest.fixture
@@ -101,8 +102,8 @@ class TestHookBinding:
     def test_extracts_no_path_from_a_call_naming_none(
         self, binding: HookBinding
     ) -> None:
-        """Adapter spec H3: a call naming no path reaches no artifact — nothing to
-        authorize, hence pass-through material rather than a denial.
+        """Adapter spec H3: extraction itself never invents a path — whether an empty
+        extraction passes through or fails closed is the adapter's decision (H3/H5).
         """
         assert binding.extract_artifact_paths({"command": "ls"}) == ()
 
@@ -135,3 +136,207 @@ class TestHookBinding:
         binding = load_hook_binding(adapter_dir, guarded_path_markers=("portfolio/", "logs/"))
 
         assert binding.guarded_path_markers == ("portfolio/", "logs/")
+
+
+def _write_binding(
+    target: Path,
+    source: Path,
+    tools_overrides: dict | None = None,
+    models_overrides: dict | None = None,
+    drop_tools_keys: tuple[str, ...] = (),
+) -> Path:
+    """Lay out an adapter dir holding the shipped binding with targeted mutations."""
+    tools = yaml.safe_load((source / "tools.yaml").read_text(encoding="utf-8"))
+    models = yaml.safe_load((source / "models.yaml").read_text(encoding="utf-8"))
+    tools.update(tools_overrides or {})
+    for key in drop_tools_keys:
+        tools.pop(key, None)
+    models.update(models_overrides or {})
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "tools.yaml").write_text(yaml.safe_dump(tools), encoding="utf-8")
+    (target / "models.yaml").write_text(yaml.safe_dump(models), encoding="utf-8")
+    return target
+
+
+class TestHookBindingFailFastValidation:
+    """Adapter spec (Invocation plumbing — the binding is validated at load like any other
+    configuration): a malformed binding stops the hook; it never degrades into empty
+    probes, which would classify every firing as a pass-through — a silent fail-open."""
+
+    @pytest.mark.parametrize(
+        ("overrides", "dropped"),
+        [
+            ({"writeTools": []}, ()),
+            ({"writeTools": {"create_file": "delete"}}, ()),
+            ({"pathKeys": "filePath"}, ()),
+            ({"nestedPathKeys": ["replacements[.filePath"]}, ()),
+            ({"unknownKey": ["x"]}, ()),
+            ({}, ("toolKeys",)),
+            ({}, ("hostSessionKeys",)),
+        ],
+    )
+    def test_refuses_a_tools_binding_its_contract_rejects(
+        self, tmp_path: Path, adapter_dir: Path, overrides: dict, dropped: tuple
+    ) -> None:
+        bad = _write_binding(
+            tmp_path / "bad", adapter_dir, tools_overrides=overrides, drop_tools_keys=dropped
+        )
+
+        with pytest.raises(BindingContractError, match="tools.conf.schema.json"):
+            load_hook_binding(bad)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"toolKeys": []},
+            {"inputKeys": []},
+            {"hostSessionKeys": []},
+            {"pathKeys": [], "nestedPathKeys": [], "patchKeys": []},
+            {"mediatedCommandKeys": []},
+        ],
+    )
+    def test_refuses_an_empty_probe_list_a_declared_gate_depends_on(
+        self, tmp_path: Path, adapter_dir: Path, overrides: dict
+    ) -> None:
+        bad = _write_binding(tmp_path / "bad", adapter_dir, tools_overrides=overrides)
+
+        with pytest.raises(BindingContractError, match="declares no"):
+            load_hook_binding(bad)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"modelBindings": {}},
+            {"modelBindings": {"gpt-5.5": {}}},
+            {"modelBindings": {"gpt-5.5": {"hostModelId": ""}}},
+        ],
+    )
+    def test_refuses_a_models_binding_its_contract_rejects(
+        self, tmp_path: Path, adapter_dir: Path, overrides: dict
+    ) -> None:
+        bad = _write_binding(tmp_path / "bad", adapter_dir, models_overrides=overrides)
+
+        with pytest.raises(BindingContractError, match="models.conf.schema.json"):
+            load_hook_binding(bad)
+
+    def test_refuses_an_unparsable_binding_file(
+        self, tmp_path: Path, adapter_dir: Path
+    ) -> None:
+        bad = _write_binding(tmp_path / "bad", adapter_dir)
+        (bad / "tools.yaml").write_text("writeTools: [unclosed\n", encoding="utf-8")
+
+        with pytest.raises(BindingContractError, match="cannot be loaded"):
+            load_hook_binding(bad)
+
+    def test_the_shared_validator_depends_on_no_harness_core_package(
+        self, repo_root: Path
+    ) -> None:
+        """Adapter spec I15: the shared validator any adapter imports stays outside the
+        harness core — PyYAML and jsonschema only."""
+        code = (repo_root / "adapters" / "binding_contract.py").read_text(encoding="utf-8")
+        for forbidden in ("services", "stores", "config", "errors", "utils"):
+            assert f"import {forbidden}" not in code
+            assert f"from {forbidden}" not in code
+
+
+_PATCH = """*** Begin Patch
+*** Add File: portfolio/new.md
++# New
+*** Update File: portfolio/kept.md
+@@
+-old
++new
+*** Update File: portfolio/old-name.md
+*** Move to: portfolio/new-name.md
+@@
+-a
++b
+*** Delete File: portfolio/gone.md
+*** End Patch
+"""
+
+
+class TestHookBindingPatchExtraction:
+    """Paths a patch-document tool (`apply_patch`) names only in its patch text."""
+
+    def test_loads_the_shipped_patch_probe(self, binding: HookBinding) -> None:
+        """Adapter spec I8: `apply_patch` carries its paths in a patch document under
+        `input` — the shipped binding declares that probe.
+        """
+        assert binding.patch_keys == ("input",)
+
+    def test_extracts_every_path_a_patch_document_names(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3 / I8: every `*** Add File:` / `*** Update File:` /
+        `*** Delete File:` / `*** Move to:` header names an artifact path, in call order.
+        """
+        assert binding.extract_artifact_paths({"input": _PATCH}) == (
+            Path("portfolio/new.md"),
+            Path("portfolio/kept.md"),
+            Path("portfolio/old-name.md"),
+            Path("portfolio/new-name.md"),
+            Path("portfolio/gone.md"),
+        )
+
+    def test_resolves_the_action_each_patch_header_performs(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3: a patch header carries its own action — an added file is a
+        `create`, an updated one an `update`, a deleted one a `delete`, and a move vacates
+        its source (`delete`) and creates its destination (`create`).
+        """
+        assert binding.resolve_path_actions("apply_patch", {"input": _PATCH}) == (
+            (Path("portfolio/new.md"), "create"),
+            (Path("portfolio/kept.md"), "update"),
+            (Path("portfolio/old-name.md"), "delete"),
+            (Path("portfolio/new-name.md"), "create"),
+            (Path("portfolio/gone.md"), "delete"),
+        )
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            "*** Add File: portfolio/plan.md ",
+            "*** Add File:  portfolio/plan.md",
+            "*** Update File: portfolio/plan.md\t",
+            "*** Delete File: portfolio/plan.md\r",
+            "*** Add File: ",
+        ],
+    )
+    def test_a_header_path_the_host_would_not_write_verbatim_is_unextractable(
+        self, binding: HookBinding, header: str
+    ) -> None:
+        """Adapter spec H3: the host takes a header path verbatim (no trim), so a path
+        with surrounding whitespace would be authorized under another name than the one
+        written — the whole call is unextractable (and so denied), never normalized.
+        """
+        patch = "*** Begin Patch\n*** Add File: portfolio/ok.md\n+x\n" + header + "\n+y\n*** End Patch"
+        assert binding.resolve_path_actions("apply_patch", {"input": patch}) == ()
+        assert binding.extract_artifact_paths({"input": patch}) == ()
+
+    def test_patch_lines_split_only_on_newline_as_the_host_does(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3: a form feed is not a line break to the host, so a header
+        hidden behind one is not a header — and must not authorize a path.
+        """
+        patch = "*** Begin Patch\n+x\x0c*** Add File: portfolio/hidden.md\n*** End Patch"
+        assert binding.resolve_path_actions("apply_patch", {"input": patch}) == ()
+
+    def test_resolves_the_tool_action_of_every_flat_path(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3: a path reached by a declared key takes its tool's action."""
+        assert binding.resolve_path_actions(
+            "replace_string_in_file", {"filePath": "portfolio/a.md"}
+        ) == ((Path("portfolio/a.md"), "update"),)
+
+    def test_extracts_no_path_from_patch_text_naming_none(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3: a patch with no file header names nothing (the adapter then
+        fails closed — it never guesses a path).
+        """
+        assert binding.extract_artifact_paths({"input": "no path here"}) == ()
+        assert binding.resolve_path_actions("apply_patch", {"input": "no path here"}) == ()

@@ -11,7 +11,7 @@ checks steps' conditions, authorization, and artifacts, and logs all of it —
 deterministically, from persisted state and validated configuration only. The harness core
 is fully host-agnostic; host-specific bindings live in separate adapter specifications.
 
-The canonical harness-core specification — terminology, invariants, the eleven-function
+The canonical harness-core specification — terminology, invariants, the twelve-function
 contract, design, and implementation — lives in **[`def/core/spec.md`](def/core/spec.md)**.
 Read that first; this file is
 only an orientation pointer. Each host binding has its own specification under
@@ -42,18 +42,34 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
   `vscode-github-copilot-chat/`).
 - `adapters/` — host-specific bindings (e.g. `vscode-github-copilot-chat/`).
 - `contracts/` — JSON Schema contracts for configuration, artifacts, and the journal.
-- `src/` — the Python implementation.
-- `tests/` — unit and functional suites.
+- `src/` — the Python implementation; `harness.py` at the root is its entry point
+  (`python3 harness.py <function> [flags]`).
+- `tests/` — the unit (`tests/unit/`), functional (`tests/functional/`), and adapter
+  (`tests/adapter/`) planes.
+
+## Requirements
+
+- Python 3.10–3.12.
+- Runtime: `pip install -r requirements.txt` (cel-python, jsonschema, PyYAML). Tests
+  additionally need `pip install -r requirements-dev.txt`.
+- The interpreter that runs the hooks must have `requirements.txt` installed:
+  `make install-hooks` records that absolute interpreter (`HARNESS_PYTHON`, defaulting to the
+  interpreter running the renderer, i.e. `PYTHON`) and `FRAMEWORK_DIR` into every rendered
+  hook entry's `env`, and refuses to render if the interpreter cannot import the requirements.
 
 ## Validation
 
 ```bash
-make verify
-make check-catalog
-make full
+make verify       # the full pytest suite (unit + functional + adapter planes); CI runs this
+make unit         # the unit plane only (tests/unit)
+make functional   # the functional plane only (tests/functional)
+make adapter      # the adapter conformance plane only (tests/adapter)
 ```
 
-See [`def/core/spec.md`](def/core/spec.md#validation-surface) for what each target runs.
+`make test` is an alias for `make verify`;
+`make install-hooks FRAMEWORK_DIR=<framework> BUNDLE_DIR=<bundle>` renders and installs the
+host hook registration. See the [`Makefile`](Makefile) for what each target runs and the
+[TDD plan](def/tdd-plan.md) for the test layout.
 
 <!-- roadmap:start -->
 ## Roadmap

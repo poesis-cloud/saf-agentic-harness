@@ -21,6 +21,7 @@ from harness_stub import HarnessStub
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REPO_ADAPTERS_DIR = REPO_ROOT / "adapters"
+REPO_ADAPTER_CONTRACTS_DIR = REPO_ROOT / "contracts" / "conf" / "adapters"
 STUB_ENTRYPOINT = Path(__file__).resolve().parent / "stub_harness_entrypoint.py"
 
 INSTRUCTION_REF = "reports-handling"
@@ -50,6 +51,9 @@ def build_framework(root: Path, script_path: Path, journal_path: Path) -> Framew
         root / "adapters",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # The adapter validates its own binding against the adapter contracts the harness
+    # ships beside `adapters/` (fail-fast load), so the copy carries them too.
+    shutil.copytree(REPO_ADAPTER_CONTRACTS_DIR, root / "contracts" / "conf" / "adapters")
     shutil.copy2(STUB_ENTRYPOINT, root / "harness.py")
     instructions_dir = root / "instructions"
     instructions_dir.mkdir()

@@ -55,6 +55,10 @@
         "description": "One dotted path expression; [] marks an array to fan out over."
       }
     },
+    "patchKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for a patch document (the '*** Begin Patch' format): every '*** Add File:' / '*** Update File:' / '*** Delete File:' / '*** Move to:' header names an artifact path, with the action the header performs."
+    },
     "hostSessionKeys": {
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the host-observed session id."

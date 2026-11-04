@@ -144,6 +144,10 @@ class TestAgentHooksSource:
                     f"{ADAPTER_ENV} {{{{AGENT_SLUG}}}}"
                 ),
                 "cwd": "{{FRAMEWORK_DIR}}",
+                "env": {
+                    "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}",
+                    "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}",
+                },
                 "timeout": 30,
             }
         ]
@@ -368,6 +372,30 @@ class TestAgentScopedHookRender:
             assert dispatch.is_file()
             assert framework not in dispatch.parents
             assert Path(entry["cwd"]) == framework.resolve()
+
+    def test_the_h0_entry_carries_its_bootstrap_environment(
+        self, repo_root: Path, framework: Path, bundle: Path, tmp_path: Path
+    ):
+        """Adapter spec (Rendering guarantees, bootstrap): H0 is the first hook a turn
+        fires, so its entry must bootstrap on its OWN — the framework anchor and the
+        interpreter are recorded in the entry's `env`, never inherited from the host."""
+        result = _install(
+            repo_root,
+            framework,
+            tmp_path,
+            bundle=bundle,
+            env_overrides={"FRAMEWORK_DIR": "/nonexistent/wrong/anchor"},
+        )
+
+        assert result.returncode == 0, result.stderr
+        for slug in ORCHESTRATORS:
+            entry = _frontmatter(_rendered(bundle, slug).read_text(encoding="utf-8"))[
+                "hooks"
+            ]["UserPromptSubmit"][0]
+            assert entry["env"] == {
+                "FRAMEWORK_DIR": str(framework.resolve()),
+                "SAF_HARNESS_PYTHON": sys.executable,
+            }
 
     def test_rendering_twice_is_idempotent(
         self, repo_root: Path, framework: Path, bundle: Path, tmp_path: Path

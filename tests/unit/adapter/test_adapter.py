@@ -501,11 +501,12 @@ class TestAdapter:
         assert runner.calls[0].inquiry["sessionId"] == "subagent-invocation-id"
         assert runner.calls[0].inquiry["parentSessionId"] == TURN_SESSION
 
-    def test_passes_through_a_write_naming_no_path(
-        self, make_adapter, tracker: SessionTracker
+    def test_denies_a_declared_write_naming_no_extractable_path(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
-        """Adapter spec H3: a call reaching no artifact path invokes nothing — the harness
-        governs the workspace data plane only.
+        """Adapter spec H3, invariant 3 (deny-by-default): a DECLARED write tool whose
+        call yields no extractable artifact path fails closed — the adapter cannot tell
+        what it would write, so it never lets it land unauthorized.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -515,8 +516,54 @@ class TestAdapter:
             _event(_pre_tool_payload("apply_patch", {"input": "no path here"}))
         )
 
+        rendered = assert_valid_stdout(decision.stdout)
+        assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert "apply_patch" in rendered["hookSpecificOutput"]["permissionDecisionReason"]
+        assert runner.calls == []
+
+    def test_passes_through_a_pathless_write_of_an_unregistered_conversation(
+        self, make_adapter
+    ) -> None:
+        """Adapter spec H3 / C7: fail-closed binds framework sessions only — an
+        unregistered conversation's write passes through, path or not.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+
+        decision = adapter.handle_hook_event(
+            _event(_pre_tool_payload("apply_patch", {"input": "no path here"}))
+        )
+
         assert (decision.exit_code, decision.stdout) == (0, "")
         assert runner.calls == []
+
+    def test_authorizes_every_path_a_patch_names_with_its_own_action(
+        self, make_adapter, tracker: SessionTracker, assert_valid_inquiry
+    ) -> None:
+        """Adapter spec H3 / I8: `apply_patch` names its paths only in its patch text —
+        each file header is authorized with the action it performs (a deleted file is a
+        `delete`, which function 8 denies in v1).
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        patch = (
+            "*** Begin Patch\n"
+            "*** Add File: portfolio/a.md\n+a\n"
+            "*** Update File: portfolio/b.md\n@@\n-x\n+y\n"
+            "*** Delete File: portfolio/c.md\n"
+            "*** End Patch\n"
+        )
+
+        adapter.handle_hook_event(_event(_pre_tool_payload("apply_patch", {"input": patch})))
+
+        calls = runner.find_calls("check-step-authorization")
+        assert [(call.inquiry["artifactPath"], call.inquiry["action"]) for call in calls] == [
+            ("portfolio/a.md", "create"),
+            ("portfolio/b.md", "update"),
+            ("portfolio/c.md", "delete"),
+        ]
+        assert_valid_inquiry("check-step-authorization", calls[0].inquiry)
 
     def test_denies_a_write_when_the_harness_errors(
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
@@ -810,6 +857,48 @@ class TestAdapter:
         rendered = assert_valid_stdout(decision.stdout)
         assert rendered["decision"] == "block"
         assert "portfolio/a.md" in rendered["reason"]
+
+    def test_checks_every_path_a_landed_patch_names(
+        self, make_adapter, tracker: SessionTracker, assert_valid_inquiry
+    ) -> None:
+        """Adapter spec H5 / I8: the landed `apply_patch` write set is every path its
+        patch headers name — one function-9 invocation carrying the whole set.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        patch = (
+            "*** Begin Patch\n"
+            "*** Update File: portfolio/a.md\n@@\n-x\n+y\n"
+            "*** Add File: portfolio/b.md\n+b\n"
+            "*** End Patch\n"
+        )
+
+        adapter.handle_hook_event(_event(_post_tool_payload("apply_patch", {"input": patch})))
+
+        assert runner.list_functions() == ["check-step-artifact"]
+        assert runner.calls[0].inquiry["artifactPaths"] == ["portfolio/a.md", "portfolio/b.md"]
+        assert_valid_inquiry("check-step-artifact", runner.calls[0].inquiry)
+
+    def test_blocks_a_landed_declared_write_naming_no_extractable_path(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        """Adapter spec H5 (fail closed): a landed DECLARED write whose paths cannot be
+        extracted is never silently accepted — the block tells the writing agent it went
+        unvalidated.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        decision = adapter.handle_hook_event(
+            _event(_post_tool_payload("apply_patch", {"input": "no path here"}))
+        )
+
+        rendered = assert_valid_stdout(decision.stdout)
+        assert rendered["decision"] == "block"
+        assert "apply_patch" in rendered["reason"]
+        assert runner.calls == []
 
     def test_evaluates_the_returned_step_against_the_stack_base(
         self, make_adapter, tracker: SessionTracker, assert_valid_inquiry

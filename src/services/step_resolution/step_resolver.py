@@ -57,6 +57,15 @@ def _has_ending_entry(log: Log) -> bool:
     )
 
 
+def _find_bound_instance(log: Log) -> str | None:
+    """Find the workflow instance this session already drives, if any (invariant 9)."""
+    for entry in reversed(log.entries):
+        instance_id = entry.report.context.workflow_instance_id
+        if instance_id is not None:
+            return instance_id
+    return None
+
+
 def _find_session_agent(log: Log) -> str | None:
     """Read the session's framework-agent identity from its start entry."""
     for entry in log.entries:
@@ -193,12 +202,21 @@ class StepResolver:
         return workflow
 
     def _deduce_workflow_instance(self, log: Log, workflow: Workflow) -> str:
-        """Deduce the instance: the one this session drives, else the latest open, else a new one."""
-        prefix = f"{workflow.slug}-"
-        for entry in reversed(log.entries):
-            instance_id = entry.report.context.workflow_instance_id
-            if instance_id is not None and instance_id.startswith(prefix):
-                return instance_id
+        """Deduce the instance: the one this session drives, else the latest open, else a new one.
+
+        Invariant 9: a session drives at most one instance over its lifetime, so a
+        session already bound to another workflow's instance is refused.
+        """
+        bound = _find_bound_instance(log)
+        if bound is not None:
+            if SessionLogStore.is_instance_of(bound, workflow.slug):
+                return bound
+            raise StateError(
+                "session-instance-bound",
+                f"Session '{log.session_id}' already drives the workflow instance "
+                f"'{bound}' and cannot drive the workflow '{workflow.slug}'.",
+                False,
+            )
         latest_open = self._session_log_store.find_latest_open_instance(
             workflow.slug,
             workflow_steps=[step.slug for step in workflow.steps],
@@ -217,7 +235,8 @@ class StepResolver:
             )
 
     def _journal_report(self, report: StepResolutionReport) -> StepResolutionReport:
-        """Append this invocation's single entry; a failing append surfaces `system-error`.
+        """Append this invocation's single entry; a failing append surfaces `system-error`
+        on a success report, while an error report keeps its primary error.
 
         Spec (rule 4): a completed invocation whose log append fails "still returns its
         report" — the entry is lost, never the step the caller was promised.
@@ -226,6 +245,9 @@ class StepResolver:
         try:
             self._session_log_store.append_log_entry(report.context.session_id, entry)
         except (OSError, HarnessError) as failure:
+            if report.outcome.error is not None:
+                # An error report whose own entry is lost keeps its primary error (rule 1).
+                return report
             lost = SystemFailureError("log-append-failed", str(failure), True)
             return StepResolutionReport(
                 context=report.context,

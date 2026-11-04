@@ -278,15 +278,19 @@ One test module per source module, **one test class per source class**. The mirr
 navigation aid and the coverage map at once — a source module with no facing test module is
 visible at a glance.
 
-The other three suites:
+The other suites:
 
 - `tests/functional/` — one module per harness function (twelve), over the real command entry
-  point.
+  point, plus `test_log_replay.py` (golden-fixture log replay).
+- `tests/functional/adapter/` — the adapter end to end, one module per hook (H0–H7) plus the
+  dispatch plumbing.
 - `tests/unit/adapter/` — the adapter's class-level suite (`HookBinding`, `HookClassifier`,
-  `EventClass`, `SessionTracker`, `Adapter`, `HookRenderer`, command runner).
+  `EventClass`, `SessionTracker`, session-id derivation, `Adapter`, `HookRenderer`, command
+  runner).
 - `tests/adapter/` — the adapter's **host-binding** suite: the hook map, the adapter
-  configuration, the dispatch funnel, and the two seam contracts. These assert the declarative
-  binding data and its contracts, not Python behavior.
+  configuration, the dispatch funnel, the two seam contracts, and the hook / agent-hook /
+  settings rendering. These assert the declarative binding data, its contracts, and the
+  rendered output, not adapter Python behavior.
 
 ### Isolation
 
@@ -307,72 +311,72 @@ Every test method carries a docstring citing the spec clause it exists to satisf
 function number and the clause ("Rule 1/4", "invariant 3", "precondition (E) 2", "C8"). This is
 what makes the `product-owner` traceability gate mechanical rather than archaeological.
 
-## 6. Current status — 2026-08-21
+## 6. Current status — 2026-11-04
 
-Verified directly: `git log --oneline -8` and `python3 -m pytest tests -q` (352 passed).
-
-```text
-0ce213f feat: vscode-github-copilot-chat adapter — classification, tracking, orchestration, rendering
-5d29f15 feat: harness services — session lifecycle, context, step, model, and checking
-d97537d feat: configuration plane — fail-fast ConfigLoader and typed configuration views
-5adc337 feat: artifact store — valid-by-construction workspace reads over committed state
-2d1c26c feat: harness foundations — errors, utils, and the session log store
-3dd1d9b Refactor artifact check handling in harness
-24524f5 refactor: align contracts and class design — inquiry/report envelopes, typed I/O, canonical refs
-f2ff248 refactor: update sibling reference to saf-agentic-organization
-```
-
-`3dd1d9b` is `origin/main`; the five commits above it are local and unpushed, per the standing
-directive.
+Release **v1.0.0-alpha.1** is in preparation. Verified directly against the tree at
+`ead92a3` (the merge of PR #10, `chore/architecture-alignment`) with
+`python3 -m pytest --collect-only -q tests/<plane>` and `make verify`.
 
 | Wave | State |
 | --- | --- |
 | 0 — plan and scaffolding | Complete |
-| 1 — foundations, adapter units, fixtures | Complete (`2d1c26c`, `5adc337`, `d97537d`, `0ce213f`) |
-| 2 — services for all twelve functions | Complete (`5d29f15`) |
-| 3 — commands, `application.py`, `harness.py` wiring | **In flight** — `src/commands/` and `src/application.py` do not yet exist |
-| 4 — functional suites | **Not started** — `tests/functional/` does not yet exist |
-| 5 — gates | Not started |
+| 1 — foundations, adapter units, fixtures | Complete |
+| 2 — services for all twelve functions | Complete |
+| 3 — commands, `application.py`, `harness.py` wiring | Complete — `src/commands/` holds one command + inquiry class per function (twelve each), `src/application.py` is the composition root, `harness.py` the entry shim |
+| 4 — functional suites | Complete — `tests/functional/` covers all twelve functions plus golden log replay; `tests/functional/adapter/` drives H0–H7 and the dispatch plumbing end to end |
+| 5 — gates | Open — see [§7](#7-known-gaps-and-risks) for what still blocks the `product-owner` gate |
 
-Landed across the five local commits: `errors.py`, `utils/`, `stores/session_log_store/`,
-`stores/artifact_store/`, `config/` (fail-fast `ConfigLoader` plus the typed configuration
-views), the services for all twelve functions (`session_lifecycle`, `context_resolution`,
-`step_resolution`, `model_resolution`, `checking`), and the adapter (`HookBinding`,
-`HookClassifier` with `EventClass`, `SessionTracker`, `Adapter`, `HookRenderer`, command
-runner).
+Implementation is complete: all twelve harness functions (0 `start-session` … 11
+`end-session`) and the `vscode-github-copilot-chat` adapter (`HookBinding`, `HookClassifier`
+with `EventClass`, `SessionTracker`, session-id derivation (`session_identity.py`), `Adapter`,
+`HookRenderer`, command runner, `adapters/dispatch.sh`, and the `adapters/render_hooks.py`
+installer behind `make install-hooks`).
 
-Suite total: **352 passing**, across `tests/unit/{utils,config,stores,services,adapter}` and
-`tests/adapter/`.
+Test planes — all implemented and green under `make verify` (counts are a snapshot at the
+time of this refresh; `make verify` is authoritative):
+
+| Plane | Location | Tests |
+| --- | --- | --- |
+| Unit — core | `tests/unit/{utils,config,stores,services,commands}`, `test_application.py`, `test_errors.py` | 447 |
+| Unit — adapter | `tests/unit/adapter/` | 156 |
+| Functional — core | `tests/functional/` (one module per function, plus `test_log_replay.py` and `test_unreadable_logs.py`) | 189 |
+| Functional — adapter | `tests/functional/adapter/` (H0–H7, dispatch plumbing, hook bootstrap) | 65 |
+| Adapter conformance | `tests/adapter/` (hook map, adapter configuration, dispatch funnel, hook contracts, hook / agent-hook / settings rendering) | 85 |
+| **Total** | `tests/` | **942** |
 
 ## 7. Known gaps and risks
 
-Recorded honestly — every item below is real and currently open.
+Recorded honestly — every item below is real and currently open unless marked resolved.
 
-**Traceability gap — blocks the `product-owner` gate.** Several test modules carry no
-per-test spec citation, so the clause → test map cannot be built mechanically for them:
+**Resolved since 2026-08-21.** The `Makefile` is no longer stale: `verify` runs the whole
+pytest suite, `unit` / `functional` / `adapter` run one plane each, `test` aliases `verify`, and
+the `check-catalog` / `tests/integration/` references are gone.
 
-- `tests/unit/stores/session_log_store/test_session_log_store.py` — 13 tests, **0** docstrings;
-- `tests/adapter/` — all four modules (`test_hooks_map.py`, `test_adapter_conf.py`,
-  `test_dispatch_funnel.py`, `test_hook_contracts.py`), 21 tests, **0** docstrings;
-- `tests/unit/stores/artifact_store/test_artifact_store.py` — 12 tests, **3** docstrings
-  (a partial gap, in addition to the two named above).
+**Traceability gap — blocks the `product-owner` gate.** Most of the original gap is closed —
+`tests/unit/stores/session_log_store/` and every `tests/adapter/` module now cite a clause per
+test. What remains without a per-test docstring (11 of the suite's test functions):
 
-A secondary inconsistency: `tests/unit/utils/` and `tests/unit/config/` use a literal `Spec:`
-docstring prefix, while `tests/unit/services/` and `tests/unit/adapter/` cite the clause without
-it ("Rule 1/4: …"). Both cite; only one form is greppable. Settle on one before the gate.
+- `tests/unit/stores/artifact_store/test_artifact_store.py` — 20 tests, **11** docstrings
+  (a partial gap);
+- `tests/unit/utils/test_named_file.py` — 2 tests, **0** docstrings.
+
+A secondary inconsistency, still open: `tests/unit/utils/` and `tests/unit/config/` use a
+literal `Spec:` docstring prefix, while `tests/unit/services/` and `tests/unit/adapter/` cite
+the clause without it ("Rule 1/4: …"). Both cite; only one form is greppable. Settle on one
+before the gate.
 
 **Two commits landed without peer review.** `5d29f15` (services) and `0ce213f` (adapter) were
-committed outside the pair protocol — no navigator challenge, no diff review. Both are under a
-**catch-up `system-architect` review**. Until it closes, treat their content as unratified: a
+committed outside the pair protocol — no navigator challenge, no diff review. Both have since
+landed on `main`, but the repository records no close-out of the **catch-up `system-architect`
+review**; it stays open until the Wave 5 `system-architect` gate ratifies them. Until then, a
 finding against them is a normal correction, not a regression.
 
-**The `Makefile` `verify` target is stale.** It still references `tests/integration/test_catalog.py`
-(via `check-catalog`, which the `verify` documentation describes as part of the gate) and
-describes a pre-refactor CLI shape (`check-artifact` / `check-step`) that the twelve-command
-surface replaced. `tests/integration/` does not exist. Fixing it belongs to Wave 3 or later —
-the `Makefile` is explicitly outside this document's lane.
-
-**Adapter open items I13(a) and I13(d) are out of test scope.** (a) whether a steering message
+**Adapter open items I4 and I13(a)/(d) remain open — live-host verification only.** They are
+the permanently tracked items in
+[`adapter/vscode-github-copilot-chat/spec.md`](adapter/vscode-github-copilot-chat/spec.md).
+I4's narrow tool-boundary-stamp exception is specified and implemented (H4), but the real fix —
+a host-native attribution surface outside model-visible arguments — is tracked, not scheduled.
+I13(a) and I13(d) are out of test scope: (a) whether a steering message
 submitted mid-execution fires `UserPromptSubmit` on the native panel path, and (d) hooks being
 a preview feature whose setting names and event set may drift. Neither is closable by a test —
 (a) needs live host experimentation, and (d) is a drift risk whose intended detector is the

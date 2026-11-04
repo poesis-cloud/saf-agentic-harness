@@ -52,6 +52,10 @@ class TestHooksMap:
                 "type": "command",
                 "command": f"{{{{ADAPTERS_DIR}}}}/dispatch.sh {event} {ADAPTER_ENV}",
                 "cwd": "{{FRAMEWORK_DIR}}",
+                "env": {
+                    "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}",
+                    "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}",
+                },
                 "timeout": timeout,
             }
             assert shlex.split(entry["command"]) == [
@@ -108,6 +112,7 @@ class TestHooksMap:
         assert tools_yaml["deleteTools"] == []
         assert tools_yaml["pathKeys"] == ["filePath", "dirPath"]
         assert tools_yaml["nestedPathKeys"] == ["replacements[].filePath"]
+        assert tools_yaml["patchKeys"] == ["input"]
         assert tools_yaml["mediatedCommandTools"] == ["run_in_terminal"]
         assert tools_yaml["mediatedCommandKeys"] == ["command"]
         assert tools_yaml["guardedShellTools"] == [

@@ -134,6 +134,28 @@ class TestResolveStep:
         entries = assert_journal_contract(harness, orchestrator_session)
         assert entries[-1]["report"] == report
 
+    def test_a_session_already_driving_an_instance_is_refused_another_workflow(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 3, invariant 9): an orchestrator session drives at most one
+        workflow instance — naming a second workflow is refused (`state-error`,
+        `session-instance-bound`), journaled without a `workflowInstanceId`."""
+        first = harness.invoke(FUNCTION, sessionId=orchestrator_session, workflowSlug="planning")
+
+        run = harness.invoke(
+            FUNCTION, sessionId=orchestrator_session, workflowSlug="verification"
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert run.status == "state-error"
+        assert run.error_code == "session-instance-bound"
+        assert "workflowInstanceId" not in report["context"] or (
+            report["context"]["workflowInstanceId"] is None
+        )
+        assert first.report["context"]["workflowInstanceId"] in run.outcome["error"]["message"]
+        entries = assert_journal_contract(harness, orchestrator_session)
+        assert entries[-1]["report"] == report
+
     def test_an_unknown_workflow_slug_is_refused_and_journaled(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:

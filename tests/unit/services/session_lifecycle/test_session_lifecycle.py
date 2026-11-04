@@ -590,6 +590,23 @@ class TestSessionLifecycle:
         assert raised.value.code == "invalid-inquiry"
         assert not (workspace / "logs").exists()
 
+    def test_a_conflict_whose_entry_is_lost_keeps_its_primary_error(self) -> None:
+        """Spec Outcomes rule 1, `system-error`: an error report whose own entry is lost
+        keeps its primary error — `session-conflict` stays a non-retryable refusal."""
+        log = Log(session_id="sess-root", entries=(_start_entry("sess-root", "orchestrator"),))
+        lifecycle = SessionLifecycle(
+            session_log_store=_FailingSessionLogStore(log),
+            access_control_list=_ACL,
+        )
+
+        report = lifecycle.start_session(
+            agent="reviewer", session_id="sess-root", parent_session_id=None
+        )
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error.code == "session-conflict"
+        assert report.outcome.error.retryable is False
+
     def test_end_session_reports_a_system_error_when_the_append_fails(self) -> None:
         """Spec Outcomes rule 1, `system-error`: log append failing still returns the
         report; the entry is lost — best-effort."""

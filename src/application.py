@@ -66,6 +66,7 @@ _EXIT_OK = 0
 _EXIT_INVALID_INQUIRY = 1
 _EXIT_USAGE = 2
 _EXIT_CONFIGURATION = 3
+_EXIT_SYSTEM = 4
 
 # The function-specific flags each command's `in` object carries, beside the shared
 # session attribution pair: (flag spellings, contract property, set-valued).
@@ -318,6 +319,8 @@ class Application:
 
         Spec (Outcomes rule 4): an inquiry its own contract rejects produces no report
         — it surfaces here, at the command exit plane, with stderr and a nonzero exit.
+        No exception crosses this boundary: a failure no service classified is the
+        environment failing — it surfaces on the same plane as `system-error`.
         """
         arguments = list(argv)
         if not arguments:
@@ -335,8 +338,15 @@ class Application:
             inquiry = command.parse_inquiry(_parse_inquiry_arguments(function, flags))
         except InquiryError as failure:
             return _refuse(f"harness: {failure.code}: {failure.message}", _EXIT_INVALID_INQUIRY)
-        report = command.execute_function(inquiry)
-        sys.stdout.write(_render_report(report.to_dict()) + "\n")
+        try:
+            rendered = _render_report(command.execute_function(inquiry).to_dict())
+        except Exception as failure:  # noqa: BLE001 — the command boundary backstop
+            return _refuse(
+                f"harness: system-error: {function} failed unexpectedly: "
+                f"{type(failure).__name__}: {failure}",
+                _EXIT_SYSTEM,
+            )
+        sys.stdout.write(rendered + "\n")
         return _EXIT_OK
 
 

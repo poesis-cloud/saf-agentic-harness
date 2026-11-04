@@ -172,6 +172,33 @@ when the hook entry declares one.
 ⚠ The host **fails open**: only a completed hook (exit 0 with a structured deny, or exit 2)
 blocks anything. See inconsistency I6.
 
+### Bootstrap failure (fail closed)
+
+A hook that cannot even reach its handling — no interpreter, no `FRAMEWORK_DIR`, an
+unreadable `.env`, a refused binding, an unexpected crash — must never surface as an "other"
+exit, which this host turns into a silent pass-through. Two layers close that gap:
+
+- **The hook carries its own bootstrap.** Every rendered entry records `FRAMEWORK_DIR` and
+  `SAF_HARNESS_PYTHON` (the interpreter `make install-hooks` validated) in its `env`, so a
+  hook runs from its registration alone and never depends on the environment the host
+  happened to inherit. `dispatch.sh` runs the adapter under `SAF_HARNESS_PYTHON` (falling
+  back to `python3` only for a hand-written registration); the adapter runs the harness
+  under its own `sys.executable`; and the adapter reads the layout keys
+  (`FRAMEWORK_*_DIR`) from `FRAMEWORK_DIR/.env` exactly as the core config loader does —
+  the process environment wins over the file. A missing `FRAMEWORK_DIR` is refused, never
+  defaulted: a guessed root would govern the wrong tree.
+- **Any failure before or around the hook handling exits 2 with a stderr diagnostic.**
+  The adapter's entry point converts every escaping exception into exit 2; `dispatch.sh`
+  maps every adapter exit other than `0` and `2` (an interpreter that cannot start, a
+  missing module, a signal) to exit 2 naming the event, the status, and the interpreter.
+  Exit 2 is the host's blocking channel: the action is refused and the model is told why.
+
+This is distinct from a **harness command error** once the hook is running: those are
+rendered per hook as specified below (H0, for instance, answers exit 0 with a
+`systemMessage` and never exit 2). A bootstrap failure at `Stop`/`SubagentStop` also answers
+exit 2, which on this host asks the agent to continue; the host's own `stop_hook_active`
+guard bounds the loop, and the diagnostic names the repair (`make install-hooks`).
+
 **Structured output** — common fields `continue`, `stopReason` (short-circuits remaining
 hooks), `systemMessage` (user-visible warning); event-specific fields per hook below.
 Multi-hook collapsing: `PreToolUse` decisions collapse most-restrictive-wins
@@ -560,6 +587,7 @@ untouched:
         "type": "command",
         "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat value-management-officer",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 30
       }
     ]
@@ -670,6 +698,7 @@ Registers the step session (function 0, with parent) and injects the step's decl
         "type": "command",
         "command": "adapters/dispatch.sh SubagentStart vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 60
       }
     ]
@@ -790,6 +819,7 @@ adapter classifies by `tool_name`):
         "type": "command",
         "command": "adapters/dispatch.sh PreToolUse vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 60
       }
     ]
@@ -917,8 +947,21 @@ the call:
   in v1 anyway: an explicit non-goal, see function 8's failure modes).
 - Path extraction probes `tool_input` per `pathKeys` (`filePath`, `dirPath`, `path`);
   `multi_replace_string_in_file` yields `replacements[].filePath` — **one function-8
-  invocation per distinct path** (see I8). Absolute host paths are relativized to the
-  workspace root before invocation.
+  invocation per distinct path** (see I8). A patch-document tool (`apply_patch`) names its
+  paths only in its patch text: `patchKeys` (`input`) is parsed for the `*** Add File:` /
+  `*** Update File:` / `*** Delete File:` / `*** Move to:` headers, and each path carries
+  the action its header performs (`create` / `update` / `delete`; a move vacates its source
+  — `delete` — and creates its destination), so a patch that deletes or renames is denied in
+  v1 like any `delete`. The patch is read as the host reads it — lines split on `\n` only,
+  the header path taken verbatim after the header's single space, never trimmed. A header
+  path that is empty or carries surrounding whitespace (a CR included) would be authorized
+  under a different name than the one the host writes, so it makes the whole call
+  unextractable. Absolute host paths are relativized to the workspace root before
+  invocation.
+- **Fail closed on an unextractable write.** A registered session's call to a DECLARED write
+  tool from which no artifact path can be extracted is **denied** without invoking the
+  harness (reason names the tool): the adapter cannot authorize what it cannot name, and
+  passing it through would let an unauthorized write land.
 - A write whose every path falls **outside** the workspace artifact layout (e.g. the
   framework's own source) passes through — exit 0, empty output, unlogged: the harness
   governs the workspace data plane only. **Exception**: a path under the workspace logs
@@ -1070,6 +1113,7 @@ into workspace state or reverts it, feeding the failure back to the writing agen
         "type": "command",
         "command": "adapters/dispatch.sh PostToolUse vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 60
       }
     ]
@@ -1106,7 +1150,10 @@ call-level atomicity is the core's, not assembled here):
 ```
 
 Non-artifact paths are excluded from the set; a call whose every path is non-artifact passes
-through (exit 0, empty output), as do non-write tools.
+through (exit 0, empty output), as do non-write tools. A registered session's landed DECLARED
+write from which no artifact path can be extracted is never silently accepted: it renders
+`decision: block` naming the tool (no harness invocation — there is no set to validate),
+mirroring H3's fail-closed denial.
 
 **Out** (stdout, exit 0)
 
@@ -1262,6 +1309,7 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
         "type": "command",
         "command": "adapters/dispatch.sh SubagentStop vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 10
       }
     ],
@@ -1270,6 +1318,7 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
         "type": "command",
         "command": "adapters/dispatch.sh Stop vscode-github-copilot-chat",
         "cwd": "{{FRAMEWORK_DIR}}",
+        "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" },
         "timeout": 10
       }
     ]
@@ -1374,6 +1423,16 @@ VS Code hook engine (permissionDecision / decision:block / additionalContext / u
   fail-fast configuration load at instantiation
   validates the adapter binding (hooks.yaml, tools.yaml, models.yaml, and these two
   contracts' presence) like any other configuration (harness core spec — Internal validation).
+  The adapter's OWN loader (`load_hook_binding`) is fail-fast too, independently of the
+  harness: on every hook it validates `tools.yaml` / `models.yaml` against
+  `contracts/conf/adapters/tools.conf.schema.json` / `models.conf.schema.json` through the
+  shared, harness-core-free `adapters/binding_contract.py` (reusable by every adapter), and
+  refuses an empty probe list a declared gate depends on (`toolKeys`, `inputKeys`,
+  `hostSessionKeys`; `pathKeys`/`nestedPathKeys`/`patchKeys` when write tools are
+  declared; `mediatedCommandKeys` when command tools are declared) — an empty probe would classify
+  every firing as a pass-through, a silent fail-open. A refused binding is a bootstrap
+  failure: the hook exits 2 with the diagnostic on stderr (see
+  [Bootstrap failure](#bootstrap-failure-fail-closed)).
 - **Seam 3 splits between this adapter and the harness core, with exactly ONE edge
   crossing it.** The event→boundary→functions orchestration is this adapter's OWN code
   (`HookBinding`, `HookClassifier` + `EventClass`, `SessionTracker`, `Adapter`,
@@ -1423,12 +1482,13 @@ must forward a third optional argument (H0's scoping agent slug), which its curr
 Three render targets, all from this adapter's sources, all rendered by this repo in ONE
 installation run; see [Rendering guarantees](#rendering-guarantees-decision-c).
 
-Four placeholders are substituted at install time:
+Five placeholders are substituted at install time:
 
 | Placeholder | Substituted with | Derived from |
 | --- | --- | --- |
 | `{{ADAPTERS_DIR}}` | this harness checkout's `adapters/` directory | the renderer's OWN location (`Path(__file__).parent`) |
 | `{{FRAMEWORK_DIR}}` | the absolute framework root | the `--framework-dir` argument, required and required to exist |
+| `{{HARNESS_PYTHON}}` | the absolute interpreter every hook runs under, recorded in each entry's `env` as `SAF_HARNESS_PYTHON` | the `--python` argument (Make: `HARNESS_PYTHON`), defaulting to the interpreter running the renderer; refused unless it imports the harness requirements |
 | `{{AGENT_SLUG}}` | the scoping orchestrator's slug (H0 target only) | the framework's own workflow catalog — every `orchestrator:` it names |
 | `{{HOOKS_LOCATION}}` | where the hooks file actually landed (settings target only) | the resolved `--dest`, workspace-relative when it is inside the framework root |
 
@@ -1442,11 +1502,11 @@ to the framework root names nothing (see host facts).
 ```json
 {
   "hooks": {
-    "SubagentStart": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PreToolUse":    [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "PostToolUse":   [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "timeout": 60 } ],
-    "SubagentStop":  [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ],
-    "Stop":          [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "timeout": 10 } ]
+    "SubagentStart": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStart vscode-github-copilot-chat", "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 60 } ],
+    "PreToolUse":    [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PreToolUse vscode-github-copilot-chat",    "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 60 } ],
+    "PostToolUse":   [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh PostToolUse vscode-github-copilot-chat",   "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 60 } ],
+    "SubagentStop":  [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh SubagentStop vscode-github-copilot-chat",  "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 10 } ],
+    "Stop":          [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh Stop vscode-github-copilot-chat",          "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 10 } ]
   }
 }
 ```
@@ -1461,7 +1521,7 @@ to the framework root names nothing (see host facts).
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat {{AGENT_SLUG}}", "cwd": "{{FRAMEWORK_DIR}}", "timeout": 30 } ]
+    "UserPromptSubmit": [ { "type": "command", "command": "{{ADAPTERS_DIR}}/dispatch.sh UserPromptSubmit vscode-github-copilot-chat {{AGENT_SLUG}}", "cwd": "{{FRAMEWORK_DIR}}", "env": { "FRAMEWORK_DIR": "{{FRAMEWORK_DIR}}", "SAF_HARNESS_PYTHON": "{{HARNESS_PYTHON}}" }, "timeout": 30 } ]
   }
 }
 ```
@@ -1589,6 +1649,12 @@ environment as `--env`, and imports nothing from `src/` (I15). It guarantees:
 - the `command` is absolutized from the RENDERER'S own location — never from `FRAMEWORK_DIR`,
   the wrong anchor that this whole section exists to correct;
 - `{{FRAMEWORK_DIR}}` resolves to an absolute framework root that exists on disk;
+- **every entry carries its bootstrap in `env`** — `FRAMEWORK_DIR` and `SAF_HARNESS_PYTHON`
+  (see [Bootstrap failure](#bootstrap-failure-fail-closed)). The interpreter is absolute,
+  exists, and is proven at render time to import the harness requirements
+  (`requirements.txt`: PyYAML, jsonschema, cel-python); otherwise the render is refused and
+  nothing is written. It is recorded unresolved, since a virtualenv is selected by the
+  location of its interpreter symlink. An `env` that is not a string map is refused;
 - **rendering is all-or-nothing, across all three targets.** Every output is validated in
   memory and files are written only once all of them pass: no `{{…}}` survives anywhere, every
   entry carries `type`/`command`/`cwd`, `cwd` is an absolute existing directory, the command's
@@ -1699,7 +1765,10 @@ attribution surface) and I13(a)/(d) (host verifications only live experimentatio
   `nestedPathKeys` — dotted path expressions with `[]` array fan-out
   (`replacements[].filePath`) — plus the previously undeclared binding keys
   (`hostStepSessionKeys`, `hostStepActorKeys`, `mediatedCommandTools`, `mediatedCommandKeys`),
-  and the shipped `tools.yaml` validates against it.
+  and the shipped `tools.yaml` validates against it. `patchKeys` (optional) closes the
+  `apply_patch` gap: that tool names its paths only inside its patch document, so each file
+  header is a path (H3); a declared write yielding no path at all fails closed (H3 deny / H5
+  block) instead of passing through.
 - **I9 — RESOLVED: the guarded-shell class exists.** The binding vocabulary now carries
   `guardedShellTools` (contract + this binding's `tools.yaml`: `run_in_terminal`,
   `create_and_run_task`): a non-harness command on a guarded tool that textually references a

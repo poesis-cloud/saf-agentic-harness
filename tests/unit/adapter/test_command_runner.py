@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -52,7 +53,7 @@ class TestSubprocessCommandRunner:
         )
 
         assert process.argv == (
-            "python3",
+            sys.executable,
             "/framework/harness.py",
             "check-step-authorization",
             "--session-id",
