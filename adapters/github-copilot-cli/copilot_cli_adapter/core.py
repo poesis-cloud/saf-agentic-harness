@@ -465,8 +465,13 @@ class Adapter:
     def _answer_harness_request(self, record: SessionRecord, request: HarnessRequest) -> Decision:
         """H4 — run the requested function FOR the observed session and hand its report back
         as the only preToolUse text the agent sees: the deny reason. Attribution is the
-        hook's own (the record keyed by the payload's sessionId), never the agent's."""
-        inquiry = {**request.inquiry, "sessionId": record.session_id}
+        hook's own (the record keyed by the payload's sessionId, with the parent it tracks),
+        never the agent's."""
+        inquiry = {
+            **request.inquiry,
+            "sessionId": record.session_id,
+            "parentSessionId": record.parent_session_id,
+        }
         try:
             report = self._runner.run_function(request.function, inquiry)
         except HarnessCommandError as failure:

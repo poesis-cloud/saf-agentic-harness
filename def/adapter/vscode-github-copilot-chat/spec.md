@@ -1067,7 +1067,11 @@ model-authored command is stamped or rewritten.
    that; the harness core itself refuses it via C8 — see Invariant 4.)
 5. Invoke the function through the command API with the request's flags (kebab-case →
    camelCase inquiry fields, e.g. `--workflow-slug` → `workflowSlug`) plus
-   `sessionId: <the resolved current session>`.
+   `sessionId: <the resolved current session>` and
+   `parentSessionId: SessionTracker.resolve_parent(sanitized(session_id))`, the session
+   whose dispatch opened it (`null` for a turn session). The core's mediated attribution rule
+   takes both ids from host-observed state, so a step session's request is journaled under
+   its parent.
 6. Answer with a **deny** whose `permissionDecisionReason` is
    `SAFe agentic harness RESULT (<function>): <directive>` followed by a blank line and the
    report as compact JSON, plus `additionalContext` telling the agent the denial *is* the

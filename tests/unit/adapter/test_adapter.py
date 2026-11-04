@@ -804,7 +804,11 @@ class TestAdapter:
         assert runner.calls == [
             RunnerCall(
                 function="resolve-step",
-                inquiry={"workflowSlug": "verification", "sessionId": TURN_SESSION},
+                inquiry={
+                    "workflowSlug": "verification",
+                    "sessionId": TURN_SESSION,
+                    "parentSessionId": None,
+                },
             )
         ]
         hook_output = assert_valid_stdout(decision.stdout)["hookSpecificOutput"]
@@ -862,6 +866,32 @@ class TestAdapter:
 
         assert [call.inquiry["sessionId"] for call in runner.calls] == ["step-session-a"]
 
+    def test_journals_a_step_request_with_the_tracked_parent_session(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """Core mediated attribution: a step session's request carries both its session
+        and the parent the tracker observed opening it, never a null parent.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        tracker.push_current(HOST_SESSION, "step-session-a")
+
+        adapter.handle_hook_event(
+            _event(
+                _pre_tool_payload(
+                    "run_in_terminal", {"command": "harness.py resolve-step-model"}
+                )
+            )
+        )
+
+        assert runner.calls == [
+            RunnerCall(
+                function="resolve-step-model",
+                inquiry={"sessionId": "step-session-a", "parentSessionId": TURN_SESSION},
+            )
+        ]
+
     @pytest.mark.parametrize(
         "command",
         [
@@ -885,7 +915,7 @@ class TestAdapter:
         assert runner.calls == [
             RunnerCall(
                 function="resolve-step",
-                inquiry={"workflowSlug": "v", "sessionId": TURN_SESSION},
+                inquiry={"workflowSlug": "v", "sessionId": TURN_SESSION, "parentSessionId": None},
             )
         ]
 

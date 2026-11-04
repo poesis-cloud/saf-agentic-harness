@@ -206,7 +206,9 @@ own permission flow still applies to what the harness lets through.
    and no harness function runs. An accepted request is RUN BY THE HOOK: the agent's flags
    become the inquiry (`--workflow-slug x` → `workflowSlug: x`), `sessionId` is the session
    the record for the payload's `sessionId` names (the turn session, or the step session in
-   a subagent), and the function runs through the same command runner, interpreter and
+   a subagent), `parentSessionId` is the parent that record tracks (`null` for a turn
+   session, the orchestrator session that H1 observed opening a step session), and the
+   function runs through the same command runner, interpreter and
    `FRAMEWORK_*` environment as every other boundary. The hook then answers
    `permissionDecision: deny` with the reason
    `SAFe agentic harness RESULT (<function>): <directive>` + a blank line + the report as the

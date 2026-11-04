@@ -282,15 +282,19 @@ class Adapter:
         rejected, inquiry = _parse_harness_request(command, function)
         if rejected is not None:
             return self._reject(rejected)
-        session_id = self._tracker.resolve_current(
-            sanitize_identifier(event.raw_host_session_id)
-        )
+        host_id = sanitize_identifier(event.raw_host_session_id)
+        session_id = self._tracker.resolve_current(host_id)
         if session_id is None:
             return self._reject(
                 "no registered agent session to attribute this harness command to"
             )
         return self._answer_harness_request(
-            function, {**inquiry, "sessionId": session_id}
+            function,
+            {
+                **inquiry,
+                "sessionId": session_id,
+                "parentSessionId": self._tracker.resolve_parent(host_id),
+            },
         )
 
     def _answer_harness_request(

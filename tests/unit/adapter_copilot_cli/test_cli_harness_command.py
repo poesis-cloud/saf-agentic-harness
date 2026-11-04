@@ -82,7 +82,7 @@ def test_the_hook_runs_the_request_and_returns_the_report(rig: Rig, command: str
     assert "not an error" in reason and "do not re-issue" in reason
     assert _report_in(reason) == RESOLVED
     assert _harness_calls(rig) == [
-        ("resolve-step", {"workflowSlug": "pi-planning", "sessionId": TURN_SESSION})
+        ("resolve-step", {"workflowSlug": "pi-planning", "sessionId": TURN_SESSION, "parentSessionId": None})
     ]
 
 
@@ -100,22 +100,22 @@ def test_the_command_is_never_modified(rig: Rig) -> None:
         assert decision["permissionDecision"] == "deny"
 
 
-def test_resolve_step_model_carries_only_the_observed_session(rig: Rig) -> None:
+def test_a_turn_request_carries_the_observed_session_and_no_parent(rig: Rig) -> None:
     rig.open_turn()
     rig.runner.script["resolve-step-model"] = {**RESOLVED, "context": {"function": "resolve-step-model"}}
     decision = _command(rig, f"python {HARNESS} resolve-step-model")
     assert decision["permissionDecisionReason"].startswith(f"{HARNESS_RESULT} (resolve-step-model)")
-    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": TURN_SESSION})]
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": TURN_SESSION, "parentSessionId": None})]
 
 
-def test_attribution_comes_from_the_payload_session(rig: Rig) -> None:
+def test_attribution_comes_from_the_payload_session_and_its_tracked_parent(rig: Rig) -> None:
     rig.open_turn()
     rig.open_step()
     rig.runner.script["resolve-step-model"] = RESOLVED
     _command(rig, f"python {HARNESS} resolve-step-model", host=SUBAGENT)
-    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": SUBAGENT})]
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": SUBAGENT, "parentSessionId": TURN_SESSION})]
     _command(rig, f"python {HARNESS} resolve-step-model", host=HOST)
-    assert _harness_calls(rig)[-1] == ("resolve-step-model", {"sessionId": TURN_SESSION})
+    assert _harness_calls(rig)[-1] == ("resolve-step-model", {"sessionId": TURN_SESSION, "parentSessionId": None})
 
 
 def test_a_harness_error_report_is_still_the_result(rig: Rig) -> None:
@@ -139,7 +139,7 @@ def test_a_harness_refusal_is_relayed_as_a_rejection(rig: Rig) -> None:
         f"{HARNESS_REJECTED}: harness: invalid-inquiry: harness.py resolve-step: "
         "unrecognized arguments: --bogus y"
     )
-    assert _harness_calls(rig) == [("resolve-step", {"bogus": "y", "sessionId": TURN_SESSION})]
+    assert _harness_calls(rig) == [("resolve-step", {"bogus": "y", "sessionId": TURN_SESSION, "parentSessionId": None})]
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,7 @@ def test_bash_on_posix_is_answered_the_same_way(tmp_path, binding) -> None:
         )
     )
     assert decision["permissionDecisionReason"].startswith(HARNESS_RESULT)
-    assert runner.calls[-1] == ("resolve-step-model", {"sessionId": session})
+    assert runner.calls[-1] == ("resolve-step-model", {"sessionId": session, "parentSessionId": None})
 
 
 @pytest.mark.parametrize(
