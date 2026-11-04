@@ -222,7 +222,7 @@ def rig(tmp_path: Path, binding: ToolBinding) -> Rig:
         context_renderer=ContextRenderer(instructions, skills),
         runner=runner,
         workspace_dir=WORKSPACE,
-        invocation=make_invocation(),
+        invocation=make_invocation(layout_dir=str(tmp_path / "state" / "layouts")),
         diagnostic=diagnostics.append,
     )
     return Rig(adapter, runner, tracker, binding, diagnostics)

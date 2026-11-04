@@ -73,10 +73,11 @@ runtime, not a window around it. A user of the CLI alone installs the same adapt
 | `subagentStart` (global) | **H1** step-started | `start-session` (step, parent = dispatcher), `resolve-step-instructions`, `resolve-step-skills` | `additionalContext` = hint + step context |
 | `preToolUse` · `task` (global) | **H2** step-starting | `check-step-preconditions` | deny on fail; deny `mode: background` |
 | `preToolUse` · `create`/`edit`/`str_replace_editor`/`apply_patch` | **H3** write-starting | `check-step-authorization` per target path | deny unless EVERY target of EVERY write in the batch is allowed. An unextractable target is denied. |
-| `preToolUse` · `powershell`/`bash` running `harness.py` | **H4** mediated attribution | none (stamp only) | `modifiedArgs.command` = canonical line with `--session-id`; anything else that mentions `harness.py` is denied |
+| `preToolUse` · `powershell`/`bash` running `harness.py` | **H4** mediated attribution | none (stamp only) | `modifiedArgs.command` = canonical line with `--env-file` and `--session-id`; anything else that mentions `harness.py` is denied |
 | `preToolUse` · other `powershell`/`bash` | I9 shell guard | none | deny when the command names the workspace or `logs/` |
 | `postToolUse` · write tool | **H5** write-ended | `check-step-artifact` | `modifiedResult` + `additionalContext` on revert |
 | `postToolUse` / `postToolUseFailure` · `task` | **H6** step-ended | `check-step-postconditions` (dispatcher's session) | `additionalContext` on fail |
+| `postToolUseFailure` · `powershell`/`bash` running `harness.py` | H4 explanation | none | `additionalContext`: the line was the adapter's rewrite; a denial is the host permission layer's |
 | `postToolUse` · any (first one only, if H0 context never landed) | H0 fallback | `resolve-*-instructions/skills` | `additionalContext` with load directives |
 | `subagentStop` (global) | **H7** step session ended | `end-session` (step) | none |
 | `agentStop` (global) | **H7** turn session ended | `end-session` (the stopping agent's own session) | none |
@@ -84,9 +85,20 @@ runtime, not a window around it. A user of the CLI alone installs the same adapt
 | `errorOccurred` (global) | diagnostic | none | none (stderr only) |
 
 **Agents never need hook environment.** The agent's shell inherits nothing from a hook's `env`,
-so H4 REWRITES the authorized command. The rewritten line has explicit `FRAMEWORK_*`
-assignments, the installed interpreter, the installed harness, and the stamped session. This
-removes any dependency on user-level variables (`setx`) for agent-run harness commands.
+so H4 REWRITES the authorized command to name the installed interpreter, the installed
+harness, a **layout file** (`--env-file`), and the stamped session. This removes any
+dependency on user-level variables (`setx`) for agent-run harness commands.
+
+**The rewritten line must stay approvable.** The runtime's permission layer checks the
+REWRITTEN command (live trial, app 1.0.102), and it can only match a saved rule such as
+`<interpreter path>:*` against a plain command led by a bare word. A `$env:X='…';` or `X=…`
+prefix, or a quoted interpreter after `&`, makes the line unapprovable, so every unattended
+run is denied. The canonical line is therefore ONE plain command: no assignment, no chaining,
+and the interpreter, harness and layout file paths unquoted whenever they are plain words
+(on Windows the 8.3 short form is tried first). The layout (`FRAMEWORK_DIR` and every
+`FRAMEWORK_*_DIR`, absolute) travels in a content-addressed file the adapter publishes under
+`<state dir>/layouts/layout-<sha256 prefix>.env`, which the harness loads through its
+`--env-file` option (see the core spec, *Configuration plane*).
 
 ## Session identity
 
@@ -165,10 +177,18 @@ own permission flow still applies to what the harness lets through.
    - The function must be `resolve-step` or `resolve-step-model`.
    - `--session-id`/`--parent-session-id` must be absent.
 
+   - `--env-file` must be absent: only the adapter names the layout file.
+
    Anything else → deny, with the exact accepted line in the reason. An accepted command is
    rewritten as `modifiedArgs` (all other arguments are kept):
-   - PowerShell: `$env:FRAMEWORK_DIR='…'; …; & '<python>' '<harness>' <function> --session-id <session> <flags>`
-   - bash: `FRAMEWORK_DIR='…' … '<python>' '<harness>' <function> --session-id <session> <flags>`
+   - PowerShell: `& <python> <harness> --env-file <layout file> <function> --session-id <session> <flags>`
+   - bash: `<python> <harness> --env-file <layout file> <function> --session-id <session> <flags>`
+
+   A path that is not a plain word (spaces, quotes, `$`, `&`, a leading `~` or `-`; for bash
+   also a backslash) and has no plain 8.3 form is single-quoted. That line still runs, but
+   the host can only approve it interactively; `install.py` refuses such an installation
+   unless `--allow-quoted-paths` is given. If the layout file cannot be published, the call
+   is denied (fail closed).
 
    A harness command batched with other calls is denied, because the runtime takes one
    `modifiedArgs` per firing.
@@ -186,6 +206,13 @@ own permission flow still applies to what the harness lets through.
   `check-step-postconditions`. On `fail`, return `additionalContext` with the failing
   conditions and the "re-resolve" directive. The step's result text is NOT read; the runtime
   elides it.
+- **H4 explanation:** on `postToolUseFailure` of a harness command in a governed session,
+  return `additionalContext` stating that the adapter rewrote the line (it added
+  `--env-file` and `--session-id`) and that a denial comes from the host's permission layer,
+  so the agent must not retry or edit it but tell the user to approve the interpreter. In the
+  live trial the model took the added parts for its own mistake and retried five times.
+  Whether a permission-layer denial fires `postToolUseFailure` is not yet verified; the
+  same sentence is in the session hint.
 - **H0 fallback:** if the session's context never landed (no `userPromptTransformed` firing),
   the first `postToolUse` appends it as short load directives, which fit the 10 KB cap.
 
@@ -236,6 +263,7 @@ committed.
 | `--bundle-dir` | The framework's rendered Copilot plugin bundle. Global hooks go to `<bundle>/hooks.json` (or the path a string `hooks` key in `plugin.json` names). The scoped H0 block goes into `<bundle>/agents/<orchestrator>.agent.md`. |
 | `--hooks-target plugin\|repo\|user\|none` | Where the global hook file goes: the bundle (default with `--bundle-dir`), `<target-repo>/.github/hooks/safe-harness-copilot-cli.json`, or `$COPILOT_HOME`/`~/.copilot/hooks/…`. |
 | `--python` | The absolute interpreter recorded in every entry (`exec`, and `SAF_HARNESS_PYTHON` in `env`). Defaults to the one running `install.py`, which should be the harness venv. The install is refused unless it imports the harness requirements (`yaml`, `jsonschema`, `celpy`). |
+| `--allow-quoted-paths` | Install even when the interpreter, the harness entry point or the layout-file directory (under the state dir) has no unquoted spelling. The H4 rewrite then quotes it and can only be approved interactively. Without the option such an install is refused. |
 | `--hook-style exec\|shell` | `exec` + `args` (default: no shell at all), or `powershell` + `bash` command strings. |
 | `--agents-dir`, `--agents-dest`, `--workflows-dir`, `--skip-agents`, `--dry-run` | As named. |
 
@@ -250,6 +278,10 @@ committed.
   `# >>> safe-harness copilot-cli H0 … >>>` and `# <<< safe-harness copilot-cli H0 <<<`.
   It has `command` (POSIX-quoted) and `windows` (`& '<python>' …`) with `--agent <slug>`.
   Re-running replaces the block. An unmanaged `hooks:` key is refused.
+- **Approval notice:** after writing, `install.py` prints the shell-command approval the
+  H4 rewrite needs, `<interpreter>:*`, as a `permissions-config.json` snippet
+  (`locations.<git root>.tool_approvals[{kind: commands, commandIdentifiers: [...]}]`).
+  The installer never edits the user's permission file.
 - **Orchestrators** are every `orchestrator:` named by `<fw>/workflows/**/*.workflow.conf.yaml`.
   A missing agent file refuses the install.
 - **All or nothing:** every output is rendered and validated before any file is written.
@@ -267,6 +299,7 @@ committed.
 | `apply_patch` | Not offered by the app (1.0.102). | Bound anyway. Unparseable patch → deny. |
 | `task` `mode: background` | The step returns before it ends, so H6 cannot evaluate it. | Denied in governed sessions. |
 | H6 enforcement | `postToolUse` can only inform, not undo, a returned step. | The `additionalContext` directive to re-resolve. Future: `subagentStop` `decision: block` + `reason` can force the subagent to continue. |
+| Permission layer on the H4 rewrite | The host checks the REWRITTEN harness line. Without a saved approval it asks the user; in autopilot or unattended runs it denies. | Install prerequisite: approve `<interpreter path>:*` (a `commands` approval in `permissions-config.json`), which `install.py` prints. The rewrite is kept plain and unquoted so that rule matches. Paths that need quoting can only be approved interactively. |
 | `exec` entries | Documented, but not yet observed executing in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
 | Latency | Plugin hooks start Python on every tool call in every folder. | Ungoverned firings return after one state lookup. Use a repository or project-scoped install when this matters. |
 

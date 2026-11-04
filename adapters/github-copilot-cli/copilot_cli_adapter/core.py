@@ -26,7 +26,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
-from .invocation import HarnessInvocation, unquote
+from .invocation import ENV_FILE_OPTION, HarnessInvocation, unquote
 from .paths import host_basename, relativize
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
@@ -82,6 +82,16 @@ _STRICT_HARNESS_COMMAND = re.compile(
 )
 _TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
 _TOKEN_TRIM = "'\"();|&<>`"
+
+# The rewritten line is the adapter's, not the agent's: say so, or the agent "fixes" text it
+# never wrote and retries a denial only the user can lift.
+_REWRITTEN_COMMAND_FAILED = (
+    "The SAFe agentic harness REWROTE this harness command before it ran (it added "
+    "--env-file and --session-id); you did not write those parts. If it was denied, the "
+    "denial comes from the host's permission layer, not from your command: do not retry or "
+    "edit it. Tell the user the harness interpreter must be approved (a permission rule "
+    "'<interpreter path>:*', see the harness adapter README), then stop."
+)
 
 Decision = Mapping[str, Any] | None
 Diagnostic = Callable[[str], None]
@@ -371,6 +381,12 @@ class Adapter:
         command: str,
     ) -> tuple[str | None, Mapping[str, Any] | None]:
         """Accept exactly ONE plain invocation of THE installed harness; deny all else."""
+        if ENV_FILE_OPTION in command:
+            return (
+                f"model-authored '{ENV_FILE_OPTION}' is never accepted: the adapter adds the "
+                "layout file (and the session) itself when it rewrites the command; run: "
+                f"{self._invocation.example('resolve-step --workflow-slug <slug>')}"
+            ), None
         match = _STRICT_HARNESS_COMMAND.match(command)
         if match is None:
             return (
@@ -385,7 +401,11 @@ class Adapter:
             ), None
         carried = next((flag for flag in _ATTRIBUTION_FLAGS if flag in command), None)
         if carried is not None:
-            return f"model-authored session attribution ('{carried}') is never accepted", None
+            return (
+                f"model-authored session attribution ('{carried}') is never accepted: the "
+                "adapter stamps the session itself when it rewrites the command; run: "
+                f"{self._invocation.example(function)}"
+            ), None
         interpreter = unquote(match.group("interpreter"))
         if not self._invocation.is_interpreter(interpreter):
             return (
@@ -399,12 +419,16 @@ class Adapter:
                 f"{self._invocation.example(function)}"
             ), None
         stamped = dict(call.args)
-        stamped[command_key] = self._invocation.canonical(
-            function,
-            (_SESSION_ID_FLAG, record.session_id),
-            "".join(f" {token}" for token in _TOKEN.findall(command[match.end("function") :])),
-            powershell=call.name in self._binding.powershell_command_tools,
-        )
+        try:
+            stamped[command_key] = self._invocation.canonical(
+                function,
+                (_SESSION_ID_FLAG, record.session_id),
+                "".join(f" {token}" for token in _TOKEN.findall(command[match.end("function") :])),
+                powershell=call.name in self._binding.powershell_command_tools,
+            )
+        except (OSError, ValueError) as failure:
+            self._diagnostic(f"[{ADAPTER_ID}] cannot publish the harness layout file: {failure}")
+            return f"the harness layout file cannot be published (fail closed): {failure}", None
         return None, stamped
 
     def _find_guarded_path(self, command: str, cwd: str | None) -> str | None:
@@ -439,6 +463,8 @@ class Adapter:
         decision: dict[str, Any] = {}
         if self._binding.is_dispatch_tool(call.name):
             decision = dict(self._settle_step(record) or {})
+        elif hook.event == POST_TOOL_USE_FAILURE and self._is_harness_command(call):
+            decision = dict(renderer.additional_context(_REWRITTEN_COMMAND_FAILED))
         elif hook.event == POST_TOOL_USE and (
             self._binding.resolve_write_action(call.name, call.args) is not None
         ):
@@ -446,6 +472,12 @@ class Adapter:
         if not record.context_injected and hook.event == POST_TOOL_USE:
             decision = self._append_late_context(host_id, record, decision)
         return decision or None
+
+    def _is_harness_command(self, call: ToolCall) -> bool:
+        if not (self._binding.is_mediated_command_tool(call.name) and isinstance(call.args, Mapping)):
+            return False
+        command = self._binding.probe(call.args, self._binding.mediated_command_keys)
+        return isinstance(command, str) and bool(_HARNESS_MENTION.search(command))
 
     def _settle_write(
         self, hook: HookInput, record: SessionRecord, call: ToolCall

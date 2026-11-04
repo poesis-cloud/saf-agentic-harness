@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from application import Application, main
+from config.config_loader import LAYOUT_VARIABLES
 from errors import ConfigurationError
 
 CAPABILITY_KEYS = (
@@ -686,6 +688,69 @@ class TestMain:
         assert exit_code != 0
         assert captured.out == ""
         assert "FRAMEWORK_DIR" in captured.err
+
+    def test_an_env_file_supplies_the_layout_over_the_inherited_environment(
+        self,
+        framework_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Spec (Configuration plane, `--env-file`): a host whose command line must stay ONE
+        plain, approvable invocation names a layout file instead of assigning variables; its
+        values win over a stale inherited environment."""
+        for key in LAYOUT_VARIABLES:
+            monkeypatch.setenv(key, "stale")
+            monkeypatch.delenv(key)
+        monkeypatch.setenv("FRAMEWORK_DIR", str(tmp_path / "stale"))
+        layout = tmp_path / "layout.env"
+        layout.write_text(f"FRAMEWORK_DIR={framework_root}\n", encoding="utf-8")
+
+        exit_code = main(
+            ["--env-file", str(layout), "start-session", "--session-id", "s1", "--agent", "facilitator"]
+        )
+
+        assert exit_code == 0
+        assert json.loads(capsys.readouterr().out)["context"]["sessionId"] == "s1"
+
+    @pytest.mark.parametrize(
+        "content, expected",
+        [
+            ("PATH=/evil\n", "env-file-unknown-variable"),
+            ("FRAMEWORK_DIR=/x\nPYTHONPATH=/evil\n", "PYTHONPATH"),
+            ("not a line\n", "env-file-unreadable"),
+            (None, "env-file-unreadable"),
+        ],
+    )
+    def test_an_env_file_is_refused_unless_it_holds_only_layout_variables(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        content: str | None,
+        expected: str,
+    ) -> None:
+        """Spec (Configuration plane, `--env-file`): only layout variables are accepted, so
+        the option cannot inject anything else into the process; a bad file is refused."""
+        monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+        monkeypatch.setenv("PYTHONPATH", os.environ.get("PYTHONPATH", ""))
+        layout = tmp_path / "layout.env"
+        if content is not None:
+            layout.write_text(content, encoding="utf-8")
+
+        exit_code = main(["--env-file", str(layout), "end-session", "--session-id", "s1"])
+
+        captured = capsys.readouterr()
+        assert exit_code == 3
+        assert captured.out == ""
+        assert expected in captured.err
+        assert os.environ.get("PATH") != "/evil"
+
+    def test_an_env_file_option_without_a_path_is_a_usage_error(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["--env-file"]) == 2
+        assert "--env-file" in capsys.readouterr().err
 
     def test_surfaces_an_invalid_framework_at_the_process_boundary(
         self,

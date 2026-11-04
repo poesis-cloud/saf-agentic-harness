@@ -36,13 +36,21 @@ ADAPTER_ENTRY = ADAPTER_DIR / "adapter.py"
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
-from copilot_cli_adapter.core import EVENTS  # noqa: E402
+from copilot_cli_adapter.core import ADAPTER_ID, EVENTS  # noqa: E402
+from copilot_cli_adapter.invocation import (  # noqa: E402
+    LAYOUT_FILES_DIR,
+    needs_quoting,
+    shell_safe,
+)
 from copilot_cli_adapter.layout import (  # noqa: E402
     FRAMEWORK_DIR_VARIABLE,
     LAYOUT_VARIABLES,
     LayoutError,
     read_env_file,
+    resolve_state_dir,
 )
+
+HARNESS_ENTRY = ADAPTER_DIR.parents[1] / "harness.py"
 
 HOOKS_FILENAME = "safe-harness-copilot-cli.json"
 PLUGIN_HOOKS_FILENAME = "hooks.json"
@@ -207,6 +215,65 @@ def resolve_interpreter(raw: str | None) -> str:
     return python
 
 
+# --- the agent-run harness command (H4) ------------------------------------------------
+
+
+def agent_command_paths(python: str, environment: Mapping[str, str]) -> dict[str, str]:
+    """The paths H4 writes into the rewritten harness command, as the adapter renders them."""
+    return {
+        "interpreter": shell_safe(python),
+        "harness entry point": shell_safe(str(HARNESS_ENTRY)),
+        "layout file directory": shell_safe(
+            str(resolve_state_dir(ADAPTER_ID, environment) / LAYOUT_FILES_DIR)
+        ),
+    }
+
+
+def check_agent_command_paths(paths: Mapping[str, str], allow_quoted: bool) -> list[str]:
+    """Refuse (or, with `allow_quoted`, warn about) a path the rewrite would have to quote.
+
+    The host's permission layer checks the REWRITTEN command; a quoted interpreter path can
+    never match a saved approval, so every unattended harness command would be denied.
+    """
+    quoted = {name: path for name, path in paths.items() if needs_quoting(path)}
+    if not quoted:
+        return []
+    listing = "; ".join(f"{name} {path}" for name, path in quoted.items())
+    problem = (
+        f"these paths need shell quoting in the harness command the adapter rewrites ({listing}), "
+        "so the host can never pre-approve it and every unattended run is denied"
+    )
+    if not allow_quoted:
+        raise InstallError(
+            f"{problem} — move them to a path without spaces or special characters (for the "
+            "interpreter: a venv under such a path; for the layout files: a user-level SAF_HARNESS_STATE_DIR the app inherits), "
+            "or pass --allow-quoted-paths to approve each harness command interactively"
+        )
+    return [f"warning: {problem}; approve each harness command interactively"]
+
+
+def approval_notice(python: str, framework_dir: Path) -> list[str]:
+    """How to let the host run the rewritten harness command without asking."""
+    rule = f"{shell_safe(python)}:*"
+    snippet = json.dumps(
+        {
+            "locations": {
+                str(framework_dir): {
+                    "tool_approvals": [{"kind": "commands", "commandIdentifiers": [rule]}]
+                }
+            }
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+    return [
+        f"approve the harness interpreter for unattended runs: the shell command rule '{rule}'",
+        "(add it to ~/.copilot/permissions-config.json under the Git root you open sessions "
+        "in, or approve the first harness command for the session interactively), e.g.:",
+        snippet,
+    ]
+
+
 # --- the agent-scoped H0 block --------------------------------------------------------
 
 
@@ -343,12 +410,19 @@ def _user_hooks_dir(environment: Mapping[str, str]) -> Path:
     return (Path(home) if home else Path.home() / ".copilot") / "hooks"
 
 
-def plan(arguments: argparse.Namespace, environment: Mapping[str, str]) -> dict[Path, str]:
-    """Compute every file to write; raise `InstallError` before anything is written."""
+def plan(
+    arguments: argparse.Namespace, environment: Mapping[str, str]
+) -> tuple[dict[Path, str], list[str]]:
+    """Compute every file to write, and the notices for the user; raise `InstallError`
+    before anything is written."""
     framework_dir = Path(os.path.abspath(os.path.expanduser(arguments.framework_dir)))
     if not framework_dir.is_dir():
         raise InstallError(f"the framework root does not exist: {framework_dir}")
     python = resolve_interpreter(arguments.python)
+    notices = check_agent_command_paths(
+        agent_command_paths(python, environment), arguments.allow_quoted_paths
+    )
+    notices.extend(approval_notice(python, framework_dir))
     bundle_dir = Path(os.path.abspath(arguments.bundle_dir)) if arguments.bundle_dir else None
     if bundle_dir is not None and not bundle_dir.is_dir():
         raise InstallError(f"the bundle directory does not exist: {bundle_dir}")
@@ -406,7 +480,7 @@ def plan(arguments: argparse.Namespace, environment: Mapping[str, str]) -> dict[
             outputs[agents_dest / f"{slug}{AGENT_SUFFIX}"] = render_agent(
                 source.read_text(encoding="utf-8"), hooks, str(source)
             )
-    return outputs
+    return outputs, notices
 
 
 def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -439,6 +513,12 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="absolute interpreter the hooks run; must import the harness requirements "
         "(default: the one running this script)",
     )
+    parser.add_argument(
+        "--allow-quoted-paths",
+        action="store_true",
+        help="install even if the agent-run harness command needs quoted paths (it can then "
+        "only be approved interactively, never by a saved permission rule)",
+    )
     parser.add_argument("--hook-style", choices=HOOK_STYLES, default="exec")
     parser.add_argument("--skip-agents", action="store_true", help="do not render H0 blocks")
     parser.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")
@@ -451,7 +531,7 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | None = None) -> int:
     arguments = _parse_arguments(sys.argv[1:] if argv is None else argv)
     try:
-        outputs = plan(arguments, os.environ if environment is None else environment)
+        outputs, notices = plan(arguments, os.environ if environment is None else environment)
     except (InstallError, OSError, yaml.YAMLError) as failure:
         print(f"install.py: refused: {failure}", file=sys.stderr)
         return 1
@@ -462,6 +542,8 @@ def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | Non
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
         print(f"wrote {path}")
+    for notice in notices:
+        print(notice)
     return 0
 
 

@@ -192,7 +192,17 @@ def test_the_harness_command_is_rewritten_to_the_installed_interpreter(host: Hos
         "command": f"python {harness} resolve-step --workflow-slug pi-planning"}}]})
     command = run.decision["modifiedArgs"]["command"]
     assert sys.executable in command and "--session-id" in command
-    assert "FRAMEWORK_DIR" in command and "--workflow-slug pi-planning" in command
+    assert "--workflow-slug pi-planning" in command
+    # The layout travels in a published file, never as `$env:`/`VAR=` prefixes the host's
+    # permission layer cannot approve.
+    assert "FRAMEWORK_DIR" not in command and "$env:" not in command
+    layout_file = command.split(" --env-file ", 1)[1].split(" ", 1)[0].strip("'")
+    layout = dict(
+        line.split("=", 1) for line in Path(layout_file).read_text(encoding="utf-8").splitlines()
+    )
+    assert Path(layout_file).is_relative_to(Path(host.environment["SAF_HARNESS_STATE_DIR"]))
+    assert layout["FRAMEWORK_DIR"] == str(host.root)
+    assert layout["FRAMEWORK_WORKSPACE_DIR"] == str(host.workspace)
 
 
 def test_a_harness_failure_never_leaks_its_text(host: Host) -> None:

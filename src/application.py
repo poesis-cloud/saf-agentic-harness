@@ -27,7 +27,7 @@ from commands.resolve_workflow_skills_command import ResolveWorkflowSkillsComman
 from commands.start_session_command import StartSessionCommand
 from config.access_control_list import AccessControlList
 from config.artifact_node import ArtifactNode
-from config.config_loader import ConfigLoader
+from config.config_loader import LAYOUT_VARIABLES, ConfigLoader
 from config.folder_node import FolderNode
 from config.framework_layout import FrameworkLayout
 from config.workflow_catalog import WorkflowCatalog
@@ -59,6 +59,7 @@ from utils.yaml_loader import YamlLoader
 
 _CONTRACTS_DIR = Path(__file__).resolve().parent.parent / "contracts"
 _FRAMEWORK_ANCHOR = "FRAMEWORK_DIR"
+_ENV_FILE_OPTION = "--env-file"
 _ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
 _SKILL_SUFFIX = ".skill.md"
 _INSTRUCTION_SUFFIX = ".instructions.md"
@@ -361,9 +362,44 @@ def _refuse(message: str, exit_code: int) -> int:
     return exit_code
 
 
+def _apply_env_file(arguments: list[str]) -> int | None:
+    """Consume a leading `--env-file <path>` and export its layout variables.
+
+    Spec (Configuration plane): a host that cannot set the process environment (a command
+    line that must stay one plain, approvable invocation) names a layout file instead. Its
+    variables take precedence over the inherited environment; only layout variables are
+    accepted, so the option cannot inject anything else into the process.
+    """
+    if not arguments or arguments[0] != _ENV_FILE_OPTION:
+        return None
+    if len(arguments) < 2:
+        return _refuse(f"harness: {_ENV_FILE_OPTION} needs a file path.", _EXIT_USAGE)
+    path = arguments[1]
+    del arguments[:2]
+    try:
+        declared = EnvLoader().load_environment(path)
+    except (OSError, UnicodeDecodeError, ValueError) as failure:
+        return _refuse(
+            f"harness: configuration-error: env-file-unreadable: {path}: {failure}",
+            _EXIT_CONFIGURATION,
+        )
+    unknown = sorted(key for key in declared if key not in LAYOUT_VARIABLES)
+    if unknown:
+        return _refuse(
+            "harness: configuration-error: env-file-unknown-variable: "
+            f"{path} declares {', '.join(unknown)}; only framework layout variables are accepted.",
+            _EXIT_CONFIGURATION,
+        )
+    os.environ.update(declared)
+    return None
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one harness command against the framework the environment anchors."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+    refused = _apply_env_file(arguments)
+    if refused is not None:
+        return refused
     framework_root = os.environ.get(_FRAMEWORK_ANCHOR)
     if not framework_root:
         return _refuse(

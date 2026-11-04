@@ -52,6 +52,7 @@ _REQUIRED_LAYOUT_KEYS = (
     "FRAMEWORK_WORKFLOWS_DIR",
     "FRAMEWORK_WORKSPACE_DIR",
 )
+LAYOUT_VARIABLES = frozenset((_FRAMEWORK_DIR_KEY, *_REQUIRED_LAYOUT_KEYS))
 _PRECONDITION_KIND = "precondition"
 _ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
 _ARTIFACTS_SLUG = re.compile(r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]")
@@ -637,4 +638,4 @@ class ConfigLoader:
         )
 
 
-__all__ = ["ConfigLoader"]
+__all__ = ["LAYOUT_VARIABLES", "ConfigLoader"]

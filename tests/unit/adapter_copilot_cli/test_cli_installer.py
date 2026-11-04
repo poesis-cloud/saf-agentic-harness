@@ -195,3 +195,39 @@ def test_a_malformed_framework_env_is_refused(framework, bundle, capsys) -> None
     assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle)) != 0
     assert "line 2 is malformed" in capsys.readouterr().err
     assert not (bundle / "hooks.json").exists()
+
+
+def test_the_install_prints_the_interpreter_approval_rule(framework, bundle, capsys) -> None:
+    """The host's permission layer checks the REWRITTEN harness line, led by the interpreter:
+    the user must approve `<interpreter>:*` once, or every unattended run is denied."""
+    assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle)) == 0
+    out = capsys.readouterr().out
+    rule = f"{INSTALL.shell_safe(sys.executable)}:*"
+    assert f"'{rule}'" in out and "permissions-config.json" in out
+    assert json.dumps(rule) in out
+
+
+def test_a_layout_directory_needing_quotes_is_refused(framework, bundle, tmp_path, capsys) -> None:
+    spaced = {"SAF_HARNESS_STATE_DIR": str(tmp_path / "state with space")}
+    assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle), environment=spaced) == 1
+    err = capsys.readouterr().err
+    assert "need shell quoting" in err and "--allow-quoted-paths" in err
+    assert not (bundle / "hooks.json").exists()
+
+
+def test_quoted_paths_can_be_accepted_with_a_warning(framework, bundle, tmp_path, capsys) -> None:
+    spaced = {"SAF_HARNESS_STATE_DIR": str(tmp_path / "state with space")}
+    assert _install(
+        "--framework-dir", str(framework), "--bundle-dir", str(bundle), "--allow-quoted-paths",
+        environment=spaced,
+    ) == 0
+    assert "warning:" in capsys.readouterr().out
+    assert (bundle / "hooks.json").is_file()
+
+
+def test_the_agent_command_paths_are_the_ones_the_adapter_renders(tmp_path) -> None:
+    paths = INSTALL.agent_command_paths(sys.executable, {"SAF_HARNESS_STATE_DIR": str(tmp_path)})
+    assert paths["harness entry point"] == INSTALL.shell_safe(str(INSTALL.HARNESS_ENTRY))
+    assert paths["layout file directory"] == INSTALL.shell_safe(
+        str(tmp_path / "github-copilot-cli" / "layouts")
+    )

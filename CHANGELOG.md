@@ -31,7 +31,13 @@ pinned.
     Copilot plugin bundle: a global `hooks.json` plus the orchestrators' agent-scoped H0
     block. It handles the runtime's batched `preToolUse`, and a batch is denied when any of
     its calls is. Harness commands are mediated: one plain `harness.py <function>` call is
-    rewritten to the canonical, attributed command line, and anything else is denied.
+    rewritten to the canonical, attributed command line, and anything else is denied. The
+    rewrite stays ONE plain command led by the unquoted interpreter, so the app's permission
+    layer can approve it with an `<interpreter>:*` rule, which `install.py` prints. The layout
+    travels in a published layout file instead of `$env:` assignments.
+- **`harness.py --env-file <file>`**: a host whose command line must stay one plain
+  invocation passes the framework layout (`FRAMEWORK_DIR` and the `FRAMEWORK_*_DIR` set) in a
+  file. Only layout variables are accepted.
 - **Verification**: `make verify` runs the unit, functional, and adapter planes on Python
   3.10, 3.11 and 3.12. CI also runs the suite on Windows (Python 3.12).
 

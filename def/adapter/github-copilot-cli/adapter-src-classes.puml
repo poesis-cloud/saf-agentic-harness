@@ -99,7 +99,10 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +harness : str
       +windows : bool
       +environment : Mapping[str, str]
+      +layout_dir : str
       +example(arguments) : str
+      +layout_file() : str
+      +publish_layout() : str
       +canonical(function, attribution, flags, powershell) : str
       +is_harness(raw, cwd) : bool
       +is_interpreter(raw) : bool
@@ -140,8 +143,9 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       (H2 dispatch / H3 write / H4 harness command / I9 shell) and
       decided; ANY denial denies the firing. An unextractable write
       target is DENIED (fail closed). H4 rewrites an accepted
-      harness command to the canonical, attributed line - the agent's
-      shell needs no FRAMEWORK_* environment. Framework-agent gating,
+      harness command to ONE plain, approvable line (unquoted
+      interpreter, --env-file <published layout file>, --session-id) -
+      the agent's shell needs no FRAMEWORK_* environment. Framework-agent gating,
       step correlation and session closure stay inside the invoked
       harness functions; this class relays their outcomes.
     end note
