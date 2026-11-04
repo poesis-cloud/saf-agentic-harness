@@ -156,7 +156,7 @@ class TestEndSession:
         instance = harness.read_log(orchestrator_session)[-1]["report"]["context"][
             "workflowInstanceId"
         ]
-        harness.invoke("check-step-postconditions", sessionId=orchestrator_session)
+        harness.execute_in_flight_step(orchestrator_session)
         harness.invoke(FUNCTION, sessionId=orchestrator_session)
 
         harness.invoke("start-session", sessionId="successor", agent="orchestrator")

@@ -19,6 +19,13 @@ from stores.session_log_store import (
     SessionLogStore,
 )
 
+# Function 10, invariant 5: every concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "report/delivered.json",
+    "outcome": "pass",
+}
+
 _CAPABILITIES = {
     "deep-reasoning": 1,
     "coding": 1,
@@ -122,7 +129,7 @@ def _postconditions_entry(
         "pass",
         session_id,
         workflow_instance_id=workflow_instance_id,
-        payload={"conditionChecks": []},
+        payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
     )
 
 
@@ -300,6 +307,99 @@ class TestSessionLifecycle:
 
         assert report.outcome.status == "not-applicable"
         assert not (workspace / "logs" / "sess-step.log.jsonl").exists()
+
+    def test_start_session_refuses_a_second_step_session_for_one_resolution(
+        self,
+        lifecycle: SessionLifecycle,
+        session_log_store: SessionLogStore,
+        workspace: Path,
+        read_journal,
+    ) -> None:
+        """Spec function 0, invariant 5: 1 step = 1 session — a resolution that already
+        registered its step session refuses a second one with `state-error`
+        (`step-session-bound`), returned but never journaled (Outcomes rule 4)."""
+        session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        session_log_store.append_log_entry(
+            "sess-root", _resolution_entry("sess-root", actor="reviewer")
+        )
+        session_log_store.create_session_log(
+            _start_entry("sess-step", "reviewer", "sess-root", "2026-08-18T09:01:30Z")
+        )
+
+        report = lifecycle.start_session(
+            agent="reviewer", session_id="sess-second", parent_session_id="sess-root"
+        )
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error.code == "step-session-bound"
+        assert report.session is None
+        assert not (workspace / "logs" / "sess-second.log.jsonl").exists()
+        assert len(read_journal("sess-root")) == 2
+        assert len(read_journal("sess-step")) == 1
+
+    def test_start_session_still_replays_the_bound_step_session(
+        self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
+    ) -> None:
+        """Spec function 0, invariants 4-5: the bound step session's own redelivered
+        start is a replay, not a second session."""
+        session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        session_log_store.append_log_entry(
+            "sess-root", _resolution_entry("sess-root", actor="reviewer")
+        )
+        session_log_store.create_session_log(
+            _start_entry("sess-step", "reviewer", "sess-root", "2026-08-18T09:01:30Z")
+        )
+
+        report = lifecycle.start_session(
+            agent="reviewer", session_id="sess-step", parent_session_id="sess-root"
+        )
+
+        assert report.outcome.status == "started"
+        assert len(read_journal("sess-step")) == 1
+
+    def test_start_session_admits_a_new_step_session_once_the_step_is_re_resolved(
+        self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore
+    ) -> None:
+        """Spec function 0, invariant 5: recovery is the initial spec's — function 10
+        concludes the step, the orchestrator re-resolves it, and the NEW resolution
+        admits a new step session."""
+        session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        session_log_store.append_log_entry(
+            "sess-root", _resolution_entry("sess-root", actor="reviewer")
+        )
+        session_log_store.create_session_log(
+            _start_entry("sess-step", "reviewer", "sess-root", "2026-08-18T09:01:30Z")
+        )
+        session_log_store.append_log_entry(
+            "sess-root",
+            _entry(
+                "2026-08-18T09:02:00Z",
+                "check-step-postconditions",
+                "fail",
+                "sess-root",
+                workflow_instance_id="verification-01J9XQ",
+                payload={
+                    "conditionChecks": [],
+                    "artifactDelivery": {
+                        "artifact": "story",
+                        "artifactPath": None,
+                        "outcome": "fail",
+                        "failureMessage": "Step 'review' committed no 'story'.",
+                    },
+                },
+            ),
+        )
+        session_log_store.append_log_entry(
+            "sess-root",
+            _resolution_entry("sess-root", actor="reviewer", timestamp="2026-08-18T09:03:00Z"),
+        )
+
+        report = lifecycle.start_session(
+            agent="reviewer", session_id="sess-retry", parent_session_id="sess-root"
+        )
+
+        assert report.outcome.status == "started"
+        assert report.session.session_id == "sess-retry"
 
     def test_start_session_replays_the_registration_of_an_open_session(
         self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal

@@ -24,6 +24,47 @@
             }
           },
           "description": "The function outcome."
+        },
+        "commitId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40,64}$",
+          "description": "The Git object id of the one commit that promoted the validated set into workspace state, or null when nothing was committed (every path byte-identical to HEAD — function 9, invariant 4)."
+        },
+        "committedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+          },
+          "description": "The artifact paths the commit changed — empty exactly when commitId is null. The session log's own record of what this session committed (function 9, invariant 3)."
+        }
+      },
+      "required": [
+        "commitId",
+        "committedPaths"
+      ],
+      "if": {
+        "properties": {
+          "commitId": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "committedPaths": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "committedPaths": {
+            "minItems": 1
+          }
         }
       }
     },

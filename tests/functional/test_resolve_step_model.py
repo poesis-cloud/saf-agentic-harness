@@ -28,7 +28,7 @@ def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
 def _dispatch_review(harness: FunctionalHarness, session_id: str) -> None:
     """Journal `draft` executed, then put the second step, `review`, in flight."""
     _dispatch_draft(harness, session_id)
-    harness.invoke("check-step-postconditions", sessionId=session_id)
+    harness.execute_in_flight_step(session_id)
     harness.invoke("resolve-step", sessionId=session_id, workflowSlug="planning")
 
 

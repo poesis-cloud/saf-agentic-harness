@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from services.checking.artifact_check import ArtifactCheck
 from services.checking.artifact_check_report import ArtifactCheckReport
+from services.checking.artifact_delivery import ArtifactDelivery
 from services.checking.authorization import Authorization
 from services.checking.authorization_report import AuthorizationReport
 from services.checking.check_step_postconditions_report import (
@@ -24,6 +25,7 @@ from services.checking.step_precondition_checker import StepPreconditionChecker
 __all__ = [
     "ArtifactCheck",
     "ArtifactCheckReport",
+    "ArtifactDelivery",
     "Authorization",
     "AuthorizationReport",
     "CheckStepPostconditionsReport",

@@ -187,8 +187,9 @@ log entry's `report`. Reports share the `context` object (`function`, `sessionId
 persists) and the `outcome` object (`status`, plus the `error` detail — required on error
 statuses, absent otherwise), and add one function-owned specific property where needed. Each
 output contract additionally pins `context.function` to its own `const` — the discriminator
-the log-entry envelope's `oneOf` selects on, and what keeps two structurally identical reports
-(functions 5 and 10) distinguishable both in the journal and in the type model. Any
+the log-entry envelope's `oneOf` selects on, and what keeps two reports sharing the
+`conditionChecks` payload (functions 5 and 10) distinguishable both in the journal and in the
+type model. Any
 session metadata beyond correlation, such as framework-agent identity when applicable, is
 recorded by function 0's registration and recovered through `sessionId` when needed. The
 normative schemas live at `contracts/api/<function>.input.schema.json` and
@@ -257,7 +258,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
 | `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
-| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives another workflow's instance (`session-instance-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives another workflow's instance (`session-instance-bound`), a step resolution already registered its step session (`step-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`) | Yes, except the C8 refusal (rule 3) and `step-session-bound` (rule 4) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
 
@@ -269,8 +270,10 @@ refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-er
 the codes named in this specification
 (`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
 `session-kind-mismatch`, `not-facilitator`,
-`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `step-correlation-missing`,
-`condition-evaluation-failed`, `artifact-schema-unresolved`, `log-unreadable`) are normative; implementations
+`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `step-session-bound`,
+`step-correlation-missing`,
+`condition-evaluation-failed`, `artifact-schema-unresolved`, `log-unreadable`,
+`log-creation-failed`, `log-append-failed`) are normative; implementations
 may add codes but never repurpose these. Statuses, codes, and structured fields are the
 normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
 tests assert their presence and key facts, never exact wording.
@@ -287,16 +290,19 @@ payload. Hook planes render it as pass-through (C7).
 
 **3. The C8 refusal shape.** A session-bound call against a session whose log carries an
 ending entry returns `state-error` with code `session-ended` — and is **not journaled**: no
-entry ever follows the ending entry (function 11, invariant 1). This is the only `state-error`
-that does not journal.
+entry ever follows the ending entry (function 11, invariant 1). Apart from `step-session-bound`,
+which has no log of its own to journal to (rule 4), this is the only `state-error` that does
+not journal.
 
 **4. The failure-journaling rule.** Error outcomes are ordinary outcomes and journal to the
 attributed session's log — with these exceptions, all forced by the absence of an open
 target log: the C8 refusal (rule 3) and `not-applicable` (rule 2) are **returned but never
 journaled**; `session-unregistered` returns its report (the context is constructible — the
-id is a valid slug) but has no log to journal to; and a **contract-validation failure**
-(`invalid-inquiry`) produces **no report at all** — a contract-valid report cannot be built
-when the inquiry's own `sessionId` is missing or malformed, so the failure surfaces at the
+id is a valid slug) but has no log to journal to; so does function 0's `step-session-bound`
+refusal — the refused step session is never registered, so no log of its own exists; and a
+**contract-validation failure** (`invalid-inquiry`) produces **no report at all** — a
+contract-valid report cannot be built when the inquiry's own `sessionId` is missing or
+malformed, so the failure surfaces at the
 **command exit plane** (stderr + nonzero exit), exactly like a crashed invocation (see
 [Logging](#logging)). A completed invocation whose log append
 fails still returns its report and surfaces `system-error` at the trigger plane. No exception
@@ -380,6 +386,10 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
   session (parent present), the correlation IS the check: function 3 only ever resolves
   configured, ACL-validated workflow actors, so a non-framework `agent` — or any foreign
   dispatch — simply finds no correlation to complete.
+- (E) For a **step** session, its correlated resolution has registered no step session yet
+  — 1 step = 1 session (invariant 5) — violation: `state-error` (`step-session-bound`),
+  returned but not journaled: the refused session is never registered, so it has no log
+  (rule 4).
 - Trigger — the session-started boundary for hook-opened sessions, before
   functions 1–2 (orchestrator session) or 6–7 (step session) run at the
   same boundary, where applicable.
@@ -411,6 +421,15 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
    refusal (`state-error`, `session-ended`) — a dead identity never revives. A
    re-registration naming a **different** `agent` for an already-registered `sessionId` is
    `state-error` (`session-conflict`), journaled: identity never silently mutates.
+5. 1 step = 1 session. A step resolution admits exactly one step session — the
+   registration naming the resolution's orchestrator session as `parentSessionId` and the
+   resolved step's actor as `agent`, at or after the resolution's `timestamp` (the cross-log
+   ordering key, see [Logging](#logging)). A start for a different `sessionId` that
+   correlates to a resolution which already registered its step session is `state-error`
+   (`step-session-bound`). Recovery is function 10's alone: it concludes the step at
+   dispatch return, and the orchestrator's re-resolution (function 3) writes a new
+   resolution, which admits a new step session. This single registration is the step's
+   session that function 10 reads delivery from (function 10, invariant 5).
 
 ### 1. resolve-workflow-instructions
 
@@ -614,11 +633,11 @@ Example:
       "conditions": [
         { "kind": "precondition", "slug": "after_build", "step": "build" },
         {
-          "kind": "postcondition", "slug": "report_exists",
+          "kind": "postcondition", "slug": "report_approved",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts['review-report'].filter(a, a.status == 'approved')"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
         }
       ],
       "capabilities": {
@@ -858,13 +877,13 @@ Example:
       { "condition": { "kind": "precondition", "slug": "after_build", "step": "build" }, "outcome": "pass" },
       {
         "condition": {
-          "kind": "precondition", "slug": "report_exists",
+          "kind": "precondition", "slug": "build_passed",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts['build-report'].filter(a, a.status == 'passed')"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
         },
-        "outcome": "fail", "failureMessage": "no artifact matches 'review-report'"
+        "outcome": "fail", "failureMessage": "no 'build-report' instance has status 'passed'"
       }
     ]
   }
@@ -912,7 +931,8 @@ plane, exactly as function 8's enforcement scope.
   declares is enforced once, from the successor's side.
 2. `stateCondition`: `setSelector.setQuery` is a CEL expression that references artifacts
    directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug ->
-   matching instances, e.g. `artifacts['review-report']`) to produce `selected`; `setPredicate`
+   matching instances — every committed path the workspace layout binds to that artifact
+   kind, wherever it lives, e.g. `artifacts['review-report']`) to produce `selected`; `setPredicate`
    is then evaluated over `selected`. The step's declared `artifact` ref is in scope as a
    runtime constant. Every `artifacts['<slug>'].<property>` reference is statically validated
    against that slug's artifact schema — an unresolvable slug or an undeclared property is a
@@ -1189,9 +1209,12 @@ into workspace state (`HEAD`).
   recommends.
   **Out** — `ArtifactCheckReport`: the `outcome` — `valid` (every path validated; the whole
   set committed as ONE commit) or `reverted` (any path judged invalid; the whole staged set
-  discarded — call-level atomicity) — plus, when reverted, `artifactChecks`: one record per
-  **failing** path (its `artifactPath`, the failure message, and the revert action); valid
-  siblings are discarded with the set, implied by set membership.
+  discarded — call-level atomicity) — plus, when valid, the commit's record: `commitId` (the
+  commit's Git object id, or `null` when nothing was committed — invariant 4) and
+  `committedPaths` (the artifact paths that commit changed; empty when `commitId` is `null`);
+  and, when reverted, `artifactChecks`: one record per **failing** path (its `artifactPath`,
+  the failure message, and the revert action); valid siblings are discarded with the set,
+  implied by set membership.
 - **Caller usage** — the agent receives the failure message(s) and rewrites the artifacts
   correctly; a write never silently corrupts the workspace, and no partial set ever commits.
 
@@ -1258,13 +1281,15 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
 3. A fully valid set is **committed** in the same act — 1 validated set = 1 commit, attributed
    to the acting session (its `sessionId` in the commit message) so Git history and the
    session log correlate. The commit and the discard are the harness's only deliberate Git
-   actions: the discard is recorded inside the validation entry's report (the revert records);
-   the commit's record is the Git history itself, correlated by session id. The commit carries
+   actions, both recorded inside the validation entry's report: the discard as the revert
+   records, the commit as `commitId` + `committedPaths` — so the session log alone states what
+   each session committed, and the commit message's `sessionId` correlates the Git history
+   back to it. `committedPaths` lists only the paths the commit changed. The commit carries
    exactly the validated set: any other content already staged in the index stays staged and
    never enters it.
 4. A staged path byte-identical to `HEAD` validates vacuously and stages nothing: a set of
-   only such paths reports `valid` and creates no commit — `valid` asserts validity, not that
-   a commit occurred.
+   only such paths reports `valid` with `commitId: null` and empty `committedPaths`, and
+   creates no commit — `valid` asserts validity, not that a commit occurred.
 5. A Git failure mid-commit or mid-discard is the uniform `system-error` (rule 1): the staged
    state is whatever the failure left — C6's detect-and-remediate plane owns residual cleanup.
 
@@ -1281,10 +1306,17 @@ function 3's cursor reads nothing else.
   This correlation **normatively relies on function 3, invariant 9** (one in-flight step per
   orchestrator session): the invoking session's single in-flight step IS the step being
   evaluated, so a host event payload need not echo the step session's own id — hosts whose
-  dispatch-return events carry no step identity are fully supported.
+  dispatch-return events carry no step identity are fully supported. The step's session is
+  the single step session function 0 registered under the in-flight resolution (function 0,
+  invariant 5); delivery (invariant 5) is read from that session's log — the
+  `committedPaths` of its function-9 `valid` entries (function 9, invariant 3), each path's
+  kind resolved through the workspace layout.
 - **Out** — `CheckStepPostconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
-  `conditionChecks`, exactly as function 5 (same payload, distinct type — one output contract
-  each).
+  `conditionChecks`, exactly as function 5 (distinct type — one output contract each), plus
+  its own `artifactDelivery` (invariant 5), journaled in the same entry: the step's
+  `artifact` kind, the delivered instance's `artifactPath` (or `null`), the delivery
+  `outcome` (`pass` / `fail`), and on failure a `failureMessage` naming the step, the kind,
+  and why — zero instances, or more than one. A failed delivery fails the aggregate.
 - **Caller usage** — on a passing outcome the orchestrator calls function 3 for the next step;
   on a failing one — per its `reports-handling` instruction (function 1) — it handles the
   failure messages and calls function 3 again — the failed step is not
@@ -1311,15 +1343,20 @@ Example:
     "conditionChecks": [
       {
         "condition": {
-          "kind": "postcondition", "slug": "report_exists",
+          "kind": "postcondition", "slug": "report_approved",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.slug == artifact)"
+            "setQuery": "artifacts['review-report'].filter(a, a.status == 'approved')"
           },
-          "setPredicate": "selected.size() == 1"
+          "setPredicate": "selected.size() > 0"
         },
         "outcome": "pass"
       }
-    ]
+    ],
+    "artifactDelivery": {
+      "artifact": "review-report",
+      "artifactPath": "reviews/payments/payments.review-report.md",
+      "outcome": "pass"
+    }
   }
 }
 ```
@@ -1354,9 +1391,15 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
 3. The step's outcome logs from this function: its postconditions hold, or they do not.
    This journaled outcome is exactly what function 3's cursor reads — a step whose latest
    outcome passes counts as executed.
-4. A step declaring zero postconditions passes vacuously: `outcome: pass` with an empty
-   `conditionChecks` array — journaled, and sufficient for the cursor to count the step
-   executed.
+4. A step's outcome passes only if its artifact was delivered (invariant 5) and every
+   declared postcondition passes. Declared postconditions may be zero; delivery is never
+   optional.
+5. Delivery. The step's session committed, through function 9, a change to exactly one
+   instance of the step's declared artifact kind — creating it or updating it (the workflow
+   schema's "produces or updates"). A step that decides "no change" or "none" records that
+   decision in the artifact itself, which is a real change, so it still delivers. A write
+   identical to committed state creates no commit (function 9, invariant 4) and does not
+   deliver. Writes to other kinds remain governed by authorization (function 8) only.
 
 ### 11. end-session
 
@@ -1879,9 +1922,10 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
     `step` only: the instance id is `context.workflowInstanceId`, never a second projection);
   - `model_resolution/` — `StepModelResolver` (4 → `ModelProfileReport`);
   - `checking/` — `StepPreconditionChecker` (5 → `CheckStepPreconditionsReport`),
-    `StepPostconditionChecker` (10 → `CheckStepPostconditionsReport`) — structurally identical
-    payloads bound to distinct output contracts, so each is its own leaf type over the abstract
-    `ConditionCheckReport` base that carries `conditionChecks`; which function produced a given
+    `StepPostconditionChecker` (10 → `CheckStepPostconditionsReport`, which adds its own
+    `artifactDelivery`) — payloads sharing `conditionChecks`, bound to distinct output
+    contracts, so each is its own leaf type over the abstract `ConditionCheckReport` base that
+    carries `conditionChecks`; which function produced a given
     report is read from `context.function`, never inferred from the type —
     `StepAuthorizationChecker` (8 → `AuthorizationReport`, whose `Authorization` carries
     `actor`, `artifactPath`, `action`, `resource`, and the failure message: it guards the ACL

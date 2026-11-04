@@ -12,6 +12,13 @@ from contract_assertions import assert_stdout_matches_contract
 from event_class import EventClass
 from hook_renderer import HookRenderer
 
+# Function 10, invariant 5: a concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "reviews/r1.json",
+    "outcome": "pass",
+}
+
 
 @pytest.fixture
 def framework_dirs(tmp_path: Path) -> tuple[Path, Path]:
@@ -402,7 +409,7 @@ class TestHookRenderer:
         """Adapter spec H5, Output construction: `outcome: valid` renders plain success —
         the commit already happened harness-side; nothing to tell the model.
         """
-        decision = renderer.render_write_outcome(build_report("check-step-artifact", "valid"))
+        decision = renderer.render_write_outcome(build_report("check-step-artifact", "valid", commitId=None, committedPaths=[]))
 
         rendered = assert_valid_stdout(decision.stdout)
         assert rendered == {"continue": True}
@@ -458,7 +465,12 @@ class TestHookRenderer:
         orchestrator proceeds to the next `resolve-step` per its instructions.
         """
         decision = renderer.render_step_outcome(
-            build_report("check-step-postconditions", "pass", conditionChecks=[])
+            build_report(
+                "check-step-postconditions",
+                "pass",
+                conditionChecks=[],
+                artifactDelivery=DELIVERED,
+            )
         )
 
         assert assert_valid_stdout(decision.stdout) == {"continue": True}
@@ -486,6 +498,7 @@ class TestHookRenderer:
                         "failureMessage": "no artifact matches 'review-report'",
                     }
                 ],
+                artifactDelivery=DELIVERED,
             )
         )
 

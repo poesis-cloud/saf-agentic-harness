@@ -71,9 +71,11 @@ class StepArtifactChecker(CheckingService):
         failures = self._validate_staged_set(artifact_paths)
         if failures:
             checks = self._discard_staged_set(artifact_paths, failures)
-            outcome, reverted = Outcome(status=_REVERTED), checks
+            outcome, reverted, commit = Outcome(status=_REVERTED), checks, None
         else:
-            self._artifact_store.commit_artifacts(artifact_paths, session_id=session_id)
+            commit = self._artifact_store.commit_artifacts(
+                artifact_paths, session_id=session_id
+            )
             outcome, reverted = Outcome(status=_VALID), ()
         report = ArtifactCheckReport(
             context=self._build_context(
@@ -81,6 +83,7 @@ class StepArtifactChecker(CheckingService):
             ),
             outcome=outcome,
             artifact_checks=reverted,
+            commit=commit,
         )
         self._journal_report(session_id, report)
         return report

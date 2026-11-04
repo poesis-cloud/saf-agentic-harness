@@ -64,8 +64,8 @@ def _open_step_session(
 
 def _open_review_session(harness: FunctionalHarness, orchestrator_session: str) -> str:
     """Journal `draft` executed, then open the session of the second step, `review`."""
-    _open_step_session(harness, orchestrator_session)
-    harness.invoke("check-step-postconditions", sessionId=orchestrator_session)
+    draft_session = _open_step_session(harness, orchestrator_session)
+    harness.execute_in_flight_step(orchestrator_session, step_session_id=draft_session)
     return _open_step_session(
         harness, orchestrator_session, session_id=REVIEW_SESSION, agent="reviewer"
     )

@@ -8,7 +8,7 @@
       "properties": {
         "function": {
           "const": "check-step-postconditions",
-          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the structurally identical check-step-preconditions output."
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the check-step-preconditions output, which shares its conditionChecks payload."
         }
       }
     }
@@ -29,7 +29,8 @@
     },
     {
       "required": [
-        "conditionChecks"
+        "conditionChecks",
+        "artifactDelivery"
       ],
       "properties": {
         "outcome": {
@@ -97,12 +98,28 @@
             "description": "One condition outcome; failure requires a failureMessage."
           },
           "description": "One outcome entry per condition checked."
+        },
+        "artifactDelivery": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/artifactDelivery"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "pass"
+                }
+              }
+            }
+          ],
+          "description": "The step delivered its artifact — required for a passing outcome."
         }
       }
     },
     {
       "required": [
-        "conditionChecks"
+        "conditionChecks",
+        "artifactDelivery"
       ],
       "properties": {
         "outcome": {
@@ -169,21 +186,45 @@
               }
             },
             "unevaluatedProperties": false,
-            "description": "One condition outcome; at least one must be fail."
+            "description": "One condition outcome."
           },
-          "contains": {
-            "properties": {
-              "outcome": {
-                "const": "fail"
-              }
-            },
-            "required": [
-              "outcome"
-            ]
-          },
-          "description": "One outcome entry per condition checked; at least one must be fail."
+          "description": "One outcome entry per condition checked."
+        },
+        "artifactDelivery": {
+          "$ref": "#/$defs/artifactDelivery",
+          "description": "The delivery verdict; a failed delivery fails the aggregate."
         }
-      }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "conditionChecks": {
+              "contains": {
+                "properties": {
+                  "outcome": {
+                    "const": "fail"
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "artifactDelivery": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "A failing step outcome: at least one condition failed, or the artifact was not delivered."
     },
     {
       "properties": {
@@ -203,5 +244,79 @@
     }
   ],
   "unevaluatedProperties": false,
+  "$defs": {
+    "artifactDelivery": {
+      "type": "object",
+      "required": [
+        "artifact",
+        "artifactPath",
+        "outcome"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
+          "description": "The step's declared artifact kind."
+        },
+        "artifactPath": {
+          "oneOf": [
+            {
+              "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The one instance of the declared kind the step's session committed a change to, or null when it committed zero or more than one."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "description": "Whether the step delivered its artifact."
+        },
+        "failureMessage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "On failure: names the step, the kind, and why — zero instances, or more than one."
+        }
+      },
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "failureMessage"
+        ],
+        "properties": {
+          "artifactPath": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "failureMessage"
+          ]
+        },
+        "properties": {
+          "artifactPath": {
+            "type": "string"
+          }
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Function 10, invariant 5: the delivery verdict — a harness invariant, not a condition: no slug, never configurable. Read from the step session's function-9 `valid` entries (`committedPaths`)."
+    }
+  },
   "description": "Output contract for the check-step-postconditions harness function."
 }

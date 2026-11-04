@@ -21,6 +21,8 @@ _CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _INSTANCE_MINT_LENGTH = 6
 _SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _INSTANCE_MINT_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4,}$")
+_START_FUNCTION = "start-session"
+_STARTED_STATUS = "started"
 
 _default_validator: SchemaValidator | None = None
 
@@ -174,6 +176,31 @@ class SessionLogStore:
         open_candidates.sort(key=lambda candidate: candidate[1])
         open_candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         return open_candidates[0][1]
+
+    def find_step_session_ids(
+        self, parent_session_id: str, agent: str, since: str
+    ) -> tuple[str, ...]:
+        """Find the step sessions registered under one step resolution.
+
+        Spec (function 0, invariant 5): a step session belongs to the resolution its
+        registration correlated to — same parent session, the step's actor as `agent`,
+        registered at or after the resolution's `timestamp` (the cross-log ordering
+        key). Function 3, invariant 9 leaves at most one such resolution in flight.
+        """
+        found: list[str] = []
+        for entry in self._iter_all_entries():
+            report = entry.report
+            if report.context.function != _START_FUNCTION:
+                continue
+            if report.outcome.status != _STARTED_STATUS or entry.timestamp < since:
+                continue
+            session = report.payload.get("session") or {}
+            if (
+                session.get("parentSessionId") == parent_session_id
+                and session.get("agent") == agent
+            ):
+                found.append(str(session["sessionId"]))
+        return tuple(sorted(set(found)))
 
     def _resolve_log_path(self, session_id: str) -> Path:
         """Resolve one session's log file path under the workspace logs dir.

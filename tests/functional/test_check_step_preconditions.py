@@ -20,12 +20,13 @@ from functional_fixtures import (
 FUNCTION = "check-step-preconditions"
 
 AFTER_DRAFT_CONDITION = {"kind": "precondition", "slug": "after-draft", "step": "draft"}
-REPORT_EXISTS_CONDITION = {
+REPORT_APPROVED_CONDITION = {
     "kind": "precondition",
-    "slug": "report-exists",
+    "slug": "report-approved",
     "setSelector": {"setQuery": "artifacts['report']"},
-    "setPredicate": "size(selected) > 0",
+    "setPredicate": "selected.exists(a, a.state == 'approved')",
 }
+DRAFT_REF = "report/draft.json"
 
 
 def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
@@ -34,8 +35,13 @@ def _dispatch_draft(harness: FunctionalHarness, session_id: str) -> None:
 
 
 def _dispatch_review(harness: FunctionalHarness, session_id: str) -> None:
-    """Journal `draft` executed, then put the conditioned step, `review`, in flight."""
+    """Journal `draft` executed, then put the conditioned step, `review`, in flight.
+
+    `draft` delivers its report (function 10, invariant 5) still unapproved, so only
+    what a test commits on top decides `report-approved`.
+    """
     _dispatch_draft(harness, session_id)
+    harness.deliver_step(session_id, "builder", DRAFT_REF, {"slug": "draft", "state": "drafted"})
     harness.invoke("check-step-postconditions", sessionId=session_id)
     harness.invoke("resolve-step", sessionId=session_id, workflowSlug="planning")
 
@@ -60,7 +66,7 @@ class TestCheckStepPreconditions:
         assert entries[-1]["report"] == report
         assert_report_journaled_byte_identically(harness, run, 2)
 
-    def test_a_missing_artifact_fails_the_gate_with_its_condition_logged_verbatim(
+    def test_an_unsatisfied_condition_fails_the_gate_with_its_condition_logged_verbatim(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 5, invariants 1-3): the journaled predecessor passes, the
@@ -75,20 +81,20 @@ class TestCheckStepPreconditions:
         checks = report["conditionChecks"]
         assert [check["condition"] for check in checks] == [
             AFTER_DRAFT_CONDITION,
-            REPORT_EXISTS_CONDITION,
+            REPORT_APPROVED_CONDITION,
         ]
         assert checks[0]["outcome"] == "pass"
         assert checks[1]["outcome"] == "fail"
-        assert "report-exists" in checks[1]["failureMessage"]
+        assert "report-approved" in checks[1]["failureMessage"]
         assert assert_journal_contract(harness, orchestrator_session)[-1]["report"] == report
 
     def test_committed_state_satisfying_every_condition_passes_the_gate(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 5, invariant 2 + C1): conditions are evaluated against
-        persisted workspace state — a committed artifact makes the selected set
-        non-empty and the predicate true."""
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "drafted"})
+        persisted workspace state — a committed approved report makes the predicate
+        true."""
+        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "approved"})
         _dispatch_review(harness, orchestrator_session)
 
         run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
@@ -105,7 +111,7 @@ class TestCheckStepPreconditions:
         nothing."""
         staged = harness.workspace_dir / "report" / "beta.json"
         staged.parent.mkdir(parents=True, exist_ok=True)
-        staged.write_text('{"slug": "beta", "state": "drafted"}', encoding="utf-8")
+        staged.write_text('{"slug": "beta", "state": "approved"}', encoding="utf-8")
         _dispatch_review(harness, orchestrator_session)
 
         run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
@@ -124,7 +130,11 @@ class TestCheckStepPreconditions:
         harness.invoke(FUNCTION, sessionId=orchestrator_session)
 
         assert harness.count_commits() == commits_before
-        assert harness.list_committed_paths() == (".gitignore", "report/alpha.json")
+        assert harness.list_committed_paths() == (
+            ".gitignore",
+            "report/alpha.json",
+            DRAFT_REF,
+        )
 
     def test_a_session_with_no_in_flight_step_is_not_applicable_and_unjournaled(
         self, harness: FunctionalHarness, orchestrator_session: str

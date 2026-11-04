@@ -13,6 +13,13 @@ from utils import EnvLoader, SchemaValidator, YamlLoader
 from utils.clock import Clock
 from utils.jsonl_store import JsonlStore
 
+# Function 10, invariant 5: every concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "report/delivered.json",
+    "outcome": "pass",
+}
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 CONTRACTS_ROOT = REPO_ROOT / "contracts"
 
@@ -212,7 +219,7 @@ def append_outcome(
             status,
             session_id,
             workflow_instance_id,
-            payload={"conditionChecks": []},
+            payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
         ),
     )
 

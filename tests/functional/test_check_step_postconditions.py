@@ -88,6 +88,9 @@ UNEVALUABLE_DELIVERY_WORKFLOW: Mapping[str, Any] = {
 }
 
 
+ALPHA: Mapping[str, Any] = {"slug": "alpha", "state": "done"}
+
+
 def _open_delivery_session(
     build_harness: Callable[..., FunctionalHarness],
     workflows: Mapping[str, Mapping[str, Any]] | None = None,
@@ -118,14 +121,20 @@ class TestCheckStepPostconditions:
     ) -> None:
         """Spec (function 10, Out + Postconditions): the aggregate outcome plus one check
         per declared postcondition, logging the FULL condition object, appended to the
-        DISPATCHING session's log."""
+        DISPATCHING session's log, with the step's delivery (invariant 5) in the same
+        entry."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
+        harness.deliver_step(session, "builder", "report/alpha.json", ALPHA)
 
         run = harness.invoke(FUNCTION, sessionId=session)
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "pass"}
+        assert report["artifactDelivery"] == {
+            "artifact": "report",
+            "artifactPath": "report/alpha.json",
+            "outcome": "pass",
+        }
         checks = report["conditionChecks"]
         assert [check["condition"] for check in checks] == [
             UNBLOCKS_VERIFY_CONDITION,
@@ -157,15 +166,16 @@ class TestCheckStepPostconditions:
         assert "report-delivered" in checks[1]["failureMessage"]
         assert assert_journal_contract(harness, session)[-1]["report"] == report
 
-    def test_a_step_declaring_zero_postconditions_passes_vacuously(
+    def test_a_delivered_step_declaring_zero_postconditions_passes(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
-        """Spec (function 10, invariant 4): a step declaring zero postconditions passes
-        vacuously — `pass` with an empty `conditionChecks`, journaled, and sufficient for
-        the cursor to count the step executed."""
+        """Spec (function 10, invariant 4): declared postconditions may be zero — a
+        delivered step passes with an empty `conditionChecks`, journaled, and sufficient
+        for the cursor to count the step executed."""
         harness.invoke(
             "resolve-step", sessionId=orchestrator_session, workflowSlug="planning"
         )
+        harness.deliver_step(orchestrator_session, "builder", "report/alpha.json", ALPHA)
 
         run = harness.invoke(FUNCTION, sessionId=orchestrator_session)
 
@@ -184,10 +194,10 @@ class TestCheckStepPostconditions:
         function 3's cursor reads — a step whose latest outcome passes counts executed,
         so the next resolution answers the successor, in the same instance."""
         harness, session = _open_delivery_session(build_harness)
-        harness.commit_artifact("report/alpha.json", {"slug": "alpha", "state": "done"})
         instance = harness.read_log(session)[-1]["report"]["context"][
             "workflowInstanceId"
         ]
+        harness.deliver_step(session, "builder", "report/alpha.json", ALPHA)
 
         harness.invoke(FUNCTION, sessionId=session)
         run = harness.invoke("resolve-step", sessionId=session, workflowSlug="delivery")
@@ -369,3 +379,81 @@ class TestCheckStepPostconditions:
             "end-session",
         )
         assert _resolved_step(harness, session) == "produce"
+
+
+class TestArtifactDelivery:
+    """Function 10, invariants 4-5: delivery is never optional, whatever is declared."""
+
+    def test_an_undelivered_step_fails_though_every_postcondition_passes(
+        self, build_harness: Callable[..., FunctionalHarness]
+    ) -> None:
+        """Spec (function 10, invariant 4): the outcome passes only if the artifact was
+        delivered — an instance committed earlier, outside the step's session, satisfies
+        the declared postconditions but delivers nothing."""
+        harness, session = _open_delivery_session(build_harness)
+        harness.commit_artifact("report/alpha.json", ALPHA)
+
+        run = harness.invoke(FUNCTION, sessionId=session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "fail"}
+        assert [check["outcome"] for check in report["conditionChecks"]] == [
+            "pass",
+            "pass",
+        ]
+        delivery = report["artifactDelivery"]
+        assert (delivery["outcome"], delivery["artifactPath"]) == ("fail", None)
+        assert "produce" in delivery["failureMessage"]
+        assert assert_journal_contract(harness, session)[-1]["report"] == report
+
+    def test_updating_an_existing_instance_delivers_it(
+        self, build_harness: Callable[..., FunctionalHarness]
+    ) -> None:
+        """Spec (function 10, invariant 5): creating OR updating one instance — the
+        workflow schema's 'produces or updates' — delivers."""
+        harness, session = _open_delivery_session(build_harness)
+        harness.commit_artifact("report/alpha.json", ALPHA)
+
+        harness.deliver_step(
+            session, "builder", "report/alpha.json", {"slug": "alpha", "state": "revised"}
+        )
+        run = harness.invoke(FUNCTION, sessionId=session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "pass"}
+        assert report["artifactDelivery"]["artifactPath"] == "report/alpha.json"
+
+    def test_a_byte_identical_write_does_not_deliver(
+        self, build_harness: Callable[..., FunctionalHarness]
+    ) -> None:
+        """Spec (function 10, invariant 5 + function 9, invariant 4): a write identical
+        to committed state creates no commit, so it does not deliver."""
+        harness, session = _open_delivery_session(build_harness)
+        harness.commit_artifact("report/alpha.json", ALPHA)
+
+        harness.deliver_step(session, "builder", "report/alpha.json", ALPHA)
+        run = harness.invoke(FUNCTION, sessionId=session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "fail"}
+        assert report["artifactDelivery"]["outcome"] == "fail"
+
+    def test_two_instances_of_the_kind_do_not_deliver(
+        self, build_harness: Callable[..., FunctionalHarness]
+    ) -> None:
+        """Spec (function 10, invariant 5): exactly one instance — a step session that
+        changed two instances of its kind fails, and the message says why."""
+        harness, session = _open_delivery_session(build_harness)
+        step_session = harness.deliver_step(session, "builder", "report/alpha.json", ALPHA)
+        (harness.workspace_dir / "report" / "beta.json").write_text(
+            '{"slug": "beta", "state": "done"}', encoding="utf-8"
+        )
+        harness.invoke(
+            "check-step-artifact", sessionId=step_session, artifactPaths=["report/beta.json"]
+        )
+
+        run = harness.invoke(FUNCTION, sessionId=session)
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "fail"}
+        assert "2" in report["artifactDelivery"]["failureMessage"]

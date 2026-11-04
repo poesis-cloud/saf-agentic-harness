@@ -123,13 +123,17 @@ class ConditionEvaluator:
         )
 
     def _load_artifacts(self, set_query: str) -> celtypes.Value:
-        """Load the committed instances of every artifact slug the query references."""
+        """Load the committed instances of every artifact kind the query references.
+
+        Function 5, invariant 2: `artifacts` maps an artifact (schema) slug to its
+        instances — resolved by kind through the workspace layout, never by path.
+        """
         slugs = sorted(set(_ARTIFACTS_REFERENCE.findall(set_query)))
         return celpy.json_to_cel(
             {
                 slug: [
                     _thaw(entry.data)
-                    for entry in self._artifact_store.discover_artifacts(slug)
+                    for entry in self._artifact_store.discover_artifacts_by_kind(slug)
                 ]
                 for slug in slugs
             }

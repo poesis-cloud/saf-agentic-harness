@@ -45,7 +45,7 @@ class _FailingSessionLogStore(SessionLogStore):
 class _FailingCommitArtifactStore(ArtifactStore):
     """A fake store whose commit fails the way a locked Git index does."""
 
-    def commit_artifacts(self, artifact_paths, *, session_id: str) -> None:
+    def commit_artifacts(self, artifact_paths, *, session_id: str):
         """Fail mid-commit exactly as the Git plane does (function 9, invariant 5)."""
         raise SystemFailureError("git-failed", "git commit failed: index.lock", True)
 
@@ -84,6 +84,9 @@ class TestStepArtifactChecker:
 
         assert report.outcome.status == "valid"
         assert report.artifact_checks == ()
+        assert report.commit is not None
+        assert report.commit.commit_id == run_git(workspace, "rev-parse", "HEAD").strip()
+        assert report.commit.paths == tuple(sorted((ARTIFACT_REF, SIBLING_REF)))
         assert _count_commits(workspace) == commits_before + 1
         assert SESSION in run_git(workspace, "log", "-1", "--format=%B")
         committed = run_git(workspace, "ls-tree", "-r", "--name-only", "HEAD")

@@ -144,6 +144,61 @@ class TestStartSession:
         }
         assert len(assert_journal_contract(harness, "step-session")) == 1
 
+    def test_a_second_step_session_for_one_resolution_is_refused_unjournaled(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 0, invariant 5 + rule 4): 1 step = 1 session — once the
+        in-flight resolution registered its step session, a second start for it is
+        `state-error` (`step-session-bound`), returned and never journaled."""
+        harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
+        harness.invoke(
+            FUNCTION,
+            sessionId="step-session",
+            parentSessionId=orchestrator_session,
+            agent="builder",
+        )
+        parent_before = harness.read_log_lines(orchestrator_session)
+
+        run = harness.invoke(
+            FUNCTION,
+            sessionId="second-session",
+            parentSessionId=orchestrator_session,
+            agent="builder",
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"]["status"] == "state-error"
+        assert run.error_code == "step-session-bound"
+        assert not harness.is_session_logged("second-session")
+        assert harness.read_log_lines(orchestrator_session) == parent_before
+        assert len(harness.read_log("step-session")) == 1
+
+    def test_a_re_resolved_step_admits_a_new_step_session(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 0, invariant 5): function 10 concludes the step at dispatch
+        return; the orchestrator re-resolves the failed step, and that new resolution
+        admits a new step session."""
+        harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
+        harness.invoke(
+            FUNCTION,
+            sessionId="step-session",
+            parentSessionId=orchestrator_session,
+            agent="builder",
+        )
+        concluded = harness.invoke("check-step-postconditions", sessionId=orchestrator_session)
+        assert concluded.status == "fail"
+        harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
+
+        run = harness.invoke(
+            FUNCTION,
+            sessionId="retry-session",
+            parentSessionId=orchestrator_session,
+            agent="builder",
+        )
+
+        assert assert_contract_round_trip(harness, run)["outcome"] == {"status": "started"}
+
     def test_start_against_an_ended_session_is_refused_unjournaled(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:

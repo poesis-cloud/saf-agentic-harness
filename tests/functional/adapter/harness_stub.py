@@ -91,11 +91,20 @@ def default_script() -> dict[str, dict[str, Any]]:
         ),
         build_report("resolve-step-skills", "resolved", skills=["code-review"]),
         build_report("check-step-preconditions", "pass", conditionChecks=[]),
-        build_report("check-step-postconditions", "pass", conditionChecks=[]),
+        build_report(
+            "check-step-postconditions",
+            "pass",
+            conditionChecks=[],
+            artifactDelivery={
+                "artifact": "review-report",
+                "artifactPath": "reviews/r1.json",
+                "outcome": "pass",
+            },
+        ),
         build_report(
             "check-step-authorization", "allowed", authorization=dict(_DEFAULT_AUTHORIZATION)
         ),
-        build_report("check-step-artifact", "valid"),
+        build_report("check-step-artifact", "valid", commitId=None, committedPaths=[]),
         build_report("resolve-step", "no-next-step"),
         build_report(
             "resolve-step-model",

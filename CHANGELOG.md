@@ -112,6 +112,23 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
     Child output (Git, the harness, interpreter probes) is decoded as UTF-8 with
     replacement.
   - `.gitattributes` keeps `*.sh` LF on Windows checkouts.
+- **Artifacts by kind:** CEL conditions' `artifacts['<slug>']` now resolves instances by
+  artifact kind through the workspace layout (function 5, invariant 2). It no longer treats
+  the slug as a path, which found nothing unless a folder happened to share the slug's name.
+- **Function 9 commit record:** the `valid` report carries `commitId` and `committedPaths`.
+  `commitId` is `null` and the paths are empty when the set was byte-identical to `HEAD`. The
+  session log alone now records what each session committed.
+- **1 step = 1 session:** function 0 refuses a second step session for a step resolution
+  that already registered one, with `state-error` / `step-session-bound`. The refusal is
+  returned but not journaled, since the refused session has no log. A failed step recovers
+  as before: function 10 concludes it and the orchestrator re-resolves it, and the new
+  resolution admits a new step session.
+- **Artifact delivery is enforced (breaking contract change):** a step outcome passes only
+  if the step's session committed a change to exactly one instance of its declared artifact
+  kind through function 9, and every declared postcondition passes (function 10, invariants
+  4–5). Zero postconditions no longer pass vacuously. Delivery is a harness invariant, not a
+  condition: it has no slug and cannot be configured. Function 10 reads it from the step
+  session's log and reports it as `artifactDelivery` in the same journaled entry.
 
 ### Known alpha limitations
 

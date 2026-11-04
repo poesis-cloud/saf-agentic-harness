@@ -164,7 +164,7 @@ _DEFAULT_SUCCESS: Mapping[str, tuple[str, Mapping[str, Any]]] = {
     "check-step-preconditions": ("pass", {"conditionChecks": []}),
     "check-step-postconditions": ("pass", {"conditionChecks": []}),
     "check-step-authorization": ("allowed", {"authorization": _DEFAULT_AUTHORIZATION}),
-    "check-step-artifact": ("valid", {}),
+    "check-step-artifact": ("valid", {"commitId": None, "committedPaths": []}),
     "resolve-step": ("no-next-step", {}),
     "resolve-step-model": (
         "resolved",
