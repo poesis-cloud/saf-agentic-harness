@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from binding_contract import BindingContractError
-from hook_binding import HookBinding, load_hook_binding
+from hook_binding import BindingContractError, HookBinding, load_hook_binding
 
 
 @pytest.fixture
@@ -294,6 +293,36 @@ class TestHookBindingPatchExtraction:
             (Path("portfolio/new-name.md"), "create"),
             (Path("portfolio/gone.md"), "delete"),
         )
+
+    @pytest.mark.parametrize(
+        "header",
+        [
+            "*** Add File: portfolio/plan.md ",
+            "*** Add File:  portfolio/plan.md",
+            "*** Update File: portfolio/plan.md\t",
+            "*** Delete File: portfolio/plan.md\r",
+            "*** Add File: ",
+        ],
+    )
+    def test_a_header_path_the_host_would_not_write_verbatim_is_unextractable(
+        self, binding: HookBinding, header: str
+    ) -> None:
+        """Adapter spec H3: the host takes a header path verbatim (no trim), so a path
+        with surrounding whitespace would be authorized under another name than the one
+        written — the whole call is unextractable (and so denied), never normalized.
+        """
+        patch = "*** Begin Patch\n*** Add File: portfolio/ok.md\n+x\n" + header + "\n+y\n*** End Patch"
+        assert binding.resolve_path_actions("apply_patch", {"input": patch}) == ()
+        assert binding.extract_artifact_paths({"input": patch}) == ()
+
+    def test_patch_lines_split_only_on_newline_as_the_host_does(
+        self, binding: HookBinding
+    ) -> None:
+        """Adapter spec H3: a form feed is not a line break to the host, so a header
+        hidden behind one is not a header — and must not authorize a path.
+        """
+        patch = "*** Begin Patch\n+x\x0c*** Add File: portfolio/hidden.md\n*** End Patch"
+        assert binding.resolve_path_actions("apply_patch", {"input": patch}) == ()
 
     def test_resolves_the_tool_action_of_every_flat_path(
         self, binding: HookBinding

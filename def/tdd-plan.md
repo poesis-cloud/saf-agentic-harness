@@ -337,12 +337,12 @@ time of this refresh; `make verify` is authoritative):
 
 | Plane | Location | Tests |
 | --- | --- | --- |
-| Unit — core | `tests/unit/{utils,config,stores,services,commands}`, `test_application.py`, `test_errors.py` | 444 |
-| Unit — adapter | `tests/unit/adapter/` | 150 |
+| Unit — core | `tests/unit/{utils,config,stores,services,commands}`, `test_application.py`, `test_errors.py` | 447 |
+| Unit — adapter | `tests/unit/adapter/` | 156 |
 | Functional — core | `tests/functional/` (one module per function, plus `test_log_replay.py` and `test_unreadable_logs.py`) | 189 |
 | Functional — adapter | `tests/functional/adapter/` (H0–H7, dispatch plumbing, hook bootstrap) | 65 |
 | Adapter conformance | `tests/adapter/` (hook map, adapter configuration, dispatch funnel, hook contracts, hook / agent-hook / settings rendering) | 85 |
-| **Total** | `tests/` | **933** |
+| **Total** | `tests/` | **942** |
 
 ## 7. Known gaps and risks
 

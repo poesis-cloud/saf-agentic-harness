@@ -226,6 +226,20 @@ class TestStepModelResolver:
         assert len(journaled) == 3
         assert journaled[-1]["report"]["outcome"]["status"] == "state-error"
 
+    def test_an_error_report_whose_entry_is_lost_keeps_its_primary_error(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Rule 1, `system-error`: an error report whose own entry is lost keeps its primary
+        error — the append failure never masks the cause the caller must act on."""
+        start_session_log(log_store)
+        append_resolution(log_store, workflow_instance_id=None)
+        failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
+
+        report = _build_resolver(failing_store).resolve_step_model(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error.code == "step-correlation-missing"
+
     def test_reports_configuration_error_when_the_model_catalog_is_empty(
         self, log_store: SessionLogStore, workspace_dir: Path
     ) -> None:

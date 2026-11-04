@@ -214,7 +214,8 @@ class StepModelResolver:
         )
 
     def _journal_report(self, report: ModelProfileReport) -> ModelProfileReport:
-        """Append this invocation's single entry; a failing append surfaces `system-error`.
+        """Append this invocation's single entry; a failing append surfaces `system-error`
+        on a success report, while an error report keeps its primary error.
 
         Spec (rule 4): a completed invocation whose log append fails "still returns its
         report" — the entry is lost, never the profile the caller was promised.
@@ -223,6 +224,9 @@ class StepModelResolver:
         try:
             self._session_log_store.append_log_entry(report.context.session_id, entry)
         except (OSError, HarnessError) as failure:
+            if report.outcome.error is not None:
+                # An error report whose own entry is lost keeps its primary error (rule 1).
+                return report
             lost = SystemFailureError("log-append-failed", str(failure), True)
             return ModelProfileReport(
                 context=report.context,

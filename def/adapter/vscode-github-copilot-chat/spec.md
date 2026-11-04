@@ -952,7 +952,11 @@ the call:
   `*** Update File:` / `*** Delete File:` / `*** Move to:` headers, and each path carries
   the action its header performs (`create` / `update` / `delete`; a move vacates its source
   — `delete` — and creates its destination), so a patch that deletes or renames is denied in
-  v1 like any `delete`. Absolute host paths are relativized to the workspace root before
+  v1 like any `delete`. The patch is read as the host reads it — lines split on `\n` only,
+  the header path taken verbatim after the header's single space, never trimmed. A header
+  path that is empty or carries surrounding whitespace (a CR included) would be authorized
+  under a different name than the one the host writes, so it makes the whole call
+  unextractable. Absolute host paths are relativized to the workspace root before
   invocation.
 - **Fail closed on an unextractable write.** A registered session's call to a DECLARED write
   tool from which no artifact path can be extracted is **denied** without invoking the

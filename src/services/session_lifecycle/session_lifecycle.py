@@ -205,10 +205,10 @@ class SessionLifecycle:
                     ),
                 ),
             )
-            failure = self._append_entry(context.session_id, report)
-            if failure is None:
-                return report
-            return SessionStartReport(context=context, outcome=_error_outcome(failure))
+            # Best-effort: an error report whose own entry is lost keeps its primary error
+            # (rule 1), so the append outcome never replaces the refusal.
+            self._append_entry(context.session_id, report)
+            return report
         return SessionStartReport(
             context=context,
             outcome=Outcome(status="started"),

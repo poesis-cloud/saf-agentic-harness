@@ -519,6 +519,25 @@ class TestOneInstancePerOrchestratorSession:
         assert len(journaled) == 3
         assert journaled[-1]["report"]["outcome"]["error"]["code"] == "session-instance-bound"
 
+    def test_a_refusal_whose_entry_is_lost_keeps_its_primary_error(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Rule 1, `system-error`: an error report whose own entry is lost keeps its primary
+        error — a lost refusal entry never turns a permanent refusal into a retryable one."""
+        start_session_log(log_store)
+        _build_two_workflow_resolver(log_store).resolve_step(
+            ORCHESTRATOR_SESSION, None, "planning"
+        )
+        failing_store = SessionLogStore(workspace_dir, jsonl_store=FailingAppendJsonlStore())
+
+        second = _build_two_workflow_resolver(failing_store).resolve_step(
+            ORCHESTRATOR_SESSION, None, "planning-review"
+        )
+
+        assert second.outcome.status == "state-error"
+        assert second.outcome.error.code == "session-instance-bound"
+        assert second.outcome.error.retryable is False
+
     def test_refuses_a_second_workflow_after_the_first_instance_has_no_next_step(
         self, log_store: SessionLogStore
     ) -> None:

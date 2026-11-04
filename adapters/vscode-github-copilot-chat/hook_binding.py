@@ -30,10 +30,12 @@ _CREATE_ACTION = "create"
 _UPDATE_ACTION = "update"
 # Patch-document file headers (the `*** Begin Patch` format `apply_patch` carries) and the
 # action each performs; `*** Move to:` re-targets the preceding `*** Update File:`.
-_PATCH_ADD_HEADER = "*** Add File:"
-_PATCH_UPDATE_HEADER = "*** Update File:"
-_PATCH_DELETE_HEADER = "*** Delete File:"
-_PATCH_MOVE_HEADER = "*** Move to:"
+# The host's own header prefixes, trailing space included: the host takes the rest of the
+# line verbatim (no trim) as the path it writes.
+_PATCH_ADD_HEADER = "*** Add File: "
+_PATCH_UPDATE_HEADER = "*** Update File: "
+_PATCH_DELETE_HEADER = "*** Delete File: "
+_PATCH_MOVE_HEADER = "*** Move to: "
 
 
 @dataclass(frozen=True)
@@ -120,7 +122,11 @@ class HookBinding:
         for key in self.patch_keys:
             patch = tool_input.get(key)
             if isinstance(patch, str):
-                operations.extend(_parse_patch_operations(patch))
+                patch_operations = _parse_patch_operations(patch)
+                if patch_operations is None:
+                    # An ambiguous header makes the whole call unextractable: fail closed.
+                    return ()
+                operations.extend(patch_operations)
         for raw_path, action in operations:
             path = Path(raw_path)
             if path not in found or action == _DELETE_ACTION:
@@ -167,29 +173,41 @@ def _iter_nested_values(value: Any, segments: Sequence[str]) -> Iterator[str]:
     yield from _iter_nested_values(value.get(segment), segments[1:])
 
 
-def _parse_patch_operations(patch: str) -> list[tuple[str, str]]:
-    """Read the (path, action) pairs a patch document's file headers declare."""
+def _parse_patch_operations(patch: str) -> list[tuple[str, str]] | None:
+    """Read the (path, action) pairs a patch document's file headers declare.
+
+    Lines are split on `\n` and header paths are taken verbatim, exactly as the host's
+    patch parser does. A header path that is empty or carries surrounding whitespace
+    (including a CR) would be authorized under a different name than the host writes,
+    so it makes the patch ambiguous: `None`, which the caller treats as unextractable.
+    """
     operations: list[tuple[str, str]] = []
     headers = (
         (_PATCH_ADD_HEADER, _CREATE_ACTION),
         (_PATCH_UPDATE_HEADER, _UPDATE_ACTION),
         (_PATCH_DELETE_HEADER, _DELETE_ACTION),
     )
-    for line in patch.splitlines():
+    for line in patch.split("\n"):
         if line.startswith(_PATCH_MOVE_HEADER):
-            destination = line[len(_PATCH_MOVE_HEADER):].strip()
-            if destination and operations and operations[-1][1] == _UPDATE_ACTION:
+            destination = line[len(_PATCH_MOVE_HEADER):]
+            if not _is_verbatim_path(destination):
+                return None
+            if operations and operations[-1][1] == _UPDATE_ACTION:
                 operations[-1] = (operations[-1][0], _DELETE_ACTION)
-            if destination:
-                operations.append((destination, _CREATE_ACTION))
+            operations.append((destination, _CREATE_ACTION))
             continue
         for header, action in headers:
             if line.startswith(header):
-                path = line[len(header):].strip()
-                if path:
-                    operations.append((path, action))
+                path = line[len(header):]
+                if not _is_verbatim_path(path):
+                    return None
+                operations.append((path, action))
                 break
     return operations
+
+
+def _is_verbatim_path(raw: str) -> bool:
+    return raw != "" and raw == raw.strip()
 
 
 def load_hook_binding(
