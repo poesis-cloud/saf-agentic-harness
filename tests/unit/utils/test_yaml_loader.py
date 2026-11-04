@@ -30,3 +30,30 @@ class TestYamlLoader:
 
         with pytest.raises(yaml.constructor.ConstructorError):
             YamlLoader().load_yaml(yaml_file)
+
+
+class TestJsonDataParsing:
+    """Artifact YAML is read in the JSON data model its JSON Schemas validate."""
+
+    def test_keeps_implicit_and_tagged_timestamps_as_strings(self) -> None:
+        data = YamlLoader().parse_json_data(
+            "day: 2026-11-04\nat: 2026-11-04T10:00:00Z\ntagged: !!timestamp 2026-11-04\n"
+            "n: 3\nok: true\nnothing: null\n"
+        )
+
+        assert dict(data) == {
+            "day": "2026-11-04", "at": "2026-11-04T10:00:00Z", "tagged": "2026-11-04",
+            "n": 3, "ok": True, "nothing": None,
+        }
+
+    def test_leaves_configuration_loading_unchanged(self, tmp_path) -> None:
+        import datetime
+
+        yaml_file = tmp_path / "sample.yaml"
+        yaml_file.write_text("day: 2026-11-04\n", encoding="utf-8")
+
+        assert YamlLoader().load_yaml(yaml_file)["day"] == datetime.date(2026, 11, 4)
+
+    def test_rejects_unsafe_yaml_tags(self) -> None:
+        with pytest.raises(yaml.constructor.ConstructorError):
+            YamlLoader().parse_json_data("!!python/object/apply:os.system ['echo unsafe']\n")
