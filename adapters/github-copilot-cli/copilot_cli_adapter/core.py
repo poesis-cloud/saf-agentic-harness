@@ -21,6 +21,7 @@ Boundary map (see `def/adapter/github-copilot-cli/spec.md`):
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -30,7 +31,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
 from .invocation import HarnessInvocation, unquote
-from .paths import host_basename, relativize
+from .paths import host_basename, is_within, relativize, resolve_host_path
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
 from .runner import CommandRunner, HarnessCommandError
@@ -84,6 +85,9 @@ _STRICT_HARNESS_COMMAND = re.compile(
 )
 _TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
 _TOKEN_TRIM = "'\"();|&<>`"
+# A `<rev>:<path>` git object name (`HEAD:portfolio/x.md`): never a drive (`C:`), a variable
+# (`$env:TEMP`) or a URL.
+_GIT_REVISION_PATH = re.compile(r"^(?![A-Za-z]:)[^:/\\$]+:(?!//)(?P<path>.+)$")
 
 # The deny reason is the ONLY preToolUse field the runtime shows the agent, so it carries the
 # harness's answer; these prefixes tell a result from a refusal of the request itself.
@@ -479,22 +483,72 @@ class Adapter:
         return renderer.deny([f"{HARNESS_RESULT} ({request.function}): {directive}\n\n{rendered}"])
 
     def _find_guarded_path(self, command: str, cwd: str | None) -> str | None:
-        markers = [f"{self._workspace_name}/", f"{self._workspace_name}\\", "logs/", "logs\\"]
-        workspace = self._workspace_dir.replace("\\", "/").rstrip("/").lower()
+        """I9 — the first token naming the workspace or `logs/`: by name, by absolute prefix,
+        or by a relative path that resolves into the workspace.
+
+        A relative path resolves against the event's `cwd`. A token is taken as a path when
+        it has a separator or a leading `.`, when it exists, or when it follows `--`. A git
+        `<rev>:<path>` object name counts as a path from the repository root: the workspace
+        when `cwd` is inside it.
+        """
+        pathspecs_only = False
         for token in command.split():
             candidate = token.strip(_TOKEN_TRIM)
             if not candidate:
+                if any(separator in token for separator in ";|&"):
+                    pathspecs_only = False
                 continue
-            if self._workspace_name and any(
-                candidate.startswith(marker) or f"/{marker}" in candidate or f"\\{marker}" in candidate
-                for marker in markers
-            ):
-                return candidate
-            if candidate == self._workspace_name and self._workspace_name:
-                return candidate
-            if workspace and candidate.replace("\\", "/").lower().startswith(workspace):
+            if candidate == "--":
+                pathspecs_only = True
+                continue
+            if self._names_guarded_path(candidate, cwd, pathspecs_only):
                 return candidate
         return None
+
+    def _names_guarded_path(self, candidate: str, cwd: str | None, pathspec: bool) -> bool:
+        references = [(candidate, cwd, pathspec)]
+        if candidate.startswith("-") and "=" in candidate:
+            references.append((candidate.split("=", 1)[1], cwd, False))
+        revision = _GIT_REVISION_PATH.match(candidate)
+        if revision is not None:
+            path = revision.group("path")
+            root = (
+                self._workspace_dir
+                if not path.startswith(".") and is_within(cwd or "", None, self._workspace_dir)
+                else cwd
+            )
+            references.append((path, root, True))
+        return any(
+            self._names_by_text(reference) or self._names_by_resolution(reference, anchor, explicit)
+            for reference, anchor, explicit in references
+        )
+
+    def _names_by_text(self, reference: str) -> bool:
+        name = self._workspace_name
+        markers = [f"{name}/", f"{name}\\", "logs/", "logs\\"]
+        if name and (
+            reference == name
+            or any(
+                reference.startswith(marker) or f"/{marker}" in reference or f"\\{marker}" in reference
+                for marker in markers
+            )
+        ):
+            return True
+        workspace = self._workspace_dir.replace("\\", "/").rstrip("/").lower()
+        return bool(workspace) and reference.replace("\\", "/").lower().startswith(workspace)
+
+    def _names_by_resolution(self, reference: str, anchor: str | None, explicit: bool) -> bool:
+        if not anchor or not reference or reference[0] in "-$~" or "://" in reference:
+            return False
+        if not (
+            explicit
+            or "/" in reference
+            or "\\" in reference
+            or reference.startswith(".")
+            or os.path.exists(str(resolve_host_path(reference, anchor, self._workspace_dir)))
+        ):
+            return False
+        return is_within(reference, anchor, self._workspace_dir)
 
     # H5 / H6 --------------------------------------------------------------------------
 

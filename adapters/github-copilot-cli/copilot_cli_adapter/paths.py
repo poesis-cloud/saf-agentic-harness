@@ -69,6 +69,17 @@ def relativize(raw: str, cwd: str | None, workspace_dir: str) -> str:
     return resolved.as_posix()
 
 
+def is_within(raw: str, cwd: str | None, workspace_dir: str) -> bool:
+    """Tell whether a path, resolved against `cwd`, is the workspace or lies inside it."""
+    if not workspace_dir:
+        return False
+    resolved = resolve_host_path(raw, cwd, workspace_dir)
+    workspace = _normalize(type(resolved), workspace_dir)
+    if not _same_flavor_absolute(workspace, type(resolved)) or not resolved.is_absolute():
+        return False
+    return resolved == workspace or workspace in resolved.parents
+
+
 def _same_flavor_absolute(path: PurePath, flavor: type[PurePath]) -> bool:
     return isinstance(path, flavor) and path.is_absolute()
 
@@ -81,4 +92,4 @@ def host_basename(raw: str) -> str:
     return flavor(raw.rstrip("\\/") or raw).name
 
 
-__all__ = ["host_basename", "is_windows_path", "relativize", "resolve_host_path"]
+__all__ = ["host_basename", "is_within", "is_windows_path", "relativize", "resolve_host_path"]
