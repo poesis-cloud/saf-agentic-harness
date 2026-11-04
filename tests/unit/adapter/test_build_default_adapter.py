@@ -186,7 +186,7 @@ def test_layout_directories_still_come_from_the_framework(
 
     injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
     assert INSTRUCTION_BODY in injected
-    assert str(framework_dir / "skills" / "code-review.skill.md") in injected
+    assert (framework_dir / "skills" / "code-review.skill.md").as_posix() in injected
 
 
 def test_the_harness_runs_under_the_adapter_own_interpreter(
@@ -239,7 +239,7 @@ def test_reads_the_layout_from_the_framework_env_file_when_the_hook_env_carries_
 
     injected = json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
     assert INSTRUCTION_BODY in injected
-    assert str(framework_dir / "skills" / "code-review.skill.md") in injected
+    assert (framework_dir / "skills" / "code-review.skill.md").as_posix() in injected
 
 
 def test_the_process_environment_takes_precedence_over_the_env_file(

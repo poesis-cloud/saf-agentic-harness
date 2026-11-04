@@ -124,7 +124,7 @@ class TestHookRenderer:
         context = assert_valid_stdout(decision.stdout)["hookSpecificOutput"][
             "additionalContext"
         ]
-        assert str(skills_dir / "code-review.skill.md") in context
+        assert (skills_dir / "code-review.skill.md").as_posix() in context
         assert "# Code review" not in context
 
     def test_renders_the_same_reports_byte_identically(
