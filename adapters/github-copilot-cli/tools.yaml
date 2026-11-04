@@ -12,8 +12,8 @@ writeTools:
   str_replace_editor: update # legacy multi-command editor; its `command` refines the action below
 deleteTools: []
 # Freeform patch tools: targets live only in the patch text's `*** Add/Update/Delete File:` and
-# `*** Move to:` headers. Not offered by the runtime as of 1.0.105 (CLI) / 1.0.102 (app) — declared so that, if a
-# model/runtime ever exposes one, a patch whose targets cannot be parsed is DENIED (fail closed).
+# `*** Move to:` headers. Offered instead of create/edit to GPT-5.x models (CLI 1.0.105), with
+# `toolArgs` the raw patch string. A patch whose targets cannot be parsed is DENIED (fail closed).
 patchTools: [apply_patch]
 patchKeys: [input, patch]
 writeToolSubcommands:

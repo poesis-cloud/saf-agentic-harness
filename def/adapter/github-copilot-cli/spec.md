@@ -61,7 +61,12 @@ replayed from a live capture in the process tests).
    - Dispatch: `task` (`agent_type`, `name`, `description`, `prompt`, optional `model`/`mode`).
    - Also `skill`, MCP tools, and `ask_user` in an interactive session. The standalone CLI's
      non-interactive prompt mode (`copilot -p`) offers **no `ask_user`** (observed, 1.0.105).
-   - **No `apply_patch`** in either. Paths are absolute host paths (`C:\Users\…`, `/home/…`).
+   - The file tools depend on the MODEL (observed, CLI 1.0.105). Claude-family models get
+     `create`/`edit`; `create` refuses a missing parent folder ("Parent directory … does not
+     exist. You need to create it before creating the file"), and `edit` needs an existing
+     file. GPT-5.x models get no `create`/`edit` but a freeform `apply_patch`, whose
+     `toolArgs` is the raw patch string; its `*** Add File:` creates missing folders.
+   - Paths are absolute host paths (`C:\Users\…`, `/home/…`).
 6. **Subagents.** `subagentStart`/`subagentStop` carry the subagent's
    `agentId`/`agentType`/`agentName` and, in `parentAgentId`, the DISPATCHER's id. For a
    first-level subagent `sessionId` is the dispatcher too. For a subagent dispatched BY a
@@ -342,7 +347,7 @@ committed.
 | H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). | C6 commit-set remediation. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
-| `apply_patch` | Not offered (app 1.0.102, CLI 1.0.105). | Bound anyway. Unparseable patch → deny. |
+| `apply_patch` | Offered instead of `create`/`edit` to GPT-5.x models only (CLI 1.0.105); `toolArgs` is the raw patch string. | Bound as a patch tool: every header target is authorized; an unparseable patch → deny. |
 | `task` `mode: background` | The step returns before it ends, so H6 cannot evaluate it. | Denied in governed sessions. |
 | H6 enforcement | `postToolUse` can only inform, not undo, a returned step. | The `additionalContext` directive to re-resolve. Future: `subagentStop` `decision: block` + `reason` can force the subagent to continue. |
 | `exec` entries | Observed executing in the standalone CLI (1.0.105, plugin `hooks.json`); not yet observed in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
