@@ -298,3 +298,68 @@ def test_a_harness_failure_never_leaks_its_text(host: Host) -> None:
         "path": str(host.workspace / "portfolio" / "a.md"), "old_str": "a", "new_str": "b"}}]})
     assert run.decision["permissionDecision"] == "deny"
     assert "secret" not in run.decision["permissionDecisionReason"]
+
+
+def test_a_step_an_orchestrator_subagent_dispatches_opens_under_that_subagent(host: Host) -> None:
+    """Live-trial replay (app 1.0.102, plugin agents): VMO subagent dispatches a VMO-acted step.
+
+    The nested `subagentStart` carries a `sessionId` no other event names; the dispatcher is
+    only in `parentAgentId`. The step opens under the dispatcher's session and the actor's
+    scoped H0 never re-opens it as a root orchestrator turn.
+    """
+    vmo, plugin_vmo = "value-management-officer", "poesis-saf-agentic-organization:value-management-officer"
+    root, d1 = "95fd9c8d-1900-48cf-96c7-3c0a9d816674", "d1fa24bb-97fd-4123-98d3-751ba40f3fa1"
+    step, opaque = "8e202f77-4865-4162-a74e-90d3273f72b6", "7abc93fb-b994-4ddc-bdf1-b567b3005b1d"
+    cwd, artifact = str(host.root), str(host.workspace / "portfolio" / "portfolio-sync.md")
+    start = {"transcriptPath": f"{root}\\events.jsonl", "agentType": plugin_vmo,
+             "agentName": plugin_vmo, "agentDisplayName": vmo, "cwd": cwd}
+    inside = {"agentType": plugin_vmo, "cwd": cwd}
+
+    def in_d1(**fields: Any) -> dict[str, Any]:
+        return {"sessionId": d1, "agentId": d1, "parentAgentId": root, **inside, **fields}
+
+    def in_step(**fields: Any) -> dict[str, Any]:
+        return {"sessionId": step, "agentId": step, "parentAgentId": d1, **inside, **fields}
+
+    nested_start = {**start, "sessionId": opaque, "agentId": step, "timestamp": 1793825897288,
+                    "parentAgentId": d1}
+    events: list[tuple[str, dict[str, Any], str | None]] = [
+        ("subagentStart", {**start, "sessionId": root, "agentId": d1, "timestamp": 1793825800000,
+                           "parentAgentId": root}, None),
+        ("userPromptSubmitted", in_d1(prompt="sync", timestamp=1793825800100), vmo),
+        ("preToolUse", in_d1(timestamp=1793825890000, toolCalls=[
+            {"id": "t1", "name": "task", "args": {"agent_type": plugin_vmo, "prompt": "p"}}]), None),
+        ("subagentStart", nested_start, None),
+        ("userPromptSubmitted", in_step(prompt="act", timestamp=1793825897400), vmo),
+        ("preToolUse", in_step(timestamp=1793825898000, toolCalls=[
+            {"id": "t2", "name": "create", "args": {"path": artifact, "file_text": "x"}}]), None),
+        ("postToolUse", in_step(timestamp=1793825899000, toolName="create",
+                                toolArgs={"path": artifact, "file_text": "x"},
+                                toolResult={"resultType": "success", "textResultForLlm": "ok"}), None),
+        ("agentStop", in_step(stopReason="end_turn", timestamp=1793825899500), None),
+        ("subagentStop", {**nested_start, "stopReason": "end_turn"}, None),
+        ("postToolUse", in_d1(timestamp=1793825899900, toolName="task",
+                              toolArgs={"agent_type": plugin_vmo, "prompt": "p"},
+                              toolResult={"resultType": "success", "textResultForLlm": "done"}), None),
+    ]
+    for event, payload, agent in events:
+        run = host.fire(event, payload, agent)
+        assert run.code == 0, (event, run.stderr)
+        if event == "preToolUse":
+            assert run.decision is None, (event, run.stdout)
+
+    orchestrator_open, step_open = host.stub.find_calls("start-session")
+    orchestrator = orchestrator_open.value("--session-id")
+    assert orchestrator.startswith(d1) and orchestrator_open.value("--parent-session-id") is None
+    assert step_open.value("--session-id") == step
+    assert step_open.value("--agent") == vmo
+    assert step_open.value("--parent-session-id") == orchestrator
+    assert len(host.stub.find_calls("resolve-workflow-instructions")) == 1
+    (authorize,) = host.stub.find_calls("check-step-authorization")
+    assert authorize.value("--session-id") == step
+    assert authorize.value("--artifact-path") == "portfolio/portfolio-sync.md"
+    (landed,) = host.stub.find_calls("check-step-artifact")
+    assert landed.value("--session-id") == step
+    (postconditions,) = host.stub.find_calls("check-step-postconditions")
+    assert postconditions.value("--session-id") == orchestrator
+    assert opaque not in json.dumps([call.argv for call in host.stub.calls])

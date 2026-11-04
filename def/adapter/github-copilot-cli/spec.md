@@ -62,9 +62,13 @@ replayed from a live capture in the process tests).
    - Also `skill`, MCP tools, and `ask_user` in an interactive session. The standalone CLI's
      non-interactive prompt mode (`copilot -p`) offers **no `ask_user`** (observed, 1.0.105).
    - **No `apply_patch`** in either. Paths are absolute host paths (`C:\Users\…`, `/home/…`).
-6. **Subagents.** `subagentStart`/`subagentStop` carry the DISPATCHER's `sessionId` and the
-   subagent's `agentId`/`agentType`/`agentName`. Inside the subagent, EVERY event carries
-   `sessionId = agentId`, plus `parentAgentId`. Observed order at a step's return (both hosts):
+6. **Subagents.** `subagentStart`/`subagentStop` carry the subagent's
+   `agentId`/`agentType`/`agentName` and, in `parentAgentId`, the DISPATCHER's id. For a
+   first-level subagent `sessionId` is the dispatcher too. For a subagent dispatched BY a
+   subagent, `sessionId` is an id no other event carries (observed, app 1.0.102): only
+   `parentAgentId` names the dispatcher. Inside the subagent, EVERY event carries
+   `sessionId = agentId`, plus `parentAgentId`. `subagentStart` fires before the subagent's
+   first `userPromptSubmitted`. Observed order at a step's return (both hosts):
    subagent `agentStop`, then `subagentStop`, then the dispatcher's `postToolUse(task)`. The
    `task` result text is elided by the runtime.
    **Plugin agents are namespaced** `<plugin-name>:<agent>`: in `task` `agent_type` (a bare
@@ -86,9 +90,9 @@ replayed from a live capture in the process tests).
 | Runtime event (registration) | Boundary | Harness function(s) | Decision on stdout |
 | --- | --- | --- | --- |
 | `sessionStart` (global) | — (announce) | none | `additionalContext`: framework root, workspace root, the exact harness command lines. Stateless. |
-| `userPromptSubmitted` (**agent-scoped**, orchestrators) | **H0** session-started | `start-session` (turn) | none (the runtime ignores this event's output) |
+| `userPromptSubmitted` (**agent-scoped**, orchestrators) | **H0** session-started | `start-session` (turn); skipped in a step session and for an agent a governed session dispatched | none (the runtime ignores this event's output) |
 | `userPromptTransformed` (**agent-scoped**, orchestrators) | **H0** context injection | `start-session` if still needed; `resolve-workflow-instructions`, `resolve-workflow-skills` | `modifiedTransformedPrompt` = hint + context + original |
-| `subagentStart` (global) | **H1** step-started | `start-session` (step, parent = dispatcher), `resolve-step-instructions`, `resolve-step-skills` | `additionalContext` = hint + step context |
+| `subagentStart` (global) | **H1** step-started | `start-session` (step, parent = dispatcher: `parentAgentId`, else `sessionId`), `resolve-step-instructions`, `resolve-step-skills` | `additionalContext` = hint + step context |
 | `preToolUse` · `task` (global) | **H2** step-starting | `check-step-preconditions` | deny on fail; deny `mode: background` |
 | `preToolUse` · `create`/`edit`/`str_replace_editor`/`apply_patch` | **H3** write-starting | `check-step-authorization` per target path | deny unless EVERY target of EVERY write in the batch is allowed. An unextractable target is denied. |
 | `preToolUse` · `powershell`/`bash` naming `harness.py` | **H4** agent harness request (hook-executed) | `resolve-step` / `resolve-step-model`, run BY the hook for the observed session | deny whose reason is `SAFe agentic harness RESULT (<fn>): …` + the report JSON; the shell never runs the line. Anything else that mentions `harness.py` → deny `SAFe agentic harness REJECTED: …`. Never `modifiedArgs`. |
@@ -147,6 +151,12 @@ own permission flow still applies to what the harness lets through.
 ### H0 — userPromptSubmitted / userPromptTransformed (agent-scoped)
 
 - **Pre:** `--agent` is present (scoped hook) and `sessionId` is non-empty. Otherwise pass.
+- **Step sessions are H1's.** An orchestrator agent acting a step still fires its scoped hook.
+  When the record for `sessionId` is a step (`origin: step`), H0 passes: no `start-session`,
+  no workflow context. When there is no record but `parentAgentId` names a session that has
+  one, the agent was opened by a governed session's dispatch (core: `parentSessionId` is "the
+  session whose action opened it"), so it is never a root turn: H0 passes with a diagnostic
+  and the agent stays ungoverned (H1 could not open its step).
 - **Effect:** on the first firing with no record, run `start-session --agent <slug>
   --session-id <sessionId>-t<timestamp>`. On `started`, write the record. On
   `not-applicable` (not an orchestrator per the framework), write nothing and pass.
@@ -157,7 +167,9 @@ own permission flow still applies to what the harness lets through.
 
 ### H1 — subagentStart
 
-- **Pre:** the dispatcher (`sessionId`) has a record, and `agentId`/`agentType` are present.
+- **Pre:** the dispatcher has a record, and `agentId`/`agentType` are present. The dispatcher is
+  the host-observed `parentAgentId`, falling back to `sessionId` when it is absent; `sessionId`
+  alone is wrong for a nested subagent (host fact 6).
   Otherwise pass, which leaves the subagent ungoverned: see *Limited boundaries*.
 - **Effect:** `start-session --agent <agentType> --session-id <agentId> --parent-session-id
   <dispatcher session>`. On `started`, record it with `origin: step` and return
@@ -318,7 +330,7 @@ committed.
 | Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Harness calls are local and fast. H5 still validates and reverts after the fact. |
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
-| H0 inside a subagent | It is not verified whether agent-scoped hooks fire for an orchestrator dispatched as a subagent. | H1 opens the step session from the global `subagentStart` anyway. The hint is part of every governed context. |
+| H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a step session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
 | H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). | C6 commit-set remediation. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |

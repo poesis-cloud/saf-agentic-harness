@@ -68,6 +68,22 @@ class HookInput:
         return str(value) if value is not None else None
 
     @property
+    def parent_host_id(self) -> str | None:
+        """The sanitized host id of the agent whose action opened this one, when observed."""
+        raw = self.raw_parent_host_session_id
+        return sanitize_identifier(raw) if raw else None
+
+    @property
+    def dispatcher_host_id(self) -> str | None:
+        """At `subagentStart`/`subagentStop`: the host id of the agent that dispatched.
+
+        The dispatcher is the host-observed `parentAgentId`. `sessionId` names it only for a
+        first-level subagent; for a subagent dispatched by a subagent the runtime fills
+        `sessionId` with an id no other event carries (observed, app 1.0.102).
+        """
+        return self.parent_host_id or self.host_id
+
+    @property
     def timestamp(self) -> str | None:
         value = self.binding.probe(self.payload, self.binding.host_timestamp_keys)
         return str(value) if value is not None else None
