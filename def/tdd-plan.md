@@ -371,15 +371,12 @@ landed on `main`, but the repository records no close-out of the **catch-up `sys
 review**; it stays open until the Wave 5 `system-architect` gate ratifies them. Until then, a
 finding against them is a normal correction, not a regression.
 
-**Adapter open items I4 and I13(a)/(d) remain open — live-host verification only.** They are
+**Adapter open items I13(a)/(d) remain open — live-host verification only.** They are
 the permanently tracked items in
 [`adapter/vscode-github-copilot-chat/spec.md`](adapter/vscode-github-copilot-chat/spec.md).
-I4's narrow tool-boundary-stamp exception is specified and implemented (H4), but the real fix —
-a host-native attribution surface outside model-visible arguments — is tracked, not scheduled.
-The exception applies to the VS Code adapter only: the `github-copilot-cli` adapter runs
-functions 3–4 from its own `preToolUse` hook with the payload's session and never stamps a
-command, so it does not need it
-([`adapter/github-copilot-cli/spec.md`](adapter/github-copilot-cli/spec.md), Mediated-attribution status).
+I4 is closed: both adapters now run functions 3–4 from their own `PreToolUse`/`preToolUse`
+hook with the payload's session and never edit an agent's command, so the core's former
+tool-boundary-stamp exception is retired and nothing tracks it any more.
 I13(a) and I13(d) are out of test scope: (a) whether a steering message
 submitted mid-execution fires `UserPromptSubmit` on the native panel path, and (d) hooks being
 a preview feature whose setting names and event set may drift. Neither is closable by a test —

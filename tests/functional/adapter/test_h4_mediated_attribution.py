@@ -1,10 +1,11 @@
-"""H4 `PreToolUse` (harness-command class) end to end — mediated session attribution."""
+"""H4 `PreToolUse` (harness-command class) end to end — the hook runs the agent's request."""
 
 from __future__ import annotations
 
+import json
 from typing import Callable
 
-from harness_stub import HarnessStub
+from harness_stub import HarnessStub, build_report
 from hook_dispatch import HookRun
 from host_events import TURN_SESSION_ID, pre_tool_use
 
@@ -14,36 +15,65 @@ def _terminal_call(command: str) -> dict[str, object]:
 
 
 class TestMediatedAttributionHook:
-    """Adapter spec H4 — mediated attribution for functions 3-4, the agent-invoked pair."""
+    """Adapter spec H4 — hook-executed functions 3-4, the agent-requested pair."""
 
-    def test_stamps_the_resolved_session_onto_the_whole_rewritten_tool_input(
+    def test_runs_the_request_in_the_hook_and_answers_with_the_report(
         self,
         open_turn: Callable[[], HookRun],
         dispatch: Callable[..., HookRun],
         harness_stub: HarnessStub,
     ) -> None:
-        """Adapter spec H4, Mechanics rule 4: inject `--session-id <resolved current
-        session>` via `updatedInput` — the FULL rewritten `tool_input`, never a patch (the
-        host validates it against the tool's input schema). The hook invokes no function
-        of its own: it is attribution plumbing (invariant 3).
+        """Adapter spec H4, Mechanics rule 4: the hook invokes function 3 itself, attributed
+        to the session resolved from the envelope, and answers with a deny whose reason is
+        the report (the host relays it as the tool result, so the terminal never runs the
+        line) plus an `additionalContext` directive. The command is never edited: no
+        `updatedInput` (invariant 1).
         """
         open_turn()
         harness_stub.forget_calls()
+        report = build_report("resolve-step", "no-next-step", session_id=TURN_SESSION_ID)
+        harness_stub.answers("resolve-step", report)
 
         run = dispatch(
-            "PreToolUse", _terminal_call("harness.py resolve-step --workflow verification")
+            "PreToolUse",
+            _terminal_call("harness.py resolve-step --workflow-slug verification"),
         )
 
         assert run.exit_code == 0
         rendered = run.decision()["hookSpecificOutput"]
-        assert rendered["updatedInput"] == {
-            "command": (
-                f"harness.py resolve-step --workflow verification "
-                f"--session-id {TURN_SESSION_ID}"
-            ),
-            "isBackground": False,
-        }
-        assert harness_stub.calls == ()
+        assert "updatedInput" not in rendered
+        assert rendered["permissionDecision"] == "deny"
+        reason = rendered["permissionDecisionReason"]
+        assert reason.startswith("SAFe agentic harness RESULT (resolve-step)")
+        assert json.loads(reason.split("\n\n", 1)[1]) == report
+        assert "not a failure" in rendered["additionalContext"]
+        (call,) = harness_stub.calls
+        assert call.function == "resolve-step"
+        assert call.value("--session-id") == TURN_SESSION_ID
+        assert call.value("--workflow-slug") == "verification"
+
+    def test_relays_a_harness_refusal_to_the_agent(
+        self,
+        open_turn: Callable[[], HookRun],
+        dispatch: Callable[..., HookRun],
+        harness_stub: HarnessStub,
+    ) -> None:
+        """Adapter spec H4, Output: a harness refusal (`harness: <code>: <msg>` on stderr)
+        reaches the agent as a REJECTED deny; the shell still never runs the line.
+        """
+        open_turn()
+        harness_stub.fails("resolve-step-model", "harness: usage-error: no such workflow")
+
+        run = dispatch(
+            "PreToolUse",
+            _terminal_call("python3 harness.py resolve-step-model --workflow-slug nope"),
+        )
+
+        assert run.exit_code == 0
+        rendered = run.decision()["hookSpecificOutput"]
+        assert rendered["permissionDecision"] == "deny"
+        assert rendered["permissionDecisionReason"].startswith("SAFe agentic harness REJECTED")
+        assert "no such workflow" in rendered["permissionDecisionReason"]
 
     def test_denies_a_harness_function_that_is_not_agent_invocable(
         self, open_turn: Callable[[], HookRun], dispatch: Callable[..., HookRun]
@@ -72,7 +102,7 @@ class TestMediatedAttributionHook:
 
         run = dispatch(
             "PreToolUse",
-            _terminal_call("harness.py resolve-step --workflow v --session-id forged-id"),
+            _terminal_call("harness.py resolve-step --workflow-slug v --session-id forged-id"),
         )
 
         assert run.exit_code == 0
@@ -85,10 +115,11 @@ class TestMediatedAttributionHook:
     ) -> None:
         """Adapter spec H4, Mechanics rule 3 / invariant 4: deny when the tracker resolves
         no current session — there is no session to attribute the call to, and a
-        never-registered session is never stamped.
+        never-registered session never reaches the harness.
         """
         run = dispatch(
-            "PreToolUse", _terminal_call("harness.py resolve-step --workflow verification")
+            "PreToolUse",
+            _terminal_call("harness.py resolve-step --workflow-slug verification"),
         )
 
         assert run.exit_code == 0
@@ -120,7 +151,7 @@ class TestMediatedAttributionHook:
     ) -> None:
         """Adapter spec H4, Mechanics rule 1 fall-through: a command that is neither a
         harness invocation nor a reference to a governed path passes through — exit 0,
-        empty output, nothing stamped and nothing invoked.
+        empty output, nothing edited and nothing invoked.
         """
         open_turn()
         harness_stub.forget_calls()

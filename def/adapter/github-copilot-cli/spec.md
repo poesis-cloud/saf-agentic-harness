@@ -293,16 +293,16 @@ committed.
 | `exec` entries | Documented, but not yet observed executing in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
 | Latency | Plugin hooks start Python on every tool call in every folder. | Ungoverned firings return after one state lookup. Use a repository or project-scoped install when this matters. |
 
-## Mediated-attribution status (VS Code I4)
+## Mediated-attribution status
 
-This host does **not** use the core's narrow tool-boundary-stamp exception. Functions 3–4
-(`resolve-step`, `resolve-step-model`) are invoked through the **hook invocation** surface:
-the `preToolUse` handler is the normalizer, the session comes from the event payload's
-`sessionId` through the adapter's private records, and nothing model-authored is stamped,
-rewritten or executed. The agent's command line is only a structurally recognized request
-(rules above), and model-authored attribution in it is denied outright. The core's
-mediated-invocation backstop still applies inside the functions. The VS Code adapter's I4
-item, and the exception itself, stay tracked for VS Code only.
+Functions 3–4 (`resolve-step`, `resolve-step-model`) are run by the `preToolUse` hook
+itself: the session comes from the event payload's `sessionId` through the adapter's
+private records, and nothing model-authored is stamped, rewritten or executed. The agent's
+command line is only a structurally recognized request (rules above), and model-authored
+attribution in it is denied outright. This satisfies the core's mediated attribution rule
+directly; the core's mediated-invocation backstop still applies inside the functions. The
+VS Code adapter uses the same hook-executed design (its I4 is resolved), so the core's former
+tool-boundary-stamp exception has been retired.
 
 ## Inconsistencies found while binding this host
 

@@ -92,7 +92,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
     class HookRenderer {
       -_binding : HookBinding
       +render_decision(event_class: EventClass, reports: tuple[Report, ...]) : HookDecision
-      +render_stamped_input(event: HookEvent, session_id: str) : HookDecision
+      +render_harness_answer(reason: str, directive: str) : HookDecision
       +render_pass_through() : HookDecision
     }
 
@@ -141,7 +141,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
     end note
     note bottom of EventClass
       NINE classes: the seven harness boundaries plus the two
-      host events that reach no harness function. Lifecycle
+      host events outside them (no boundary command). Lifecycle
       participles avoid the step/session clash
       (1 step = 1 session): STEP_STARTING is the dispatch
       about to open the step - it can DENY; STEP_STARTED is
@@ -154,9 +154,11 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       STEP_STARTING and STEP_ENDED occur
       in the dispatching (orchestrator) session - their
       entries journal to its log.
-      MEDIATED_ATTRIBUTION (H4) invokes NO function: it
-      stamps the resolved session id onto the model-authored
-      harness command the host is about to run. PASS_THROUGH
+      MEDIATED_ATTRIBUTION (H4) runs the agent's plain
+      resolve-step / resolve-step-model request ITSELF with
+      the session ""SessionTracker"" resolves, and answers with
+      a deny carrying the report - the agent's command never
+      runs and is never edited. PASS_THROUGH
       is every other firing - foreign session, non-artifact
       path, unclassified tool - answered with exit 0 and
       empty output. Only the seven boundaries appear in

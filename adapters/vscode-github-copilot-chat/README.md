@@ -72,6 +72,28 @@ malformed `.env`, a binding refused by its schema — **fails closed**: it exits
 diagnostic on stderr, which the host shows to the model and treats as blocking. See the spec,
 Bootstrap failure (fail closed).
 
+## How agents call the harness
+
+Orchestrators request `resolve-step` and `resolve-step-model` with ONE plain
+`run_in_terminal` command, alone in its tool call:
+
+```text
+python <harness.py> resolve-step --workflow-slug <slug>
+python <harness.py> resolve-step-model --workflow-slug <slug>
+```
+
+- Never add `--session-id` / `--parent-session-id`, environment prefixes, chaining (`&&`,
+  `;`, `|`), redirection or substitution: any of those is rejected.
+- The `PreToolUse` hook runs the request itself for the agent's own session and the
+  terminal never runs the line. The hook never edits the command.
+- The answer arrives as the tool result `Tool execution denied: SAFe agentic harness RESULT
+  (<function>): …` with the report JSON, followed by a `<PreToolUse-context>` note. That
+  denial IS the successful answer: act on it and do not re-issue the command.
+- `SAFe agentic harness REJECTED: …` means the request itself was refused: fix the named
+  problem and ask again.
+- Any `python`/`python3`/`py -3` interpreter and any path ending in `harness.py` are
+  accepted; the hook always runs the installed harness with its recorded interpreter.
+
 ## Required VS Code settings
 
 Merged by `make install-hooks` (spec — Required VS Code settings):
@@ -82,9 +104,11 @@ Merged by `make install-hooks` (spec — Required VS Code settings):
 
 ## Known limitations (alpha)
 
-- **I4 — interim attribution exception.** The host has no attribution surface outside
-  model-visible tool arguments; H4 stamps the session at the tool boundary
-  (`updatedInput`) under the core's narrow, explicitly interim tool-boundary-stamp exception.
+- **Harness answers look like denials.** VS Code has no hook output that replaces a tool
+  result, so H4 returns the report as a `PreToolUse` deny. The user also sees a
+  `Tried to use run_in_terminal - …` block containing the report in the chat.
+- **Subagent attribution** comes from the adapter's session stack, not from the payload:
+  inside a subagent the host reports the parent conversation's `session_id` (I13).
 - **I13 — preview-setting drift and open host verifications.** Hooks are a VS Code preview
   feature: setting names, events, and payload fields may change between releases. The
   fail-fast binding validation is the drift detector; I13 lists what only live

@@ -96,6 +96,12 @@ def default_script() -> dict[str, dict[str, Any]]:
             "check-step-authorization", "allowed", authorization=dict(_DEFAULT_AUTHORIZATION)
         ),
         build_report("check-step-artifact", "valid"),
+        build_report("resolve-step", "no-next-step"),
+        build_report(
+            "resolve-step-model",
+            "resolved",
+            profile={"slug": "balanced", "score": 7, "costRank": 2, "reason": "default"},
+        ),
     )
     return {
         str(report["context"]["function"]): {"report": report} for report in successes

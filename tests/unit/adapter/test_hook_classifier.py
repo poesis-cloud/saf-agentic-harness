@@ -131,7 +131,7 @@ class TestHookClassifier:
                 "hook_event_name": "PreToolUse",
                 "session_id": "chat-session-guid",
                 "tool_name": "run_in_terminal",
-                "tool_input": {"command": "harness.py resolve-step --workflow verification"},
+                "tool_input": {"command": "harness.py resolve-step --workflow-slug verification"},
                 "tool_use_id": "call_ghi789",
             }
         )
@@ -244,7 +244,7 @@ class TestHookClassifier:
                 "hook_event_name": "PostToolUse",
                 "session_id": "chat-session-guid",
                 "tool_name": "run_in_terminal",
-                "tool_input": {"command": "harness.py resolve-step --workflow verification"},
+                "tool_input": {"command": "harness.py resolve-step --workflow-slug verification"},
                 "tool_response": "…",
                 "tool_use_id": "call_ghi789",
             }

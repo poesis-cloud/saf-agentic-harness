@@ -15,9 +15,11 @@ environment id, and optionally the scoping agent slug (agent-scoped hooks) as it
 and forwards the event payload (JSON on stdin) unchanged to the adapter's own hook entry
 (`adapters/<env>/adapter.py`). The adapter classifies the event, invokes the harness's pure
 function commands, and answers the host with **structured JSON on stdout, exit 0**
-(`permissionDecision` / `decision: block` / `additionalContext` / `updatedInput`); exit 2 is
-only the hard-failure fallback. Each adapter's `hooks.yaml` calls it with its own env id —
-nothing in the script itself varies per host.
+(`permissionDecision` / `decision: block` / `additionalContext`); exit 2 is only the
+hard-failure fallback. No adapter edits an agent's tool input (`updatedInput` /
+`modifiedArgs`): an agent's harness request is run by the hook itself and answered. Each
+adapter's `hooks.yaml` calls it with its own env id — nothing in the script itself varies
+per host.
 
 ```bash
 adapters/dispatch.sh <event> <env> [<agent>]

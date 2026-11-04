@@ -22,7 +22,11 @@ pinned.
 - **Two host adapters**:
   - `vscode-github-copilot-chat` binds VS Code with GitHub Copilot Chat agent hooks. It ships
     the H0–H7 hooks, the shared `adapters/dispatch.sh` funnel, and the
-    `adapters/render_hooks.py` installer.
+    `adapters/render_hooks.py` installer. Agent harness commands are hook-executed, as for
+    the Copilot app: the `PreToolUse` hook runs one plain `run_in_terminal`
+    `resolve-step`/`resolve-step-model` request itself, for the session its tracker
+    resolves, and returns the report as the deny reason plus `additionalContext`. It no
+    longer stamps `--session-id` through `updatedInput`.
   - `github-copilot-cli` binds the GitHub Copilot app and the Copilot CLI, which share one
     agent runtime ([spec](def/adapter/github-copilot-cli/spec.md),
     [README](adapters/github-copilot-cli/README.md)). It is Windows-first: hooks run
@@ -118,10 +122,11 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   - `exec` hook entries and scoped hooks inside subagents are not yet byte-verified in the
     app.
   - See the adapter spec's *Limited or unsupported boundaries*.
-- **Session attribution (VS Code):** it relies on the core's interim tool-boundary-stamp
-  exception (adapter spec I4). A host-native attribution surface is tracked, not
-  scheduled. The Copilot app / CLI adapter does not use the exception: its hook runs the
-  agent's harness request itself.
+- **Session attribution:** no adapter edits an agent's command. Both hooks run the agent's
+  harness request themselves, so the core's former tool-boundary-stamp exception is retired
+  (VS Code adapter spec I4). In VS Code, the answer arrives as `Tool execution denied: …`,
+  and the user also sees a `Tried to use run_in_terminal` block. Inside a VS Code subagent,
+  attribution comes from the adapter's session stack (I13).
 - **Host fail-open:** the host proceeds when a hook times out or fails to spawn (I6).
 - **`Stop` hooks:** a bootstrap failure at `Stop`/`SubagentStop` exits 2. That asks the
   agent to continue, bounded by the host's `stop_hook_active` guard.
