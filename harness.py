@@ -3,10 +3,8 @@
 
 This entry shim lives at the harness project root; the harness core lives under `src/`. It
 puts `src/` on sys.path so the core's imports resolve, then runs one harness function
-command through the composition root. Run it as
-`python3 harness.py [--env-file <file>] <function> [flags]`, with `FRAMEWORK_DIR` (from the
-environment, or from the layout file `--env-file` names) anchoring the framework whose
-configuration is loaded.
+command through the composition root. Run it as `python3 harness.py <function> [flags]`,
+with `FRAMEWORK_DIR` anchoring the framework whose configuration is loaded.
 """
 
 import sys

@@ -45,7 +45,7 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
 - `adapters/` — host-specific bindings (`vscode-github-copilot-chat/`, `github-copilot-cli/`).
 - `contracts/` — JSON Schema contracts for configuration, artifacts, and the journal.
 - `src/` — the Python implementation; `harness.py` at the root is its entry point
-  (`python3 harness.py [--env-file <layout file>] <function> [flags]`).
+  (`python3 harness.py <function> [flags]`).
 - `tests/` — the unit (`tests/unit/`), functional (`tests/functional/`), and adapter
   (`tests/adapter/`) planes.
 

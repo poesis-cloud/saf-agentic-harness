@@ -30,14 +30,11 @@ pinned.
     `install.py` (or `make install-hooks-copilot-cli`) adds the hooks to a framework's
     Copilot plugin bundle: a global `hooks.json` plus the orchestrators' agent-scoped H0
     block. It handles the runtime's batched `preToolUse`, and a batch is denied when any of
-    its calls is. Harness commands are mediated: one plain `harness.py <function>` call is
-    rewritten to the canonical, attributed command line, and anything else is denied. The
-    rewrite stays ONE plain command led by the unquoted interpreter, so the app's permission
-    layer can approve it with an `<interpreter>:*` rule, which `install.py` prints. The layout
-    travels in a published layout file instead of `$env:` assignments.
-- **`harness.py --env-file <file>`**: a host whose command line must stay one plain
-  invocation passes the framework layout (`FRAMEWORK_DIR` and the `FRAMEWORK_*_DIR` set) in a
-  file. Only layout variables are accepted.
+    its calls is. Agent harness commands are hook-executed: the `preToolUse` hook runs one
+    plain `resolve-step`/`resolve-step-model` request itself, for the session named by the
+    payload, and returns the report as the deny reason (`SAFe agentic harness RESULT …`).
+    It never edits or runs the command, and needs no permission rule. Anything else that
+    names `harness.py` is denied.
 - **Verification**: `make verify` runs the unit, functional, and adapter planes on Python
   3.10, 3.11 and 3.12. CI also runs the suite on Windows (Python 3.12).
 
@@ -116,11 +113,15 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   - A timed-out `preToolUse` **fails open**.
   - **Shell writes** are guarded textually only. The core's commit-set check is the
     backstop.
+  - The harness answer to an agent reaches it as a hook denial whose reason starts with
+    `SAFe agentic harness RESULT`.
   - `exec` hook entries and scoped hooks inside subagents are not yet byte-verified in the
     app.
   - See the adapter spec's *Limited or unsupported boundaries*.
-- **Session attribution:** it relies on the core's interim tool-boundary-stamp exception
-  (adapter spec I4). A host-native attribution surface is tracked, not scheduled.
+- **Session attribution (VS Code):** it relies on the core's interim tool-boundary-stamp
+  exception (adapter spec I4). A host-native attribution surface is tracked, not
+  scheduled. The Copilot app / CLI adapter does not use the exception: its hook runs the
+  agent's harness request itself.
 - **Host fail-open:** the host proceeds when a hook times out or fails to spawn (I6).
 - **`Stop` hooks:** a bootstrap failure at `Stop`/`SubagentStop` exits 2. That asks the
   agent to continue, bounded by the host's `stop_hook_active` guard.

@@ -1,15 +1,16 @@
-"""H4 — the ONE harness command an agent may run, recognized strictly and re-rendered.
+"""H4 — a harness command is a REQUEST the preToolUse hook answers itself.
 
 The org bundle's orchestrators run `<python> <harness>/harness.py resolve-step
 --workflow-slug <slug>` and `... resolve-step-model` with NO session ids, through
-`powershell` (Windows) or `bash`. Any interpreter spelling is accepted; the harness path is
-pinned; everything else that mentions `harness.py` is denied.
+`powershell` (Windows) or `bash`. The hook recognizes the line strictly, runs the function
+for the session the PAYLOAD names, and returns its report as the deny reason (the only
+preToolUse text the runtime shows the agent). The command is never edited and the shell
+never runs it; everything else that mentions `harness.py` is rejected.
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
+import json
 
 import pytest
 
@@ -18,28 +19,40 @@ from cli_rig import (
     HARNESS,
     HOST,
     PYTHON,
+    SUBAGENT,
     TURN_SESSION,
-    WORKSPACE,
+    FakeRunner,
     Rig,
     make_invocation,
-    post_tool_use,
     pre_tool_use,
 )
-from copilot_cli_adapter.invocation import needs_quoting, shell_safe
+from copilot_cli_adapter.core import HARNESS_REJECTED, HARNESS_RESULT, Adapter
+from copilot_cli_adapter.payload import HookInput
+from copilot_cli_adapter.renderer import ContextRenderer
+from copilot_cli_adapter.runner import HarnessCommandError
+from copilot_cli_adapter.tracker import SessionTracker
+from harness_stub import build_error_report
 
 FORWARD = HARNESS.replace("\\", "/")
-LAYOUT_TEXT = f"FRAMEWORK_DIR={CWD}\nFRAMEWORK_WORKSPACE_DIR={WORKSPACE}\n"
+RESOLVED = {
+    "context": {"function": "resolve-step", "sessionId": TURN_SESSION},
+    "outcome": {"status": "resolved"},
+    "step": {"slug": "build", "agent": "system-architect"},
+}
 
 
-def _command(rig: Rig, command: str, tool: str = "powershell"):
-    return rig.fire("preToolUse", pre_tool_use((tool, {"command": command, "description": "d"})))
+def _command(rig: Rig, command: str, tool: str = "powershell", host: str = HOST):
+    return rig.fire(
+        "preToolUse", pre_tool_use((tool, {"command": command, "description": "d"}), host=host)
+    )
 
 
-def _split_rewrite(command: str, prefix: str) -> tuple[Path, str]:
-    """`<prefix> --env-file <layout> <rest>` -> (layout file, rest)."""
-    assert command.startswith(f"{prefix} --env-file "), command
-    layout, _, rest = command[len(prefix) + len(" --env-file ") :].partition(" ")
-    return Path(layout.strip("'")), rest
+def _report_in(reason: str) -> dict:
+    return json.loads(reason.split("\n\n", 1)[1])
+
+
+def _harness_calls(rig: Rig) -> list[tuple[str, dict]]:
+    return [call for call in rig.runner.calls if call[0] in ("resolve-step", "resolve-step-model")]
 
 
 @pytest.mark.parametrize(
@@ -58,136 +71,107 @@ def _split_rewrite(command: str, prefix: str) -> tuple[Path, str]:
         f"  {PYTHON} {HARNESS}   resolve-step   --workflow-slug   pi-planning  ",
     ],
 )
-def test_every_interpreter_spelling_is_stamped_and_canonicalized(rig: Rig, command: str) -> None:
+def test_the_hook_runs_the_request_and_returns_the_report(rig: Rig, command: str) -> None:
     rig.open_turn()
+    rig.runner.script["resolve-step"] = RESOLVED
     decision = _command(rig, command)
-    stamped = decision["modifiedArgs"]
-    assert stamped["description"] == "d"
-    layout, rest = _split_rewrite(stamped["command"], f"& {PYTHON} {HARNESS}")
-    assert rest == (
-        f"resolve-step --session-id {TURN_SESSION} "
-        "--workflow-slug " + ('"pi-planning"' if '"pi-planning"' in command else "pi-planning")
-    )
-    assert layout.read_text(encoding="utf-8") == LAYOUT_TEXT
-
-
-def test_the_rewrite_stays_approvable_by_an_interpreter_rule(rig: Rig) -> None:
-    """Live trial (app 1.0.102): the host's permission layer checks the REWRITTEN line; an
-    `$env:X=...;` / `X=... cmd` prefix or a quoted interpreter after `&` can match no saved
-    rule, so every unattended harness command was denied. The rewrite is ONE plain command
-    led by the bare interpreter path."""
-    rig.open_turn()
-    command = _command(rig, f"python {HARNESS} resolve-step-model")["modifiedArgs"]["command"]
-    assert command.startswith(f"& {PYTHON} ")
-    assert "$env:" not in command and "'" not in command and '"' not in command
-    assert ";" not in command and "FRAMEWORK_" not in command
-
-
-def test_the_layout_file_is_content_addressed(tmp_path: Path) -> None:
-    first = make_invocation(layout_dir=str(tmp_path))
-    again = make_invocation(layout_dir=str(tmp_path))
-    other = make_invocation(layout_dir=str(tmp_path), environment={"FRAMEWORK_DIR": "/elsewhere"})
-    assert first.publish_layout() == again.publish_layout() != other.publish_layout()
-    assert Path(other.publish_layout()).read_text(encoding="utf-8") == "FRAMEWORK_DIR=/elsewhere\n"
-    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
-        {Path(first.layout_file()).name, Path(other.layout_file()).name}
-    )
-
-
-def test_a_layout_file_that_cannot_be_published_denies(rig: Rig, tmp_path: Path, binding) -> None:
-    from copilot_cli_adapter.core import Adapter
-    from copilot_cli_adapter.renderer import ContextRenderer
-    from cli_rig import FakeRunner
-
-    blocker = tmp_path / "not-a-directory"
-    blocker.write_text("x", encoding="utf-8")
-    (tmp_path / "i").mkdir()
-    (tmp_path / "s").mkdir()
-    diagnostics: list[str] = []
-    adapter = Adapter(
-        binding, rig.tracker, ContextRenderer(tmp_path / "i", tmp_path / "s"), FakeRunner(),
-        WORKSPACE, make_invocation(layout_dir=str(blocker / "layouts")), diagnostic=diagnostics.append,
-    )
-    rig.open_turn()
-    from copilot_cli_adapter.payload import HookInput
-
-    decision = adapter.handle(
-        HookInput("preToolUse", pre_tool_use(("powershell", {"command": f"python {HARNESS} resolve-step-model"})), binding, None)
-    )
+    assert set(decision) == {"permissionDecision", "permissionDecisionReason"}
     assert decision["permissionDecision"] == "deny"
-    assert "layout file cannot be published" in decision["permissionDecisionReason"]
-    assert diagnostics
+    reason = decision["permissionDecisionReason"]
+    assert reason.startswith(f"{HARNESS_RESULT} (resolve-step): ")
+    assert "not an error" in reason and "do not re-issue" in reason
+    assert _report_in(reason) == RESOLVED
+    assert _harness_calls(rig) == [
+        ("resolve-step", {"workflowSlug": "pi-planning", "sessionId": TURN_SESSION})
+    ]
 
 
-def test_a_layout_value_that_is_not_one_line_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(ValueError):
-        make_invocation(layout_dir=str(tmp_path), environment={"FRAMEWORK_DIR": "a\nB=c"}).publish_layout()
+def test_the_command_is_never_modified(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["resolve-step"] = RESOLVED
+    for command in (
+        f"python {HARNESS} resolve-step --workflow-slug x",
+        f"python {HARNESS} resolve-step-model",
+        f"python {HARNESS} end-session",
+    ):
+        rig.runner.script["resolve-step-model"] = RESOLVED
+        decision = _command(rig, command)
+        assert "modifiedArgs" not in decision
+        assert decision["permissionDecision"] == "deny"
 
 
-def test_a_path_needing_quotes_falls_back_to_a_quoted_word(rig: Rig, tmp_path: Path, binding) -> None:
-    """No unquoted spelling exists (no 8.3 name): the line still runs, approved interactively."""
-    invocation = make_invocation(python=r"C:\no such dir\python.exe", layout_dir=str(tmp_path))
-    command = invocation.canonical("resolve-step-model", ("--session-id", "s"), "", powershell=True)
-    assert command.startswith(r"& 'C:\no such dir\python.exe' ")
-    posix = make_invocation(python="/no such/python", layout_dir=str(tmp_path), windows=False)
-    assert posix.canonical("resolve-step-model", (), "", powershell=False).startswith("'/no such/python' ")
-    backslashed = make_invocation(layout_dir=str(tmp_path)).canonical(
-        "resolve-step-model", (), "", powershell=False
+def test_resolve_step_model_carries_only_the_observed_session(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["resolve-step-model"] = {**RESOLVED, "context": {"function": "resolve-step-model"}}
+    decision = _command(rig, f"python {HARNESS} resolve-step-model")
+    assert decision["permissionDecisionReason"].startswith(f"{HARNESS_RESULT} (resolve-step-model)")
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": TURN_SESSION})]
+
+
+def test_attribution_comes_from_the_payload_session(rig: Rig) -> None:
+    rig.open_turn()
+    rig.open_step()
+    rig.runner.script["resolve-step-model"] = RESOLVED
+    _command(rig, f"python {HARNESS} resolve-step-model", host=SUBAGENT)
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": SUBAGENT})]
+    _command(rig, f"python {HARNESS} resolve-step-model", host=HOST)
+    assert _harness_calls(rig)[-1] == ("resolve-step-model", {"sessionId": TURN_SESSION})
+
+
+def test_a_harness_error_report_is_still_the_result(rig: Rig) -> None:
+    rig.open_turn()
+    report = build_error_report("resolve-step", session_id=TURN_SESSION)
+    rig.runner.script["resolve-step"] = report
+    decision = _command(rig, f"python {HARNESS} resolve-step --workflow-slug x")
+    reason = decision["permissionDecisionReason"]
+    assert reason.startswith(HARNESS_RESULT)
+    assert _report_in(reason) == report
+
+
+def test_a_harness_refusal_is_relayed_as_a_rejection(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["resolve-step"] = HarnessCommandError(
+        "harness command 'resolve-step' failed (exit 2): Traceback ...\nharness: invalid-inquiry: x",
+        refusal="harness: invalid-inquiry: harness.py resolve-step: unrecognized arguments: --bogus y",
     )
-    assert backslashed.startswith(f"'{PYTHON}' '{HARNESS}' ")
+    decision = _command(rig, f"python {HARNESS} resolve-step --bogus y")
+    assert decision["permissionDecisionReason"] == (
+        f"{HARNESS_REJECTED}: harness: invalid-inquiry: harness.py resolve-step: "
+        "unrecognized arguments: --bogus y"
+    )
+    assert _harness_calls(rig) == [("resolve-step", {"bogus": "y", "sessionId": TURN_SESSION})]
 
 
 @pytest.mark.parametrize(
-    "path, quoted",
+    "failure",
     [
-        (r"C:\Users\cleme\.venv\Scripts\python.exe", False),
-        (r"C:\Users\RUNNER~1\AppData\Local\Temp\x", False),
-        ("/opt/h/.venv/bin/python3.12", False),
-        (r"C:\Program Files\Python\python.exe", True),
-        ("~/venv/bin/python", True),
-        ("-python", True),
-        ("/srv/o'rg/python", True),
-        ("/srv/$HOME/python", True),
-        ("/srv/a&b/python", True),
-        ("/srv/a;b/python", True),
-        ("/srv/a(b)/python", True),
-        ("", True),
+        HarnessCommandError("harness command 'resolve-step' failed (exit 1): Traceback secret"),
+        RuntimeError("Traceback secret"),
     ],
 )
-def test_only_plain_words_go_unquoted(path: str, quoted: bool) -> None:
-    assert needs_quoting(path) is quoted
-
-
-def test_shell_safe_never_changes_a_plain_path() -> None:
-    assert shell_safe(PYTHON) == PYTHON
-    assert shell_safe("/opt/h/python") == "/opt/h/python"
-
-
-def test_resolve_step_model_is_stamped(rig: Rig) -> None:
+def test_an_unavailable_harness_is_rejected_without_leaking_its_output(
+    rig: Rig, failure: Exception
+) -> None:
     rig.open_turn()
-    stamped = _command(rig, f"python {HARNESS} resolve-step-model")["modifiedArgs"]["command"]
-    assert stamped.endswith(f"resolve-step-model --session-id {TURN_SESSION}")
+    rig.runner.script["resolve-step"] = failure
+    decision = _command(rig, f"python {HARNESS} resolve-step --workflow-slug x")
+    reason = decision["permissionDecisionReason"]
+    assert reason.startswith(HARNESS_REJECTED) and "could not answer" in reason
+    assert "secret" not in reason
+    assert any("secret" in line for line in rig.diagnostics)
 
 
-def test_bash_gets_a_posix_rendering(tmp_path, binding) -> None:
-    from cli_rig import FakeRunner
-    from copilot_cli_adapter.core import Adapter
-    from copilot_cli_adapter.payload import HookInput
-    from copilot_cli_adapter.renderer import ContextRenderer
-    from copilot_cli_adapter.tracker import SessionTracker
-
+def test_bash_on_posix_is_answered_the_same_way(tmp_path, binding) -> None:
     (tmp_path / "i").mkdir()
     (tmp_path / "s").mkdir()
     invocation = make_invocation(
-        python="/opt/h/.venv/bin/python",
-        harness="/opt/h/harness.py",
-        windows=False,
-        environment={"FRAMEWORK_DIR": "/srv/o'rg"},
-        layout_dir=str(tmp_path / "layouts"),
+        python="/opt/h/.venv/bin/python", harness="/opt/h/harness.py", windows=False
     )
     tracker = SessionTracker(tmp_path / "state")
+    runner = FakeRunner()
+    runner.script["resolve-step-model"] = RESOLVED
     adapter = Adapter(
-        binding, tracker, ContextRenderer(tmp_path / "i", tmp_path / "s"), FakeRunner(),
+        binding, tracker, ContextRenderer(tmp_path / "i", tmp_path / "s"), runner,
         "/srv/org/workspace", invocation, diagnostic=lambda _: None,
     )
     adapter.handle(HookInput("userPromptSubmitted", {"sessionId": "h", "prompt": "p"}, binding, "rte"))
@@ -202,13 +186,8 @@ def test_bash_gets_a_posix_rendering(tmp_path, binding) -> None:
             None,
         )
     )
-    layout, rest = _split_rewrite(
-        decision["modifiedArgs"]["command"], "/opt/h/.venv/bin/python /opt/h/harness.py"
-    )
-    assert rest == f"resolve-step-model --session-id {session}"
-    assert layout.read_text(encoding="utf-8") == "FRAMEWORK_DIR=/srv/o'rg\n"
-    # No `VAR=value cmd` prefix: the bare interpreter path leads, as an approval rule needs.
-    assert re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", decision["modifiedArgs"]["command"]) is None
+    assert decision["permissionDecisionReason"].startswith(HARNESS_RESULT)
+    assert runner.calls[-1] == ("resolve-step-model", {"sessionId": session})
 
 
 @pytest.mark.parametrize(
@@ -221,31 +200,34 @@ def test_bash_gets_a_posix_rendering(tmp_path, binding) -> None:
         (f"python {HARNESS} resolve-step --workflow-slug `whoami`", "one plain invocation"),
         (f'python {HARNESS} resolve-step --workflow-slug "$env:X"', "one plain invocation"),
         (f"python {HARNESS} resolve-step --workflow-slug x && echo", "one plain invocation"),
+        (f"$env:FRAMEWORK_DIR='x'; python {HARNESS} resolve-step", "one plain invocation"),
         (f"cd C:\\x; python {HARNESS} resolve-step", "one plain invocation"),
         (f"python {HARNESS} check-step-authorization --artifact-path a", "not agent-invocable"),
         (f"python {HARNESS} start-session --agent rte", "not agent-invocable"),
         (f"python {HARNESS} end-session", "not agent-invocable"),
         (f"python {HARNESS} resolve-step --session-id forged --workflow-slug x", "never accepted"),
         (f"python {HARNESS} resolve-step --parent-session-id p", "never accepted"),
-        (f"python {HARNESS} --env-file C:\\x.env resolve-step", "'--env-file' is never accepted"),
-        (f"python {HARNESS} resolve-step --env-file C:\\x.env", "'--env-file' is never accepted"),
         (f"node {HARNESS} resolve-step --workflow-slug x", "not a Python interpreter"),
         (f"C:\\evil\\pythonx.exe {HARNESS} resolve-step", "not a Python interpreter"),
         ("python C:\\elsewhere\\harness.py resolve-step --workflow-slug x", "not the installed harness"),
         ("python harness.py resolve-step --workflow-slug x", "not the installed harness"),
         (f"python -c 'import x' {HARNESS} resolve-step", "one plain invocation"),
+        (f"python {HARNESS} resolve-step --workflow-slug", "needs a value"),
+        (f"python {HARNESS} resolve-step --workflow-slug a --workflow-slug b", "more than once"),
     ],
 )
-def test_everything_else_mentioning_the_harness_is_denied(
+def test_everything_else_mentioning_the_harness_is_rejected_unrun(
     rig: Rig, command: str, expected: str
 ) -> None:
     rig.open_turn()
     decision = _command(rig, command)
     assert decision["permissionDecision"] == "deny"
+    assert decision["permissionDecisionReason"].startswith(HARNESS_REJECTED)
     assert expected in decision["permissionDecisionReason"]
+    assert _harness_calls(rig) == []
 
 
-def test_a_harness_command_batched_with_another_call_is_denied(rig: Rig) -> None:
+def test_a_harness_command_batched_with_another_call_is_rejected_unrun(rig: Rig) -> None:
     rig.open_turn()
     decision = rig.fire(
         "preToolUse",
@@ -256,6 +238,7 @@ def test_a_harness_command_batched_with_another_call_is_denied(rig: Rig) -> None
     )
     assert decision["permissionDecision"] == "deny"
     assert "alone" in decision["permissionDecisionReason"]
+    assert _harness_calls(rig) == []
 
 
 def test_in_an_ungoverned_session_a_harness_command_is_denied_with_a_diagnosis(rig: Rig) -> None:
@@ -266,35 +249,15 @@ def test_in_an_ungoverned_session_a_harness_command_is_denied_with_a_diagnosis(r
     assert rig.runner.calls == []
 
 
-def test_a_step_session_is_stamped_with_its_own_session(rig: Rig) -> None:
-    from cli_rig import SUBAGENT
-
-    rig.open_turn()
-    rig.open_step()
-    decision = rig.fire(
-        "preToolUse",
-        pre_tool_use(("powershell", {"command": f"python {HARNESS} resolve-step-model"}), host=SUBAGENT),
-    )
-    assert f"--session-id {SUBAGENT}" in decision["modifiedArgs"]["command"]
-    assert HOST not in decision["modifiedArgs"]["command"]
-
-
-def test_a_failed_harness_command_is_explained_as_the_adapters_rewrite(rig: Rig) -> None:
-    """Live trial: the model read the host's denial of the REWRITTEN line, took the added
-    `--session-id` for its own mistake and retried five times. Say whose line it was."""
-    rig.open_turn()
-    decision = rig.fire(
-        "postToolUseFailure",
-        post_tool_use("powershell", {"command": f"python {HARNESS} resolve-step-model"}, event_failed=True),
-    )
-    context = decision["additionalContext"]
-    assert "REWROTE" in context and "permission layer" in context and "do not retry" in context
-    assert rig.fire(
-        "postToolUseFailure", post_tool_use("powershell", {"command": "git status"}, event_failed=True)
-    ) is None
-
-
-def test_every_session_is_told_the_rewrite_is_the_adapters() -> None:
+def test_the_hint_says_the_shell_never_runs_the_line_and_how_the_result_arrives() -> None:
     hint = make_invocation().hint()
     assert f"& {PYTHON} {HARNESS} resolve-step --workflow-slug <workflow-slug>" in hint
-    assert "--env-file" in hint and "permission layer" in hint
+    assert "does NOT run this command" in hint
+    assert HARNESS_RESULT in hint and HARNESS_REJECTED in hint
+    assert "--env-file" not in hint and "$env:" not in hint
+    assert CWD in hint
+
+
+def test_the_hint_quotes_a_path_only_when_the_request_needs_it() -> None:
+    spaced = make_invocation(python=r"C:\Program Files\Python312\python.exe")
+    assert r"& 'C:\Program Files\Python312\python.exe' " in spaced.hint()

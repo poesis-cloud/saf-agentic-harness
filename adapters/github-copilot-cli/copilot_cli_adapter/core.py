@@ -11,7 +11,8 @@ Boundary map (see `def/adapter/github-copilot-cli/spec.md`):
     H1  subagentStart                                               start-session (step)
     H2  preToolUse · dispatch tool (`task`)                         check-step-preconditions
     H3  preToolUse · write tool                                     check-step-authorization
-    H4  preToolUse · shell tool running `harness.py`                attribution stamp
+    H4  preToolUse · shell tool requesting `harness.py`             resolve-step / resolve-step-model
+                                                                    (run BY the hook; never by the shell)
     H5  postToolUse · write tool                                    check-step-artifact
     H6  postToolUse / postToolUseFailure · dispatch tool            check-step-postconditions
     H7  agentStop / subagentStop / sessionEnd                       end-session
@@ -19,18 +20,20 @@ Boundary map (see `def/adapter/github-copilot-cli/spec.md`):
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
-from .invocation import ENV_FILE_OPTION, HarnessInvocation, unquote
+from .invocation import HarnessInvocation, unquote
 from .paths import host_basename, relativize
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
-from .runner import CommandRunner
+from .runner import CommandRunner, HarnessCommandError
 from .tracker import STEP_ORIGIN, TURN_ORIGIN, SessionRecord, SessionTracker
 
 ADAPTER_ID = "github-copilot-cli"
@@ -68,7 +71,6 @@ _ALLOWING = frozenset({"pass", "allowed"})
 _PASSING_STEP = frozenset({"pass", _NOT_APPLICABLE})
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
 _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
-_SESSION_ID_FLAG = "--session-id"
 _TURN_MARKER = "-t"
 _HARNESS_MENTION = re.compile(r"harness\.py", re.IGNORECASE)
 # ONE plain invocation: `[&] <python|python3|py|abs interpreter> [-3[.x]] <harness.py> <fn>
@@ -83,15 +85,24 @@ _STRICT_HARNESS_COMMAND = re.compile(
 _TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
 _TOKEN_TRIM = "'\"();|&<>`"
 
-# The rewritten line is the adapter's, not the agent's: say so, or the agent "fixes" text it
-# never wrote and retries a denial only the user can lift.
-_REWRITTEN_COMMAND_FAILED = (
-    "The SAFe agentic harness REWROTE this harness command before it ran (it added "
-    "--env-file and --session-id); you did not write those parts. If it was denied, the "
-    "denial comes from the host's permission layer, not from your command: do not retry or "
-    "edit it. Tell the user the harness interpreter must be approved (a permission rule "
-    "'<interpreter path>:*', see the harness adapter README), then stop."
+# The deny reason is the ONLY preToolUse field the runtime shows the agent, so it carries the
+# harness's answer; these prefixes tell a result from a refusal of the request itself.
+HARNESS_RESULT = "SAFe agentic harness RESULT"
+HARNESS_REJECTED = "SAFe agentic harness REJECTED"
+_RESULT_DIRECTIVE = (
+    "this is the successful answer to your harness command, not an error. The harness hook "
+    "ran '{function}' for your session itself, so your shell did not run the line (the host "
+    "shows that as a denial). Act on this report; do not re-issue the command to get it again."
 )
+
+
+@dataclass(frozen=True)
+class HarnessRequest:
+    """An accepted agent request for an agent-invocable harness function."""
+
+    function: str
+    inquiry: Mapping[str, str]
+
 
 Decision = Mapping[str, Any] | None
 Diagnostic = Callable[[str], None]
@@ -247,21 +258,22 @@ class Adapter:
         except MalformedPayloadError as failure:
             return renderer.deny([f"unreadable tool-call payload: {failure}"])
         reasons: list[str] = []
-        stamped: list[tuple[ToolCall, Mapping[str, Any]]] = []
+        requests: list[HarnessRequest] = []
         for call in calls:
-            reason, stamp = self._gate_tool_call(hook, record, call)
+            reason, request = self._gate_tool_call(hook, record, call)
             if reason:
                 reasons.append(reason)
-            if stamp is not None:
-                stamped.append((call, stamp))
-        if not reasons and stamped and len(calls) > 1:
+            if request is not None:
+                requests.append(request)
+        if not reasons and requests and len(calls) > 1:
             reasons.append(
-                "a harness command must be issued alone, not batched with other tool calls"
+                f"{HARNESS_REJECTED}: a harness command must be issued alone, not batched "
+                "with other tool calls"
             )
         if reasons:
             return renderer.deny(reasons)
-        if stamped:
-            return renderer.modified_args(stamped[0][1])
+        if requests:
+            return self._answer_harness_request(record, requests[0])
         return None
 
     def _gate_ungoverned(self, hook: HookInput) -> Decision:
@@ -289,7 +301,7 @@ class Adapter:
 
     def _gate_tool_call(
         self, hook: HookInput, record: SessionRecord, call: ToolCall
-    ) -> tuple[str | None, Mapping[str, Any] | None]:
+    ) -> tuple[str | None, HarnessRequest | None]:
         if self._binding.is_dispatch_tool(call.name):
             return self._gate_dispatch(record, call), None
         if self._binding.resolve_write_action(call.name, call.args) is not None:
@@ -345,8 +357,9 @@ class Adapter:
 
     def _gate_shell(
         self, hook: HookInput, record: SessionRecord, call: ToolCall
-    ) -> tuple[str | None, Mapping[str, Any] | None]:
-        """H4 — stamp a harness command's attribution; guard every other shell command."""
+    ) -> tuple[str | None, HarnessRequest | None]:
+        """H4 — take a harness command as a request to the hook; guard every other shell
+        command (I9)."""
         if not isinstance(call.args, Mapping):
             return f"'{call.name}' carries no argument object", None
         command_key = next(
@@ -361,7 +374,7 @@ class Adapter:
             return f"'{call.name}' names no command", None
         command = str(call.args[command_key])
         if _HARNESS_MENTION.search(command) and self._binding.is_mediated_command_tool(call.name):
-            return self._gate_harness_command(hook, record, call, command_key, command)
+            return self._read_harness_request(hook, command)
         if self._binding.is_guarded_shell_tool(call.name):
             offending = self._find_guarded_path(command, hook.cwd)
             if offending is not None:
@@ -372,26 +385,22 @@ class Adapter:
                 ), None
         return None, None
 
-    def _gate_harness_command(
-        self,
-        hook: HookInput,
-        record: SessionRecord,
-        call: ToolCall,
-        command_key: str,
-        command: str,
-    ) -> tuple[str | None, Mapping[str, Any] | None]:
-        """Accept exactly ONE plain invocation of THE installed harness; deny all else."""
-        if ENV_FILE_OPTION in command:
-            return (
-                f"model-authored '{ENV_FILE_OPTION}' is never accepted: the adapter adds the "
-                "layout file (and the session) itself when it rewrites the command; run: "
-                f"{self._invocation.example('resolve-step --workflow-slug <slug>')}"
-            ), None
+    def _read_harness_request(
+        self, hook: HookInput, command: str
+    ) -> tuple[str | None, HarnessRequest | None]:
+        """Accept exactly ONE plain invocation of THE installed harness; reject all else."""
+        rejected, request = self._parse_harness_request(hook, command)
+        return (f"{HARNESS_REJECTED}: {rejected}", None) if rejected else (None, request)
+
+    def _parse_harness_request(
+        self, hook: HookInput, command: str
+    ) -> tuple[str | None, HarnessRequest | None]:
+        example = self._invocation.example("resolve-step --workflow-slug <slug>")
         match = _STRICT_HARNESS_COMMAND.match(command)
         if match is None:
             return (
                 "a harness command must be one plain invocation, never chained or piped: "
-                f"{self._invocation.example('resolve-step --workflow-slug <slug>')}"
+                f"{example}"
             ), None
         function = match.group("function")
         if function not in _AGENT_INVOCABLE_FUNCTIONS:
@@ -403,7 +412,7 @@ class Adapter:
         if carried is not None:
             return (
                 f"model-authored session attribution ('{carried}') is never accepted: the "
-                "adapter stamps the session itself when it rewrites the command; run: "
+                "harness hook attributes the request to your session itself; run: "
                 f"{self._invocation.example(function)}"
             ), None
         interpreter = unquote(match.group("interpreter"))
@@ -418,18 +427,40 @@ class Adapter:
                 f"'{harness}' is not the installed harness entry point: "
                 f"{self._invocation.example(function)}"
             ), None
-        stamped = dict(call.args)
+        inquiry: dict[str, str] = {}
+        tokens = [unquote(token) for token in _TOKEN.findall(command[match.end("function") :])]
+        index = 0
+        while index < len(tokens):
+            flag = tokens[index]
+            value = tokens[index + 1] if index + 1 < len(tokens) else None
+            if value is None or value.startswith("--"):
+                return f"flag '{flag}' needs a value", None
+            key = _camel(flag[2:])
+            if key in inquiry:
+                return f"flag '{flag}' is given more than once", None
+            inquiry[key] = value
+            index += 2
+        return None, HarnessRequest(function=function, inquiry=inquiry)
+
+    def _answer_harness_request(self, record: SessionRecord, request: HarnessRequest) -> Decision:
+        """H4 — run the requested function FOR the observed session and hand its report back
+        as the only preToolUse text the agent sees: the deny reason. Attribution is the
+        hook's own (the record keyed by the payload's sessionId), never the agent's."""
+        inquiry = {**request.inquiry, "sessionId": record.session_id}
         try:
-            stamped[command_key] = self._invocation.canonical(
-                function,
-                (_SESSION_ID_FLAG, record.session_id),
-                "".join(f" {token}" for token in _TOKEN.findall(command[match.end("function") :])),
-                powershell=call.name in self._binding.powershell_command_tools,
+            report = self._runner.run_function(request.function, inquiry)
+        except HarnessCommandError as failure:
+            self._diagnostic(f"[{ADAPTER_ID}] {request.function} failed: {failure}")
+            refusal = failure.refusal or "the harness could not answer (see the hook diagnostics)"
+            return renderer.deny([f"{HARNESS_REJECTED}: {refusal}"])
+        except Exception as failure:  # noqa: BLE001 - every failure must be contained
+            self._diagnostic(f"[{ADAPTER_ID}] {request.function} failed: {failure}")
+            return renderer.deny(
+                [f"{HARNESS_REJECTED}: the harness could not answer (see the hook diagnostics)"]
             )
-        except (OSError, ValueError) as failure:
-            self._diagnostic(f"[{ADAPTER_ID}] cannot publish the harness layout file: {failure}")
-            return f"the harness layout file cannot be published (fail closed): {failure}", None
-        return None, stamped
+        rendered = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+        directive = _RESULT_DIRECTIVE.format(function=request.function)
+        return renderer.deny([f"{HARNESS_RESULT} ({request.function}): {directive}\n\n{rendered}"])
 
     def _find_guarded_path(self, command: str, cwd: str | None) -> str | None:
         markers = [f"{self._workspace_name}/", f"{self._workspace_name}\\", "logs/", "logs\\"]
@@ -463,8 +494,6 @@ class Adapter:
         decision: dict[str, Any] = {}
         if self._binding.is_dispatch_tool(call.name):
             decision = dict(self._settle_step(record) or {})
-        elif hook.event == POST_TOOL_USE_FAILURE and self._is_harness_command(call):
-            decision = dict(renderer.additional_context(_REWRITTEN_COMMAND_FAILED))
         elif hook.event == POST_TOOL_USE and (
             self._binding.resolve_write_action(call.name, call.args) is not None
         ):
@@ -472,12 +501,6 @@ class Adapter:
         if not record.context_injected and hook.event == POST_TOOL_USE:
             decision = self._append_late_context(host_id, record, decision)
         return decision or None
-
-    def _is_harness_command(self, call: ToolCall) -> bool:
-        if not (self._binding.is_mediated_command_tool(call.name) and isinstance(call.args, Mapping)):
-            return False
-        command = self._binding.probe(call.args, self._binding.mediated_command_keys)
-        return isinstance(command, str) and bool(_HARNESS_MENTION.search(command))
 
     def _settle_write(
         self, hook: HookInput, record: SessionRecord, call: ToolCall
@@ -602,6 +625,11 @@ class Adapter:
             return None
 
 
+def _camel(kebab: str) -> str:
+    head, *rest = kebab.split("-")
+    return head + "".join(part[:1].upper() + part[1:] for part in rest)
+
+
 def classify_calls(binding: ToolBinding, calls: Sequence[ToolCall]) -> list[str]:
     """Answer the boundary each call of a batch maps to (diagnostics and tests)."""
     classes = []
@@ -619,4 +647,12 @@ def classify_calls(binding: ToolBinding, calls: Sequence[ToolCall]) -> list[str]
     return classes
 
 
-__all__ = ["ADAPTER_ID", "Adapter", "EVENTS", "classify_calls"]
+__all__ = [
+    "ADAPTER_ID",
+    "Adapter",
+    "EVENTS",
+    "HARNESS_REJECTED",
+    "HARNESS_RESULT",
+    "HarnessRequest",
+    "classify_calls",
+]

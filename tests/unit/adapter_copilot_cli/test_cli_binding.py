@@ -42,8 +42,6 @@ def test_the_app_tools_classify(binding: ToolBinding) -> None:
     assert binding.is_dispatch_tool("task")
     assert binding.is_mediated_command_tool("powershell") and binding.is_mediated_command_tool("bash")
     assert binding.is_guarded_shell_tool("powershell")
-    assert "powershell" in binding.powershell_command_tools
-    assert "bash" not in binding.powershell_command_tools
 
 
 def test_a_write_without_a_path_cannot_be_extracted(binding: ToolBinding) -> None:

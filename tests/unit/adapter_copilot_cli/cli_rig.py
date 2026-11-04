@@ -163,7 +163,6 @@ def make_invocation(**overrides: Any) -> HarnessInvocation:
         "windows": True,
         "framework_dir": CWD,
         "workspace_dir": WORKSPACE,
-        "environment": {"FRAMEWORK_DIR": CWD, "FRAMEWORK_WORKSPACE_DIR": WORKSPACE},
     }
     values.update(overrides)
     return HarnessInvocation(**values)
@@ -222,7 +221,7 @@ def rig(tmp_path: Path, binding: ToolBinding) -> Rig:
         context_renderer=ContextRenderer(instructions, skills),
         runner=runner,
         workspace_dir=WORKSPACE,
-        invocation=make_invocation(layout_dir=str(tmp_path / "state" / "layouts")),
+        invocation=make_invocation(),
         diagnostic=diagnostics.append,
     )
     return Rig(adapter, runner, tracker, binding, diagnostics)

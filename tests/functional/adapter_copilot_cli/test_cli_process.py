@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 import pytest
 
-from harness_stub import HarnessStub, build_report
+from harness_stub import HarnessStub, build_error_report, build_report
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STUB_ENTRYPOINT = REPO_ROOT / "tests" / "functional" / "adapter" / "stub_harness_entrypoint.py"
@@ -184,25 +184,36 @@ def test_an_unextractable_write_is_denied(host: Host) -> None:
     assert "check-step-authorization" not in host.stub.functions
 
 
-def test_the_harness_command_is_rewritten_to_the_installed_interpreter(host: Host) -> None:
+def test_the_hook_runs_the_harness_request_itself_and_returns_its_report(host: Host) -> None:
     host.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
+    report = build_error_report("resolve-step", session_id=f"{HOST}-t1")
+    host.stub.answers("resolve-step", report)
+    host.stub.forget_calls()
     harness = host.root / "harness.py"
     tool = "powershell" if os.name == "nt" else "bash"
+    command = f"python {harness} resolve-step --workflow-slug pi-planning"
     run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": [{"id": "c", "name": tool, "args": {
-        "command": f"python {harness} resolve-step --workflow-slug pi-planning"}}]})
-    command = run.decision["modifiedArgs"]["command"]
-    assert sys.executable in command and "--session-id" in command
-    assert "--workflow-slug pi-planning" in command
-    # The layout travels in a published file, never as `$env:`/`VAR=` prefixes the host's
-    # permission layer cannot approve.
-    assert "FRAMEWORK_DIR" not in command and "$env:" not in command
-    layout_file = command.split(" --env-file ", 1)[1].split(" ", 1)[0].strip("'")
-    layout = dict(
-        line.split("=", 1) for line in Path(layout_file).read_text(encoding="utf-8").splitlines()
-    )
-    assert Path(layout_file).is_relative_to(Path(host.environment["SAF_HARNESS_STATE_DIR"]))
-    assert layout["FRAMEWORK_DIR"] == str(host.root)
-    assert layout["FRAMEWORK_WORKSPACE_DIR"] == str(host.workspace)
+        "command": command, "description": "d"}}]})
+    assert run.code == 0
+    assert set(run.decision) == {"permissionDecision", "permissionDecisionReason"}
+    assert run.decision["permissionDecision"] == "deny"
+    reason = run.decision["permissionDecisionReason"]
+    assert reason.startswith("SAFe agentic harness RESULT (resolve-step)")
+    assert json.loads(reason.split("\n\n", 1)[1]) == report
+    (call,) = host.stub.calls
+    assert call.function == "resolve-step"
+    assert call.value("--session-id") == f"{HOST}-t1"
+    assert call.value("--workflow-slug") == "pi-planning"
+
+
+def test_a_rejected_harness_request_never_reaches_the_harness(host: Host) -> None:
+    host.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
+    host.stub.forget_calls()
+    harness = host.root / "harness.py"
+    run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": [{"id": "c", "name": "powershell", "args": {
+        "command": f"python {harness} resolve-step --session-id forged"}}]})
+    assert run.decision["permissionDecisionReason"].startswith("SAFe agentic harness REJECTED")
+    assert host.stub.calls == ()
 
 
 def test_a_harness_failure_never_leaks_its_text(host: Host) -> None:

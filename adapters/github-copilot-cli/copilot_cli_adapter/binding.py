@@ -79,7 +79,6 @@ class ToolBinding:
     async_dispatch_modes: frozenset[str]
     mediated_command_tools: frozenset[str]
     mediated_command_keys: tuple[str, ...]
-    powershell_command_tools: frozenset[str]
     guarded_shell_tools: frozenset[str]
     model_bindings: Mapping[str, str] = field(default_factory=dict)
 
@@ -248,7 +247,6 @@ def load_tool_binding(adapter_dir: Path) -> ToolBinding:
         async_dispatch_modes=frozenset(_strings(raw, "asyncDispatchModes")),
         mediated_command_tools=frozenset(_strings(raw, "mediatedCommandTools")),
         mediated_command_keys=_strings(raw, "mediatedCommandKeys"),
-        powershell_command_tools=frozenset(_strings(raw, "powershellCommandTools")),
         guarded_shell_tools=frozenset(_strings(raw, "guardedShellTools")),
         model_bindings={
             str(slug): str((binding or {}).get("hostModelId"))

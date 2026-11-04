@@ -105,15 +105,6 @@
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the command string of a mediated-command tool."
     },
-    "powershellCommandTools": {
-      "description": "Mediated-command tools whose command string is PowerShell; the others are POSIX shell. The adapter re-renders an authorized harness command in that tool's dialect.",
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "description": "One host tool name."
-      }
-    },
     "guardedShellTools": {
       "description": "Host tool names whose command strings can reach the filesystem outside any write-classified tool (terminals, task runners). A command that textually references a workspace artifact-layout path or the workspace logs path is DENIED at the pre-tool boundary — an advisory-grade guard (textual matching is bypassable; C6's detect-and-remediate plane remains the guarantee), closing the routine write escape hatch.",
       "type": "array",

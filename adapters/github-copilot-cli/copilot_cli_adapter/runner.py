@@ -23,7 +23,12 @@ class HarnessCommandError(RuntimeError):
     """Raised when a harness command produced no usable report.
 
     A gating boundary renders it as a DENIAL — a missing outcome is never an allow.
+    `refusal` is the harness's own exit-plane message (`harness: ...` on stderr), if any.
     """
+
+    def __init__(self, message: str, refusal: str | None = None) -> None:
+        super().__init__(message)
+        self.refusal = refusal
 
 
 class CommandRunner(Protocol):
@@ -78,7 +83,8 @@ class SubprocessCommandRunner:
         exit_code, stdout, stderr = self._run_process(argv, environment)
         if exit_code != 0:
             raise HarnessCommandError(
-                f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}"
+                f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}",
+                refusal=_read_refusal(stderr),
             )
         try:
             report = json.loads(stdout)
@@ -91,6 +97,14 @@ class SubprocessCommandRunner:
                 f"harness command '{function}' answered {type(report).__name__}, not a report"
             )
         return report
+
+
+def _read_refusal(stderr: str) -> str | None:
+    """The harness's own refusal line — never a traceback or any other raw output."""
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    if lines and lines[-1].startswith("harness: "):
+        return lines[-1][:2000]
+    return None
 
 
 def render_flags(inquiry: Mapping[str, Any]) -> list[str]:

@@ -98,12 +98,7 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +python : str
       +harness : str
       +windows : bool
-      +environment : Mapping[str, str]
-      +layout_dir : str
       +example(arguments) : str
-      +layout_file() : str
-      +publish_layout() : str
-      +canonical(function, attribution, flags, powershell) : str
       +is_harness(raw, cwd) : bool
       +is_interpreter(raw) : bool
       +hint() : str
@@ -115,7 +110,6 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +framework_dir : Path
       +resolve(variable) : Path
       +environment : dict[str, str]
-      +absolute_environment : dict[str, str]
     }
     class "install.py" as Installer <<entry>> {
       +main(argv, environment) : int
@@ -142,10 +136,10 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       binding"). preToolUse is BATCHED: every call is classified
       (H2 dispatch / H3 write / H4 harness command / I9 shell) and
       decided; ANY denial denies the firing. An unextractable write
-      target is DENIED (fail closed). H4 rewrites an accepted
-      harness command to ONE plain, approvable line (unquoted
-      interpreter, --env-file <published layout file>, --session-id) -
-      the agent's shell needs no FRAMEWORK_* environment. Framework-agent gating,
+      target is DENIED (fail closed). H4 never edits a command: an
+      accepted harness request is RUN BY THE HOOK for the observed
+      session and its report returned as the deny reason (the shell
+      never runs it). Framework-agent gating,
       step correlation and session closure stay inside the invoked
       harness functions; this class relays their outcomes.
     end note

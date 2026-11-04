@@ -52,9 +52,9 @@ dispatchModelKeys: [model]
 dispatchModeKeys: [mode]
 asyncDispatchModes: [background]
 
-# Mediated attribution surface (H4): a shell command running `harness.py resolve-step[-model]`.
+# Harness request surface (H4): a shell command naming `harness.py resolve-step[-model]` is a
+# REQUEST the preToolUse hook answers by running the function itself; the shell never runs it.
 mediatedCommandTools: [powershell, bash]
 mediatedCommandKeys: [command]
-powershellCommandTools: [powershell]
 # Guarded shell class (I9): advisory textual guard on every other shell command.
 guardedShellTools: [powershell, bash]

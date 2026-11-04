@@ -2005,16 +2005,6 @@ FRAMEWORK_INSTRUCTIONS_DIR=instructions
 FRAMEWORK_WORKSPACE_DIR=../saf-agentic-workspace
 ```
 
-A host that cannot set the process environment — one whose command line must stay ONE
-plain invocation, e.g. so that a permission rule on the interpreter can approve it — names a
-**layout file** instead: `harness.py --env-file <file> <function> [flags]`. The option must
-come before the function. The file has the `.env` syntax and may declare ONLY the layout
-variables above (`FRAMEWORK_DIR` and the `FRAMEWORK_*_DIR` set). Its values are exported
-before the anchor is read and take precedence over the inherited environment, because the
-caller named them explicitly. An unreadable or malformed file, or any other variable, is
-refused before any function runs (`configuration-error`, exit 3); a missing path is a usage
-error (exit 2).
-
 `FrameworkLayout` is the dataclass over these variables — validated fail-fast like any other
 configuration source (every variable present, every path existing — see
 [Internal validation](#internal-validation--not-functions)).

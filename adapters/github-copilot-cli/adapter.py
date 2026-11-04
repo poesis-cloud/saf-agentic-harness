@@ -31,7 +31,7 @@ if str(ADAPTER_DIR) not in sys.path:
 from copilot_cli_adapter import renderer  # noqa: E402
 from copilot_cli_adapter.binding import load_tool_binding  # noqa: E402
 from copilot_cli_adapter.core import ADAPTER_ID, EVENTS, Adapter  # noqa: E402
-from copilot_cli_adapter.invocation import LAYOUT_FILES_DIR, HarnessInvocation  # noqa: E402
+from copilot_cli_adapter.invocation import HarnessInvocation  # noqa: E402
 from copilot_cli_adapter.layout import (  # noqa: E402
     resolve_layout,
     resolve_state_dir,
@@ -51,10 +51,9 @@ def build_adapter(
     """Build the adapter and its binding from this directory and the framework layout."""
     layout = resolve_layout(framework_dir, workspace_dir=workspace_dir)
     binding = load_tool_binding(ADAPTER_DIR)
-    state_dir = resolve_state_dir(ADAPTER_ID)
     adapter = Adapter(
         binding=binding,
-        tracker=SessionTracker(state_dir),
+        tracker=SessionTracker(resolve_state_dir(ADAPTER_ID)),
         context_renderer=ContextRenderer(
             instructions_dir=layout.resolve("FRAMEWORK_INSTRUCTIONS_DIR"),
             skills_dir=layout.resolve("FRAMEWORK_SKILLS_DIR"),
@@ -70,8 +69,6 @@ def build_adapter(
             windows=os.name == "nt",
             framework_dir=str(layout.framework_dir),
             workspace_dir=str(layout.resolve("FRAMEWORK_WORKSPACE_DIR")),
-            environment=layout.absolute_environment,
-            layout_dir=str(state_dir / LAYOUT_FILES_DIR),
         ),
     )
     return adapter, binding

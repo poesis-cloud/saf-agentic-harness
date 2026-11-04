@@ -2,7 +2,8 @@
 
 Every rendered object is ONE JSON line, ASCII-escaped so a Windows console code page can
 never corrupt it. The adapter never renders `permissionDecision: "allow"` — an allow
-would bypass the user's own permission flow; an authorized call simply passes through.
+would bypass the user's own permission flow; an authorized call simply passes through. Nor
+does it ever render `modifiedArgs`: the adapter never edits an agent's command.
 """
 
 from __future__ import annotations
@@ -42,10 +43,6 @@ def deny(reasons: Sequence[str]) -> dict[str, Any]:
         "permissionDecision": "deny",
         "permissionDecisionReason": "; ".join(reasons) or "denied by the SAFe agentic harness",
     }
-
-
-def modified_args(args: Mapping[str, Any]) -> dict[str, Any]:
-    return {"modifiedArgs": dict(args)}
 
 
 def additional_context(text: str) -> dict[str, Any]:
@@ -195,7 +192,6 @@ __all__ = [
     "additional_context",
     "deny",
     "describe_report",
-    "modified_args",
     "read_error",
     "read_status",
     "render",

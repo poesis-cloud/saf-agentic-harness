@@ -376,6 +376,10 @@ the permanently tracked items in
 [`adapter/vscode-github-copilot-chat/spec.md`](adapter/vscode-github-copilot-chat/spec.md).
 I4's narrow tool-boundary-stamp exception is specified and implemented (H4), but the real fix —
 a host-native attribution surface outside model-visible arguments — is tracked, not scheduled.
+The exception applies to the VS Code adapter only: the `github-copilot-cli` adapter runs
+functions 3–4 from its own `preToolUse` hook with the payload's session and never stamps a
+command, so it does not need it
+([`adapter/github-copilot-cli/spec.md`](adapter/github-copilot-cli/spec.md), Mediated-attribution status).
 I13(a) and I13(d) are out of test scope: (a) whether a steering message
 submitted mid-execution fires `UserPromptSubmit` on the native panel path, and (d) hooks being
 a preview feature whose setting names and event set may drift. Neither is closable by a test —

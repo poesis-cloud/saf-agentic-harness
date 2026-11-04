@@ -30,11 +30,6 @@ adapters/github-copilot-cli/
   agents and skills; this installer adds the hooks to it.
 - The **framework folder trusted** in the app. Repository hooks and agent-scoped hooks do not
   run in an untrusted folder, and they fail silently. Without them no harness session opens.
-- **Paths without spaces or special characters** for the venv interpreter, the harness
-  checkout and the state directory (`%LOCALAPPDATA%`). The harness command the adapter
-  rewrites must name them unquoted, or the app can never pre-approve it. On Windows the 8.3
-  short form is used when it exists; otherwise `install.py` refuses (see
-  [Approving the harness interpreter](#approving-the-harness-interpreter)).
 
 ## Install — Windows (PowerShell)
 
@@ -80,12 +75,8 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   needed:** hooks get their layout from `env`, and agents get absolute paths from the
   injected hint (see below).
 - The installer **refuses** an interpreter (`--python`, default: the one running it) that
-  cannot import the harness requirements, and a malformed `<fw>/.env`. It also refuses when
-  the interpreter, the harness entry point or the layout-file directory needs shell quoting,
-  unless `--allow-quoted-paths` is given. Nothing is written then.
-- After writing, it **prints the permission rule** the harness command needs (see
-  [Approving the harness interpreter](#approving-the-harness-interpreter)). It never edits
-  your permission file.
+  cannot import the harness requirements, and a malformed `<fw>/.env`. Nothing is written
+  then.
 - **A managed `hooks:` block** in the frontmatter of every orchestrator's agent file
   (`<bundle>/agents/<slug>.agent.md`). The orchestrators are the agents that
   `workflows/**/*.workflow.conf.yaml` names as `orchestrator:`. The block holds the scoped
@@ -121,15 +112,20 @@ either checkout or recreating the venv.
    Its scoped hook opens the harness session. Every session also receives a short context
    from `sessionStart` naming the framework root, the workspace, and the exact harness command
    lines.
-4. The orchestrator runs `& <venv python> <harness.py> resolve-step --workflow-slug <slug>`
-   (or `… resolve-step-model`) with its shell tool. It may write `python`, `python3`, `py -3`
-   or a full interpreter path. The adapter accepts exactly one plain invocation of the
-   installed harness, without `--session-id` or `--env-file`, and rewrites it into the
-   canonical, attributed command:
-   `& <venv python> <harness.py> --env-file <layout file> resolve-step --session-id <session> --workflow-slug <slug>`.
-   The layout file holds `FRAMEWORK_DIR` and every `FRAMEWORK_*_DIR`; the adapter publishes
-   it under the state directory (`layouts\layout-<hash>.env`). Everything else that mentions
-   `harness.py` is denied.
+4. The orchestrator asks the harness with ONE plain command, alone in its tool call:
+   `& <venv python> <harness.py> resolve-step --workflow-slug <slug>` (or
+   `… resolve-step-model`; on Linux/macOS without the leading `&`). It may write `python`, `python3`,
+   `py -3` or a full interpreter path, but never `--session-id`, `$env:`, or chaining.
+   **The shell does not run this command, and the adapter never edits it.** The
+   `preToolUse` hook recognizes the request, runs the function itself for the agent's own
+   session (taken from the hook payload), and returns the report as the tool response. The
+   app shows it as a hook denial whose reason starts with
+   `SAFe agentic harness RESULT (resolve-step): …` followed by the JSON report. That is the
+   successful answer: the agent must act on it and not re-issue the command. Only a reason
+   starting with `SAFe agentic harness REJECTED` means the request was refused (it names
+   the problem and the accepted line). Because the hook decides before the app's permission
+   layer, **no permission rule or interactive approval is needed** for harness commands,
+   including in autopilot, and agent shells need no `FRAMEWORK_*` variables.
 5. Steps are dispatched with `task`, synchronously; `mode: background` is denied. Writes go
    through `create`/`edit`, which the harness authorizes (H3) and validates (H5). `skill`,
    `ask_user` (the human gate), `view`, `grep` and `glob` are never gated.
@@ -144,47 +140,6 @@ Session records live in `%LOCALAPPDATA%\saf-agentic-harness\github-copilot-cli`,
 `$XDG_STATE_HOME/saf-agentic-harness/github-copilot-cli`. `SAF_HARNESS_STATE_DIR` overrides
 both. Hook diagnostics go to stderr.
 
-## Approving the harness interpreter
-
-The app's permission layer checks the command that actually runs, which is the **rewritten**
-harness line, not the one the agent wrote. That line is led by the venv interpreter. Without
-a saved approval the app asks you each time; in autopilot or any unattended run it **denies**
-(`denied-no-approval-rule-and-could-not-request-from-user`).
-
-Approve the interpreter once, with the rule `install.py` prints:
-
-```json
-{
-  "locations": {
-    "C:\\saf\\saf-agentic-organization": {
-      "tool_approvals": [
-        {
-          "kind": "commands",
-          "commandIdentifiers": ["C:\\saf\\saf-agentic-harness\\.venv\\Scripts\\python.exe:*"]
-        }
-      ]
-    }
-  }
-}
-```
-
-- Put it in `%USERPROFILE%\.copilot\permissions-config.json` (or `$COPILOT_HOME/…`,
-  `~/.copilot/…` on Linux/macOS). Merge it into the existing `locations` rather than
-  replacing the file, and do not edit the file while a session runs.
-- The location key is the **Git root** of the folder you open sessions in (or that folder
-  when it is not a repository).
-- Instead, you can approve the first harness command for the session when the app asks.
-- The rule approves **any** command led by that interpreter. The adapter still gates
-  harness commands (H4), and a dedicated venv keeps the rule narrow.
-
-The rewrite is kept approvable on purpose. It is one plain command, with no `$env:X=…;` or
-`X=… cmd` prefix and no quotes around the interpreter; any of those makes a rule-based
-approval impossible. When a path has no unquoted spelling (a space, `'`, `$`, `&`, …, and no
-8.3 short name), the adapter quotes it, the line can only be approved interactively, and
-`install.py` refuses unless you pass `--allow-quoted-paths`. To avoid this, put the harness,
-its venv and the state directory (`SAF_HARNESS_STATE_DIR`, set user-wide so the app
-inherits it) on plain paths.
-
 ## Known limitations
 
 These are detailed, with their fallbacks, in the spec's *Limited or unsupported boundaries*.
@@ -196,14 +151,12 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
   workspace or `logs/`, but a determined command can evade a textual check. The core's
   commit-set check is the backstop. Agents must write through `create`/`edit`.
 - **Batching.** A harness command must be the only tool call in its batch.
-- **Host denials of the rewritten line.** The agent sees the rewritten command (with
-  `--env-file` and `--session-id`) in a host denial. In a live trial the model took those
-  parts for its own mistake, "fixed" them and retried five times. The session hint, and the
-  adapter's `postToolUseFailure` context for a failed harness command, therefore say that the
-  harness rewrote the line and that the denial comes from the host permission layer, so the
-  agent should stop and ask for approval. The host's own denial text cannot be changed, and
-  it is not yet verified that a permission denial fires `postToolUseFailure`.
+- **The harness answer arrives as a "denial".** The runtime has no other channel for a
+  `preToolUse` hook to answer the agent without running or editing its command. The reason
+  prefix and the session hint say it is the result; a model that still retries just gets the
+  same answer again. If the `preToolUse` hook times out, the agent's line runs in its shell
+  without the hook environment, and the harness refuses it (`FRAMEWORK_DIR is unset`).
 - **Latency.** Plugin hooks start Python for every tool call in every folder. Ungoverned
   sessions return after one state lookup.
 - **Not yet byte-verified in the app:** `exec` entries (fall back to `--hook-style shell`),
-  `modifiedArgs` without `permissionDecision`, and scoped hooks inside subagents.
+  the exact wrapper around a deny reason, and scoped hooks inside subagents.

@@ -47,14 +47,6 @@ class FrameworkLayout:
         """The explicit `FRAMEWORK_*` environment every harness subprocess runs under."""
         return {FRAMEWORK_DIR_VARIABLE: str(self.framework_dir), **self.values}
 
-    @property
-    def absolute_environment(self) -> dict[str, str]:
-        """The same layout with every directory absolute — independent of any cwd."""
-        return {
-            FRAMEWORK_DIR_VARIABLE: str(self.framework_dir),
-            **{variable: str(self.resolve(variable)) for variable in self.values},
-        }
-
 
 def read_env_file(path: Path) -> dict[str, str]:
     """Parse the framework's `.env` exactly as the core `EnvLoader` does: KEY=VALUE lines,
