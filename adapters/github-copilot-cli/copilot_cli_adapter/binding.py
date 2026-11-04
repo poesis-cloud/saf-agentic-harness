@@ -7,21 +7,33 @@ batched `preToolUse` shape was learned from captured payloads, not from the docs
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-import yaml
+# The binding validator is shared by every adapter: it lives in `adapters/`.
+_SHARED_ADAPTERS_DIR = str(Path(__file__).resolve().parents[2])
+if _SHARED_ADAPTERS_DIR not in sys.path:
+    sys.path.append(_SHARED_ADAPTERS_DIR)
 
-from .apply_patch import PatchParseError, parse_patch_targets
+from binding_contract import (  # noqa: E402
+    MODELS_CONTRACT,
+    TOOLS_CONTRACT,
+    BindingContractError,
+    load_contract_bound_yaml,
+    require_non_empty,
+)
+
+from .apply_patch import PatchParseError, parse_patch_targets  # noqa: E402
 
 TOOLS_FILENAME = "tools.yaml"
 MODELS_FILENAME = "models.yaml"
 _DELETE_ACTION = "delete"
 
 
-class BindingError(ValueError):
-    """Raised when the binding files are missing or malformed."""
+class BindingError(BindingContractError):
+    """Raised when the binding files are missing, malformed or off-contract."""
 
 
 class TargetExtractionError(ValueError):
@@ -162,18 +174,40 @@ def _strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _read_yaml(path: Path) -> Mapping[str, Any]:
-    if not path.is_file():
-        raise BindingError(f"binding file is missing: {path}")
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _read_yaml(path: Path, contract: str) -> Mapping[str, Any]:
+    try:
+        loaded = load_contract_bound_yaml(path, contract)
+    except BindingError:
+        raise
+    except BindingContractError as failure:
+        raise BindingError(str(failure)) from failure
     if not isinstance(loaded, Mapping):
         raise BindingError(f"binding file is not a mapping: {path}")
     return loaded
 
 
+# Every probe a gate depends on: empty, it would classify every firing as a pass-through.
+_GATING_PROBES = (
+    ("writeTools", "no write would ever be authorized (H3) or validated (H5)"),
+    ("pathKeys", "no write target could be extracted — every write would be denied"),
+    ("toolCallsKeys", "no batched preToolUse call would be gated"),
+    ("toolCallNameKeys", "no batched tool call could be named"),
+    ("toolCallArgsKeys", "no batched tool call's arguments could be read"),
+    ("hostSessionKeys", "no event could be correlated to its session"),
+    ("dispatchTools", "no step dispatch would be gated (I4)"),
+    ("mediatedCommandTools", "no harness command would be mediated (H4)"),
+)
+
+
 def load_tool_binding(adapter_dir: Path) -> ToolBinding:
-    """Load this adapter's binding from its own directory."""
-    raw = _read_yaml(adapter_dir / TOOLS_FILENAME)
+    """Load this adapter's binding, contract-validated at load (fail fast, never empty)."""
+    tools_path = adapter_dir / TOOLS_FILENAME
+    raw = _read_yaml(tools_path, TOOLS_CONTRACT)
+    for key, why in _GATING_PROBES:
+        try:
+            require_non_empty(raw, key, source=str(tools_path), why=why)
+        except BindingContractError as failure:
+            raise BindingError(str(failure)) from failure
     write_tools = raw.get("writeTools") or {}
     if not isinstance(write_tools, Mapping):
         raise BindingError("tools.yaml 'writeTools' must be a mapping")
@@ -186,7 +220,7 @@ def load_tool_binding(adapter_dir: Path) -> ToolBinding:
             read_only=frozenset(spec.get("readOnly") or ()),
             actions=dict(spec.get("actions") or {}),
         )
-    models = _read_yaml(adapter_dir / MODELS_FILENAME).get("modelBindings") or {}
+    models = _read_yaml(adapter_dir / MODELS_FILENAME, MODELS_CONTRACT).get("modelBindings") or {}
     return ToolBinding(
         write_tools={str(name): str(action) for name, action in write_tools.items()},
         delete_tools=frozenset(_strings(raw, "deleteTools")),

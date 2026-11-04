@@ -27,6 +27,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import subprocess
+
 import yaml
 
 ADAPTER_DIR = Path(__file__).resolve().parent
@@ -38,6 +40,7 @@ from copilot_cli_adapter.core import EVENTS  # noqa: E402
 from copilot_cli_adapter.layout import (  # noqa: E402
     FRAMEWORK_DIR_VARIABLE,
     LAYOUT_VARIABLES,
+    LayoutError,
     read_env_file,
 )
 
@@ -57,6 +60,10 @@ BLOCK_CLOSE = "# <<< safe-harness copilot-cli H0 <<<"
 HOOK_TARGETS = ("plugin", "repo", "user", "none")
 HOOK_STYLES = ("exec", "shell")
 _IO_ENVIRONMENT = {"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+HARNESS_PYTHON_VARIABLE = "SAF_HARNESS_PYTHON"
+# The modules requirements.txt installs: the recorded hook interpreter must import them all,
+# or every hook would fail (closed) at its first firing.
+HARNESS_REQUIREMENT_MODULES = ("yaml", "jsonschema", "celpy")
 
 
 class InstallError(ValueError):
@@ -117,7 +124,10 @@ def layout_environment(
     inherit (no `setx`). `workspace_dir` overrides FRAMEWORK_WORKSPACE_DIR with an absolute
     path — the governed portfolio tree may live outside the framework checkout.
     """
-    declared = read_env_file(framework_dir / ".env")
+    try:
+        declared = read_env_file(framework_dir / ".env")
+    except LayoutError as failure:
+        raise InstallError(str(failure)) from failure
     values = {FRAMEWORK_DIR_VARIABLE: str(framework_dir)}
     if workspace_dir is not None:
         values["FRAMEWORK_WORKSPACE_DIR"] = str(workspace_dir)
@@ -159,12 +169,37 @@ def render_hooks_file(
         entry.update(
             {
                 "cwd": str(framework_dir),
-                "env": {**environment, **_IO_ENVIRONMENT},
+                "env": {**environment, HARNESS_PYTHON_VARIABLE: python, **_IO_ENVIRONMENT},
                 "timeoutSec": spec["timeoutSec"],
             }
         )
         hooks[event] = [entry]
     return {"version": 1, "hooks": hooks}
+
+
+def resolve_interpreter(raw: str | None) -> str:
+    """The interpreter every hook runs, refused unless it can import the harness requirements.
+
+    Absolute but NOT symlink-resolved: a venv interpreter is a symlink whose own location
+    selects the venv.
+    """
+    python = os.path.abspath(os.path.expanduser(raw)) if raw else os.path.abspath(sys.executable)
+    if not Path(python).is_file():
+        raise InstallError(f"the Python interpreter does not exist: {python}")
+    probe = "import " + ", ".join(HARNESS_REQUIREMENT_MODULES)
+    try:
+        completed = subprocess.run(
+            [python, "-c", probe], capture_output=True, text=True, check=False
+        )
+    except OSError as failure:
+        raise InstallError(f"the Python interpreter cannot run: {python}: {failure}") from failure
+    if completed.returncode != 0:
+        raise InstallError(
+            f"the Python interpreter {python} cannot import the harness requirements "
+            f"({', '.join(HARNESS_REQUIREMENT_MODULES)}) — install requirements.txt into it, "
+            "or pass --python <interpreter that has them>"
+        )
+    return python
 
 
 # --- the agent-scoped H0 block --------------------------------------------------------
@@ -308,9 +343,7 @@ def plan(arguments: argparse.Namespace, environment: Mapping[str, str]) -> dict[
     framework_dir = Path(os.path.abspath(os.path.expanduser(arguments.framework_dir)))
     if not framework_dir.is_dir():
         raise InstallError(f"the framework root does not exist: {framework_dir}")
-    python = os.path.abspath(arguments.python) if arguments.python else sys.executable
-    if not Path(python).is_file():
-        raise InstallError(f"the Python interpreter does not exist: {python}")
+    python = resolve_interpreter(arguments.python)
     bundle_dir = Path(os.path.abspath(arguments.bundle_dir)) if arguments.bundle_dir else None
     if bundle_dir is not None and not bundle_dir.is_dir():
         raise InstallError(f"the bundle directory does not exist: {bundle_dir}")
@@ -396,7 +429,11 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--agents-dir", help="where the orchestrator agent sources are")
     parser.add_argument("--agents-dest", help="where the rendered orchestrator agents go")
     parser.add_argument("--workflows-dir", help="the framework's workflow catalog")
-    parser.add_argument("--python", help="interpreter the hooks run (default: this one)")
+    parser.add_argument(
+        "--python",
+        help="absolute interpreter the hooks run; must import the harness requirements "
+        "(default: the one running this script)",
+    )
     parser.add_argument("--hook-style", choices=HOOK_STYLES, default="exec")
     parser.add_argument("--skip-agents", action="store_true", help="do not render H0 blocks")
     parser.add_argument("--dry-run", action="store_true", help="print the plan, write nothing")

@@ -57,7 +57,7 @@
     },
     "patchKeys": {
       "$ref": "#/$defs/keyList",
-      "description": "Ordered payload field names to probe for a patch document (the '*** Begin Patch' format): every '*** Add File:' / '*** Update File:' / '*** Delete File:' / '*** Move to:' header names an artifact path, with the action the header performs."
+      "description": "Ordered payload field names to probe for a patch document (the '*** Begin Patch' format): every '*** Add File:' / '*** Update File:' / '*** Delete File:' / '*** Move to:' header names an artifact path, with the action the header performs. For an adapter declaring `patchTools`, the keys are probed in that tool's arguments, and a string tool input is itself the patch text."
     },
     "hostSessionKeys": {
       "$ref": "#/$defs/keyList",
@@ -131,10 +131,6 @@
         "minLength": 1,
         "description": "One host tool name."
       }
-    },
-    "patchKeys": {
-      "$ref": "#/$defs/keyList",
-      "description": "Ordered argument field names to probe for a patch tool's patch text (a string tool input is itself the patch text)."
     },
     "writeToolSubcommands": {
       "description": "Write tools whose action depends on one of their own arguments: `key` names that argument, `readOnly` lists values that make the call a non-write, `actions` maps values to an action verb (other values keep the writeTools verb).",

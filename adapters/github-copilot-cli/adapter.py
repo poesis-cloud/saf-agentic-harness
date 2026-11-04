@@ -4,11 +4,15 @@
     <python> adapter.py hook --event <camelCaseEvent> [--agent <slug>] [--framework-dir <dir>]
 
 The installer renders every hook entry to run THIS file with an explicit interpreter, so
-no shell (and no bash on Windows) sits between the runtime and the adapter. Fail closed:
-at `preToolUse`, any adapter failure DENIES a session that is (or may be) governed — only a
-readable payload with no session record passes, so a broken install cannot block tool use in
-every folder the app opens; at every other event a failure is a diagnostic on stderr and a
-pass-through (those events cannot veto anyway).
+no shell (and no bash on Windows) sits between the runtime and the adapter.
+
+Bootstrap failure (spec, as for every adapter): any failure escaping the hook handling — a
+missing or non-directory framework root, an unreadable or malformed `.env`, an off-contract
+binding, an unreadable payload, an unexpected crash — answers exit 2 with a stderr
+diagnostic, never an exit the runtime fails open on. The Copilot CLI runtime turns exit 2
+into a DENY at `preToolUse` and into a user-visible warning at every other event. A
+pass-through on failure is never chosen, even for a session without a record: a broken
+bootstrap is exactly what keeps H0 from creating that record.
 """
 
 from __future__ import annotations
@@ -26,20 +30,19 @@ if str(ADAPTER_DIR) not in sys.path:
 
 from copilot_cli_adapter import renderer  # noqa: E402
 from copilot_cli_adapter.binding import load_tool_binding  # noqa: E402
-from copilot_cli_adapter.core import ADAPTER_ID, EVENTS, PRE_TOOL_USE, Adapter  # noqa: E402
+from copilot_cli_adapter.core import ADAPTER_ID, EVENTS, Adapter  # noqa: E402
 from copilot_cli_adapter.invocation import HarnessInvocation  # noqa: E402
 from copilot_cli_adapter.layout import (  # noqa: E402
     resolve_layout,
     resolve_state_dir,
 )
-from copilot_cli_adapter.payload import HookInput, sanitize_identifier  # noqa: E402
+from copilot_cli_adapter.payload import HookInput  # noqa: E402
 from copilot_cli_adapter.renderer import ContextRenderer  # noqa: E402
 from copilot_cli_adapter.runner import SubprocessCommandRunner  # noqa: E402
 from copilot_cli_adapter.tracker import SessionTracker  # noqa: E402
 
 HARNESS_ENTRYPOINT = ADAPTER_DIR.parents[1] / "harness.py"
-# The observed host session key, read without the binding (which may be what failed).
-_HOST_SESSION_KEY = "sessionId"
+EXIT_FAIL_CLOSED = 2
 
 
 def build_adapter(
@@ -72,31 +75,14 @@ def build_adapter(
     return adapter, binding
 
 
-def session_may_be_governed(payload: Any) -> bool:
-    """False only when the payload is readable AND no session record exists for it."""
-    try:
-        if not isinstance(payload, Mapping):
-            return True
-        raw = payload.get(_HOST_SESSION_KEY)
-        if not isinstance(raw, str) or not raw:
-            return True
-        tracker = SessionTracker(resolve_state_dir(ADAPTER_ID))
-        return tracker.read(sanitize_identifier(raw)) is not None
-    except Exception:  # noqa: BLE001 - any doubt is "governed": deny
-        return True
-
-
 def run_hook(
     argv: Sequence[str],
     stdin: BinaryIO,
     stdout: TextIO,
     stderr: TextIO,
     build: Callable[[str | None, str | None], tuple[Adapter, Any]] = build_adapter,
-    may_be_governed: Callable[[Any], bool] | None = None,
 ) -> int:
-    may_be_governed = may_be_governed or session_may_be_governed
     arguments = _parse_arguments(argv)
-    payload: Any = None
     try:
         raw = stdin.read()
         payload = json.loads(raw.decode("utf-8-sig")) if raw.strip() else {}
@@ -112,16 +98,13 @@ def run_hook(
             )
         )
     except Exception as failure:  # noqa: BLE001 - the entry must never crash open
-        print(f"[{ADAPTER_ID}] {arguments.event}: {type(failure).__name__}: {failure}", file=stderr)
-        if arguments.event != PRE_TOOL_USE:
-            return 0
-        if not may_be_governed(payload):
-            # The plugin's hooks fire in EVERY folder the app opens: a broken install must not
-            # take down tool use in sessions the harness never governed.
-            return 0
-        decision = renderer.deny(
-            [f"the SAFe agentic harness adapter failed ({type(failure).__name__}); denied"]
+        print(
+            f"[{ADAPTER_ID}] {arguments.event}: the hook failed — failing closed: "
+            f"{type(failure).__name__}: {failure}",
+            file=stderr,
         )
+        stderr.flush()
+        return EXIT_FAIL_CLOSED
     output = renderer.render(decision)
     if output:
         stdout.write(output + "\n")

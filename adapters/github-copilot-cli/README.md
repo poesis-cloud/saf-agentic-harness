@@ -59,8 +59,9 @@ python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
     --framework-dir ~/saf/saf-agentic-organization \
     --bundle-dir <the rendered bundle> \
     [--workspace-dir ~/saf/saf-agentic-workspace]
-# or, the same through make (uses the python3 on PATH — activate the venv first):
-make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=…]
+# or, the same through make (PYTHON defaults to python3 on PATH — activate the venv first,
+# or pass HARNESS_PYTHON=<absolute venv python>):
+make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=…] [HARNESS_PYTHON=…]
 ```
 
 ## What the installer writes
@@ -69,9 +70,13 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   `hooks` file path, the installer writes there instead; an inline `hooks` object is refused.
   Every entry is `exec: <venv python>`, `args: [adapter.py, hook, --event, …,
   --framework-dir, <fw>]`, with `cwd: <fw>` and an `env` holding `FRAMEWORK_DIR` plus every
-  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env` and `--workspace-dir`. **No user-level
-  variables (`setx`) are needed:** hooks get their layout from `env`, and agents get absolute
-  paths from the injected hint (see below).
+  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env` and `--workspace-dir`, plus
+  `SAF_HARNESS_PYTHON` (the recorded interpreter). **No user-level variables (`setx`) are
+  needed:** hooks get their layout from `env`, and agents get absolute paths from the
+  injected hint (see below).
+- The installer **refuses** an interpreter (`--python`, default: the one running it) that
+  cannot import the harness requirements, and a malformed `<fw>/.env`. Nothing is written
+  then.
 - **A managed `hooks:` block** in the frontmatter of every orchestrator's agent file
   (`<bundle>/agents/<slug>.agent.md`). The orchestrators are the agents that
   `workflows/**/*.workflow.conf.yaml` names as `orchestrator:`. The block holds the scoped
@@ -115,6 +120,12 @@ either checkout or recreating the venv.
 5. Steps are dispatched with `task`, synchronously; `mode: background` is denied. Writes go
    through `create`/`edit`, which the harness authorizes (H3) and validates (H5). `skill`,
    `ask_user` (the human gate), `view`, `grep` and `glob` are never gated.
+
+**Failure is closed and visible.** If a hook cannot bootstrap, it exits 2 with a stderr
+diagnostic. That happens when the framework root is gone, `.env` is malformed, the binding is
+off-contract, or the payload is unreadable. The app then denies the tool call (`preToolUse`)
+or shows a warning (other events). A broken install therefore blocks tool use wherever the
+plugin's hooks fire. Repair it by re-running `install.py`, or by disabling the plugin.
 
 Session records live in `%LOCALAPPDATA%\saf-agentic-harness\github-copilot-cli`, or
 `$XDG_STATE_HOME/saf-agentic-harness/github-copilot-cli`. `SAF_HARNESS_STATE_DIR` overrides

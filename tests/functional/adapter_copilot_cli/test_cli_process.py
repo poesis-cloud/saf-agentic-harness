@@ -70,6 +70,12 @@ def host(tmp_path: Path) -> Host:
         root / "adapters" / "github-copilot-cli",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # The binding is contract-validated at load by the shared validator, which reads the
+    # adapter contracts the harness ships beside `adapters/`: the copy carries both.
+    shutil.copy2(REPO_ROOT / "adapters" / "binding_contract.py", root / "adapters")
+    shutil.copytree(
+        REPO_ROOT / "contracts" / "conf" / "adapters", root / "contracts" / "conf" / "adapters"
+    )
     shutil.copy2(STUB_ENTRYPOINT, root / "harness.py")
     for name in LAYOUT:
         (root / name).mkdir()
@@ -157,8 +163,16 @@ def test_an_unreadable_payload_in_a_governed_session_is_denied(host: Host) -> No
     host.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
     run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": "nope"})
     assert run.code == 0 and run.decision["permissionDecision"] == "deny"
+    # Unparsable stdin escapes the hook handling: exit 2, which the runtime turns into a deny.
     run = host.fire("preToolUse", b"\x00 not json")
-    assert run.code == 0 and run.decision["permissionDecision"] == "deny"
+    assert (run.code, run.stdout) == (2, "") and "failing closed" in run.stderr
+
+
+def test_a_malformed_framework_env_fails_closed(host: Host) -> None:
+    (host.root / ".env").write_text("FRAMEWORK_WORKSPACE_DIR\n", encoding="utf-8")
+    run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": [
+        {"id": "a", "name": "view", "args": {"path": "C:\\x"}}]})
+    assert (run.code, run.stdout) == (2, "") and "malformed" in run.stderr
 
 
 def test_an_unextractable_write_is_denied(host: Host) -> None:

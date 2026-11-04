@@ -90,15 +90,18 @@ install-hooks:
 
 ## install-hooks-copilot-cli: render the GitHub Copilot app / Copilot CLI hooks
 ## (adapters/github-copilot-cli) into the framework's rendered plugin bundle: the global
-## hooks.json and the orchestrators' agent-scoped H0 block. Run it with the harness VENV's
-## python3 first on PATH — that interpreter is recorded in every hook. Machine-specific output,
-## never committed. On Windows run install.py directly (see adapters/github-copilot-cli/README.md).
+## hooks.json and the orchestrators' agent-scoped H0 block. Machine-specific output, never
+## committed. On Windows run install.py directly (see adapters/github-copilot-cli/README.md).
 ##
 ##   FRAMEWORK_DIR  required — the framework CHECKOUT (not the bundle).
 ##   BUNDLE_DIR     required — the framework's rendered Copilot plugin bundle.
 ##   WORKSPACE_DIR  optional — absolute FRAMEWORK_WORKSPACE_DIR override.
+##   HARNESS_PYTHON absolute interpreter the hooks run under; defaults to the interpreter
+##                  running the installer ($(PYTHON)). It must import requirements.txt or the
+##                  install is refused. Recorded as `exec` and SAF_HARNESS_PYTHON in every entry.
 install-hooks-copilot-cli:
-	python3 adapters/github-copilot-cli/install.py \
+	$(PYTHON) adapters/github-copilot-cli/install.py \
+		$(if $(HARNESS_PYTHON),--python "$(HARNESS_PYTHON)") \
 		--framework-dir "$(FRAMEWORK_DIR)" \
 		--bundle-dir "$(BUNDLE_DIR)" \
 		$(if $(WORKSPACE_DIR),--workspace-dir "$(WORKSPACE_DIR)")

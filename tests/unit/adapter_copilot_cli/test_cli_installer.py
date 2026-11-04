@@ -74,6 +74,7 @@ def test_a_bundle_install_writes_plugin_hooks_and_scoped_blocks(framework, bundl
         assert env["FRAMEWORK_WORKSPACE_DIR"] == str(workspace)
         assert {f"FRAMEWORK_{name.upper()}_DIR" for name in LAYOUT} <= set(env)
         assert env["PYTHONUTF8"] == "1"
+        assert env["SAF_HARNESS_PYTHON"] == entry["exec"]
     for slug in ORCHESTRATORS:
         text = (bundle / "agents" / f"{slug}.agent.md").read_text(encoding="utf-8")
         front = yaml.safe_load(text.split("---\n")[1])
@@ -171,3 +172,27 @@ def test_windows_paths_are_quoted_for_powershell() -> None:
     command = INSTALL.powershell_command(r"C:\Program Files\h\.venv\Scripts\python.exe", args)
     assert command.startswith(r"& 'C:\Program Files\h\.venv\Scripts\python.exe' ")
     assert r"'C:\Users\o''neil\org'" in command
+
+
+def test_an_interpreter_without_the_harness_requirements_is_refused(
+    framework, bundle, tmp_path, capsys
+) -> None:
+    bare = tmp_path / "bare-python"
+    bare.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    bare.chmod(0o755)
+    assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle), "--python", str(bare)) != 0
+    assert "cannot import the harness requirements" in capsys.readouterr().err
+    assert not (bundle / "hooks.json").exists()
+
+
+def test_a_missing_interpreter_is_refused(framework, bundle, tmp_path, capsys) -> None:
+    missing = tmp_path / "nope" / "python.exe"
+    assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle), "--python", str(missing)) != 0
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_a_malformed_framework_env_is_refused(framework, bundle, capsys) -> None:
+    (framework / ".env").write_text("FRAMEWORK_AGENTS_DIR=agents\nbroken line\n", encoding="utf-8")
+    assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle)) != 0
+    assert "line 2 is malformed" in capsys.readouterr().err
+    assert not (bundle / "hooks.json").exists()

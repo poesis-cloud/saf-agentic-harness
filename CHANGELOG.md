@@ -19,9 +19,19 @@ pinned.
   all driven by declarative workflow contracts with CEL conditions.
 - **Contracts** (`contracts/`): JSON Schemas for the framework configuration, the session and
   report logs, and the adapter bindings.
-- **One host adapter**: `vscode-github-copilot-chat`, which binds VS Code with GitHub Copilot
-  Chat agent hooks. It ships the H0–H7 hooks, the shared `adapters/dispatch.sh` funnel, and
-  the `adapters/render_hooks.py` installer.
+- **Two host adapters**:
+  - `vscode-github-copilot-chat` binds VS Code with GitHub Copilot Chat agent hooks. It ships
+    the H0–H7 hooks, the shared `adapters/dispatch.sh` funnel, and the
+    `adapters/render_hooks.py` installer.
+  - `github-copilot-cli` binds the GitHub Copilot app and the Copilot CLI, which share one
+    agent runtime ([spec](def/adapter/github-copilot-cli/spec.md),
+    [README](adapters/github-copilot-cli/README.md)). It is Windows-first: hooks run
+    `adapter.py` through the recorded venv interpreter (`exec` + `args`), with no bash. Its
+    `install.py` (or `make install-hooks-copilot-cli`) adds the hooks to a framework's
+    Copilot plugin bundle: a global `hooks.json` plus the orchestrators' agent-scoped H0
+    block. It handles the runtime's batched `preToolUse`, and a batch is denied when any of
+    its calls is. Harness commands are mediated: one plain `harness.py <function>` call is
+    rewritten to the canonical, attributed command line, and anything else is denied.
 - **Verification**: `make verify` runs the unit, functional, and adapter planes on Python
   3.10, 3.11 and 3.12.
 
@@ -33,8 +43,15 @@ pip install -r requirements.txt
 make install-hooks FRAMEWORK_DIR=<framework root> BUNDLE_DIR=<rendered bundle>
 ```
 
-Full steps are in the
-[adapter README](adapters/vscode-github-copilot-chat/README.md).
+For the GitHub Copilot app / Copilot CLI (Windows, PowerShell):
+
+```powershell
+.venv\Scripts\python adapters\github-copilot-cli\install.py `
+    --framework-dir <framework checkout> --bundle-dir <rendered plugin bundle>
+```
+
+Full steps are in the [VS Code adapter README](adapters/vscode-github-copilot-chat/README.md)
+and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 
 ### Integrity boundaries
 
@@ -75,9 +92,17 @@ Full steps are in the
 
 ### Known alpha limitations
 
-- **Supported hosts:** only VS Code with GitHub Copilot Chat. Hooks are a VS Code preview
-  feature, so settings and events may drift; adapter spec I13 lists the open host
-  verifications.
+- **Supported hosts:** VS Code with GitHub Copilot Chat, and the GitHub Copilot app /
+  Copilot CLI. VS Code hooks are a preview feature, so settings and events may drift;
+  adapter spec I13 lists the open host verifications.
+- **Copilot app / CLI:** the following limits apply.
+  - Hooks run only in a **trusted folder**.
+  - A timed-out `preToolUse` **fails open**.
+  - **Shell writes** are guarded textually only. The core's commit-set check is the
+    backstop.
+  - `exec` hook entries and scoped hooks inside subagents are not yet byte-verified in the
+    app.
+  - See the adapter spec's *Limited or unsupported boundaries*.
 - **Session attribution:** it relies on the core's interim tool-boundary-stamp exception
   (adapter spec I4). A host-native attribution surface is tracked, not scheduled.
 - **Host fail-open:** the host proceeds when a hook times out or fails to spawn (I6).

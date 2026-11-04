@@ -57,20 +57,23 @@ class FrameworkLayout:
 
 
 def read_env_file(path: Path) -> dict[str, str]:
-    """Parse a dotenv file's `KEY=VALUE` lines (comments and blanks ignored)."""
+    """Parse the framework's `.env` exactly as the core `EnvLoader` does: KEY=VALUE lines,
+    comments and blanks ignored, a malformed or unreadable file refused (never guessed)."""
     if not path.is_file():
         return {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as failure:
+        raise LayoutError(f"{path} cannot be read: {failure}") from failure
     values: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
+    for line_number, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
             continue
-        key, _, value = stripped.partition("=")
-        key = key.strip().removeprefix("export ").strip()
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        values[key] = value
+        key, separator, value = line.partition("=")
+        if separator == "" or key.strip() == "":
+            raise LayoutError(f"{path} line {line_number} is malformed: expected KEY=VALUE")
+        values[key.strip()] = value.strip()
     return values
 
 

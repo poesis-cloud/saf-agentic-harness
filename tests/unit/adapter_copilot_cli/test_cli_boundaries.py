@@ -349,3 +349,33 @@ def test_a_harness_error_report_never_opens_a_session(rig: Rig) -> None:
     rig.runner.script["start-session"] = build_error_report("start-session")
     rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
     assert rig.tracker.read(HOST) is None
+
+
+def test_a_bound_session_rebind_report_never_opens_a_session(rig: Rig) -> None:
+    rig.runner.script["start-session"] = build_error_report(
+        "start-session", code="session-instance-bound", message="already bound"
+    )
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    assert rig.tracker.read(HOST) is None
+
+
+def test_h0_binds_a_turn_once_across_both_prompt_events(rig: Rig) -> None:
+    rig.open_turn()
+    rig.fire(
+        "userPromptTransformed",
+        {"sessionId": HOST, "prompt": "go", "transformedPrompt": "go", "timestamp": 2},
+        ORCHESTRATOR,
+    )
+    assert len(rig.runner.inquiries("start-session")) == 1
+
+
+def test_h3_denies_on_a_system_error_report(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["check-step-authorization"] = build_error_report(
+        "check-step-authorization",
+        status="system-error",
+        code="log-unreadable",
+        message="The session log cannot be read.",
+    )
+    reason = _denied(rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT, "file_text": "x"}))))
+    assert "system-error" in reason and "log-unreadable" in reason

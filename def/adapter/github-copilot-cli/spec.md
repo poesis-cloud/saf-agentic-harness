@@ -202,14 +202,25 @@ own permission flow still applies to what the harness lets through.
 
 `adapter.py hook` reads stdin as UTF-8, with or without a BOM.
 
-- **At `preToolUse`, any adapter exception DENIES** with a generic reason; exception text never
-  reaches the model. The one exception: a readable payload whose `sessionId` has no record
-  passes, with a stderr diagnostic. Plugin hooks fire in every folder the app opens, so a
-  broken install must not block tool use in sessions the harness never governed.
-- **At every other event,** an exception is a stderr diagnostic and a pass, because those
-  events cannot veto.
+- **Bootstrap failure** (as for every adapter): any failure escaping the hook handling exits
+  **2** with a stderr diagnostic. This covers:
+  - a missing or non-directory framework root (`--framework-dir`, else `FRAMEWORK_DIR`);
+  - an unreadable or malformed `<fw>/.env` (parsed exactly as the core `EnvLoader` does);
+  - an off-contract or empty-probe binding (`adapters/binding_contract.py`);
+  - an unparsable payload;
+  - an unexpected crash.
+
+  The runtime turns exit 2 into a **deny** at `preToolUse` and into a user-visible warning at
+  every other event. That is the right severity, because only `preToolUse` can veto. Exit 2 is
+  chosen even for a session without a record, because a broken bootstrap is exactly what keeps
+  H0 from creating that record. A broken install therefore blocks tool use in every folder
+  where the plugin's hooks fire until it is repaired. That is visible and fail-closed, never
+  silent.
+- **A readable but malformed tool-call batch** in a governed session is denied with a reason.
 - **Harness failures** (no report, non-zero exit, stderr) become fixed text such as
   "check-step-authorization unavailable" and deny the write. The raw text goes to stderr only.
+  Error reports (`inquiry-error`, `state-error`, `system-error`) deny, and the core's own
+  `code — message` is relayed, as in the VS Code adapter.
 
 ## Rendered registration — `install.py`
 
@@ -224,18 +235,21 @@ committed.
 | `--workspace-dir` | Override `FRAMEWORK_WORKSPACE_DIR` (absolute) — e.g. a portfolio repository outside the checkout. Written into the global hooks' `env` AND passed as `--workspace-dir` (scoped hooks cannot carry `env`). |
 | `--bundle-dir` | The framework's rendered Copilot plugin bundle. Global hooks go to `<bundle>/hooks.json` (or the path a string `hooks` key in `plugin.json` names). The scoped H0 block goes into `<bundle>/agents/<orchestrator>.agent.md`. |
 | `--hooks-target plugin\|repo\|user\|none` | Where the global hook file goes: the bundle (default with `--bundle-dir`), `<target-repo>/.github/hooks/safe-harness-copilot-cli.json`, or `$COPILOT_HOME`/`~/.copilot/hooks/…`. |
-| `--python` | The interpreter recorded in every entry. Defaults to the one running `install.py`, which should be the harness venv. |
+| `--python` | The absolute interpreter recorded in every entry (`exec`, and `SAF_HARNESS_PYTHON` in `env`). Defaults to the one running `install.py`, which should be the harness venv. The install is refused unless it imports the harness requirements (`yaml`, `jsonschema`, `celpy`). |
 | `--hook-style exec\|shell` | `exec` + `args` (default: no shell at all), or `powershell` + `bash` command strings. |
 | `--agents-dir`, `--agents-dest`, `--workflows-dir`, `--skip-agents`, `--dry-run` | As named. |
 
 - **Global entry:** `type: command`, `exec: <python>`,
   `args: [<adapter.py>, hook, --event, <e>, --framework-dir, <fw>, (--workspace-dir, <ws>)]`,
   `cwd: <fw>`, and `env` holding `FRAMEWORK_DIR` plus every `FRAMEWORK_*_DIR` (from
-  `<fw>/.env`, overridden by the process environment and `--workspace-dir`), `PYTHONUTF8=1`,
-  and `timeoutSec`.
-- **Scoped block:** inserted between `# >>> saf-agentic-harness (generated) >>>` markers inside
-  the frontmatter. It has `command` (POSIX-quoted) and `windows` (`& '<python>' …`) with
-  `--agent <slug>`. Re-running replaces the block. An unmanaged `hooks:` key is refused.
+  `<fw>/.env`, overridden by the process environment and `--workspace-dir`),
+  `SAF_HARNESS_PYTHON=<python>`, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`, and `timeoutSec`.
+  The hook therefore bootstraps from its registration alone, because the app runs hooks with
+  its own environment and not the operator's shell (no `setx`).
+- **Scoped block:** inserted inside the frontmatter, between the managed markers
+  `# >>> safe-harness copilot-cli H0 … >>>` and `# <<< safe-harness copilot-cli H0 <<<`.
+  It has `command` (POSIX-quoted) and `windows` (`& '<python>' …`) with `--agent <slug>`.
+  Re-running replaces the block. An unmanaged `hooks:` key is refused.
 - **Orchestrators** are every `orchestrator:` named by `<fw>/workflows/**/*.workflow.conf.yaml`.
   A missing agent file refuses the install.
 - **All or nothing:** every output is rendered and validated before any file is written.
