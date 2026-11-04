@@ -13,7 +13,7 @@ PYTHON ?= python3
 PYTEST := PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -p no:cacheprovider
 HOOKS_DEST ?= $(FRAMEWORK_DIR)/.github/hooks
 
-.PHONY: verify test unit functional adapter install-hooks
+.PHONY: verify test unit functional adapter install-hooks install-hooks-copilot-cli
 
 ## verify: the full pytest suite in one invocation — the unit plane (src/ units + the adapter's
 ## own units), the functional plane (every harness function end to end through the composition
@@ -87,3 +87,18 @@ install-hooks:
 		--agents-dir "$(AGENTS_DIR)" \
 		--agents-dest "$(AGENTS_DEST)" \
 		--settings-dest "$(SETTINGS_DEST)"
+
+## install-hooks-copilot-cli: render the GitHub Copilot app / Copilot CLI hooks
+## (adapters/github-copilot-cli) into the framework's rendered plugin bundle: the global
+## hooks.json and the orchestrators' agent-scoped H0 block. Run it with the harness VENV's
+## python3 first on PATH — that interpreter is recorded in every hook. Machine-specific output,
+## never committed. On Windows run install.py directly (see adapters/github-copilot-cli/README.md).
+##
+##   FRAMEWORK_DIR  required — the framework CHECKOUT (not the bundle).
+##   BUNDLE_DIR     required — the framework's rendered Copilot plugin bundle.
+##   WORKSPACE_DIR  optional — absolute FRAMEWORK_WORKSPACE_DIR override.
+install-hooks-copilot-cli:
+	python3 adapters/github-copilot-cli/install.py \
+		--framework-dir "$(FRAMEWORK_DIR)" \
+		--bundle-dir "$(BUNDLE_DIR)" \
+		$(if $(WORKSPACE_DIR),--workspace-dir "$(WORKSPACE_DIR)")

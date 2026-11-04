@@ -1,0 +1,21 @@
+# GitHub Copilot CLI / GitHub Copilot app environment binding — canonical model slug -> host
+# model id. Validated by contracts/conf/adapters/models.conf.schema.json.
+#
+# `hostModelId` is the exact string this runtime accepts as the `task` tool's `model` argument
+# and as a custom agent's frontmatter `model:` — the runtime's own model ids (identical to the
+# canonical slugs for the models below). Scope: the models selectable in the GitHub Copilot app
+# on 2026-07 that also appear in conf/model-profiles.conf.yaml. A canonical slug absent here is
+# not offered by this host: resolve-step-model's fallback chain must name a bound model.
+modelBindings:
+  claude-fable-5:
+    hostModelId: claude-fable-5
+  claude-opus-4.8:
+    hostModelId: claude-opus-4.8
+  claude-opus-4.8-fast:
+    hostModelId: claude-opus-4.8-fast
+  claude-sonnet-5:
+    hostModelId: claude-sonnet-5
+  claude-haiku-4.5:
+    hostModelId: claude-haiku-4.5
+  gpt-5.3-codex:
+    hostModelId: gpt-5.3-codex

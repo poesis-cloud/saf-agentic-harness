@@ -1,0 +1,232 @@
+"""The adapter's view over its own `tools.yaml` / `models.yaml` binding.
+
+Every payload key and tool name the adapter classifies on is DATA in `tools.yaml`, so a
+runtime that renames a field is corrected in configuration, not in code (the runtime's
+batched `preToolUse` shape was learned from captured payloads, not from the docs).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import yaml
+
+from .apply_patch import PatchParseError, parse_patch_targets
+
+TOOLS_FILENAME = "tools.yaml"
+MODELS_FILENAME = "models.yaml"
+_DELETE_ACTION = "delete"
+
+
+class BindingError(ValueError):
+    """Raised when the binding files are missing or malformed."""
+
+
+class TargetExtractionError(ValueError):
+    """Raised when a declared write tool's target paths cannot be extracted (fail closed)."""
+
+
+@dataclass(frozen=True)
+class Subcommand:
+    """A write tool whose action depends on one of its own arguments."""
+
+    key: str
+    read_only: frozenset[str]
+    actions: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class ToolBinding:
+    """The tool classes and payload keys of the Copilot CLI runtime."""
+
+    write_tools: Mapping[str, str]
+    delete_tools: frozenset[str]
+    patch_tools: frozenset[str]
+    patch_keys: tuple[str, ...]
+    write_tool_subcommands: Mapping[str, Subcommand]
+    path_keys: tuple[str, ...]
+    nested_path_keys: tuple[str, ...]
+    tool_keys: tuple[str, ...]
+    input_keys: tuple[str, ...]
+    tool_calls_keys: tuple[str, ...]
+    tool_call_name_keys: tuple[str, ...]
+    tool_call_args_keys: tuple[str, ...]
+    tool_call_id_keys: tuple[str, ...]
+    host_session_keys: tuple[str, ...]
+    host_parent_session_keys: tuple[str, ...]
+    host_step_session_keys: tuple[str, ...]
+    host_step_actor_keys: tuple[str, ...]
+    host_timestamp_keys: tuple[str, ...]
+    host_cwd_keys: tuple[str, ...]
+    dispatch_tools: frozenset[str]
+    dispatch_agent_keys: tuple[str, ...]
+    dispatch_model_keys: tuple[str, ...]
+    dispatch_mode_keys: tuple[str, ...]
+    async_dispatch_modes: frozenset[str]
+    mediated_command_tools: frozenset[str]
+    mediated_command_keys: tuple[str, ...]
+    powershell_command_tools: frozenset[str]
+    guarded_shell_tools: frozenset[str]
+    model_bindings: Mapping[str, str] = field(default_factory=dict)
+
+    def probe(self, payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
+        """Answer the first present, non-empty value among `keys` (first hit wins)."""
+        for key in keys:
+            value = payload.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    def resolve_write_action(self, tool_name: str, args: Any) -> str | None:
+        """Answer the ACL action a call performs, or None when it is not a write."""
+        if tool_name in self.delete_tools:
+            return _DELETE_ACTION
+        action = self.write_tools.get(tool_name)
+        if action is None and tool_name in self.patch_tools:
+            action = "update"
+        if action is None:
+            return None
+        subcommand = self.write_tool_subcommands.get(tool_name)
+        if subcommand is not None and isinstance(args, Mapping):
+            verb = args.get(subcommand.key)
+            if isinstance(verb, str):
+                if verb in subcommand.read_only:
+                    return None
+                return subcommand.actions.get(verb, action)
+        return action
+
+    def extract_write_targets(
+        self, tool_name: str, args: Any
+    ) -> tuple[tuple[str, str], ...]:
+        """Answer every `(host path, action)` a write call targets.
+
+        Raises `TargetExtractionError` when the tool is a declared write but no path can
+        be extracted — the caller DENIES (adapter spec H3, fail closed).
+        """
+        action = self.resolve_write_action(tool_name, args)
+        if action is None:
+            return ()
+        if tool_name in self.patch_tools:
+            patch_text = args if isinstance(args, str) else None
+            if patch_text is None and isinstance(args, Mapping):
+                found = self.probe(args, self.patch_keys)
+                patch_text = found if isinstance(found, str) else None
+            try:
+                return parse_patch_targets(patch_text or "")
+            except PatchParseError as failure:
+                raise TargetExtractionError(
+                    f"'{tool_name}' patch targets cannot be extracted: {failure}"
+                ) from failure
+        if not isinstance(args, Mapping):
+            raise TargetExtractionError(f"'{tool_name}' carries no argument object")
+        paths = [
+            str(args[key]) for key in self.path_keys if isinstance(args.get(key), str) and args[key]
+        ]
+        for nested in self.nested_path_keys:
+            paths.extend(_probe_nested(args, nested))
+        if not paths:
+            raise TargetExtractionError(
+                f"'{tool_name}' names no target path under {list(self.path_keys)}"
+            )
+        return tuple((path, action) for path in dict.fromkeys(paths))
+
+    def is_dispatch_tool(self, tool_name: str) -> bool:
+        return tool_name in self.dispatch_tools
+
+    def is_mediated_command_tool(self, tool_name: str) -> bool:
+        return tool_name in self.mediated_command_tools
+
+    def is_guarded_shell_tool(self, tool_name: str) -> bool:
+        return tool_name in self.guarded_shell_tools
+
+
+def _probe_nested(args: Mapping[str, Any], spec: str) -> list[str]:
+    """Probe an `array[].key` path spec, answering every string it reaches."""
+    head, _, tail = spec.partition("[].")
+    items = args.get(head)
+    if not tail or not isinstance(items, Sequence) or isinstance(items, str):
+        return []
+    return [
+        str(item[tail])
+        for item in items
+        if isinstance(item, Mapping) and isinstance(item.get(tail), str) and item[tail]
+    ]
+
+
+def _strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    value = raw.get(key) or []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise BindingError(f"tools.yaml '{key}' must be a list of strings")
+    return tuple(value)
+
+
+def _read_yaml(path: Path) -> Mapping[str, Any]:
+    if not path.is_file():
+        raise BindingError(f"binding file is missing: {path}")
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, Mapping):
+        raise BindingError(f"binding file is not a mapping: {path}")
+    return loaded
+
+
+def load_tool_binding(adapter_dir: Path) -> ToolBinding:
+    """Load this adapter's binding from its own directory."""
+    raw = _read_yaml(adapter_dir / TOOLS_FILENAME)
+    write_tools = raw.get("writeTools") or {}
+    if not isinstance(write_tools, Mapping):
+        raise BindingError("tools.yaml 'writeTools' must be a mapping")
+    subcommands: dict[str, Subcommand] = {}
+    for tool, spec in (raw.get("writeToolSubcommands") or {}).items():
+        if not isinstance(spec, Mapping) or not isinstance(spec.get("key"), str):
+            raise BindingError(f"tools.yaml 'writeToolSubcommands.{tool}' needs a 'key'")
+        subcommands[str(tool)] = Subcommand(
+            key=spec["key"],
+            read_only=frozenset(spec.get("readOnly") or ()),
+            actions=dict(spec.get("actions") or {}),
+        )
+    models = _read_yaml(adapter_dir / MODELS_FILENAME).get("modelBindings") or {}
+    return ToolBinding(
+        write_tools={str(name): str(action) for name, action in write_tools.items()},
+        delete_tools=frozenset(_strings(raw, "deleteTools")),
+        patch_tools=frozenset(_strings(raw, "patchTools")),
+        patch_keys=_strings(raw, "patchKeys"),
+        write_tool_subcommands=subcommands,
+        path_keys=_strings(raw, "pathKeys"),
+        nested_path_keys=_strings(raw, "nestedPathKeys"),
+        tool_keys=_strings(raw, "toolKeys"),
+        input_keys=_strings(raw, "inputKeys"),
+        tool_calls_keys=_strings(raw, "toolCallsKeys"),
+        tool_call_name_keys=_strings(raw, "toolCallNameKeys"),
+        tool_call_args_keys=_strings(raw, "toolCallArgsKeys"),
+        tool_call_id_keys=_strings(raw, "toolCallIdKeys"),
+        host_session_keys=_strings(raw, "hostSessionKeys"),
+        host_parent_session_keys=_strings(raw, "hostParentSessionKeys"),
+        host_step_session_keys=_strings(raw, "hostStepSessionKeys"),
+        host_step_actor_keys=_strings(raw, "hostStepActorKeys"),
+        host_timestamp_keys=_strings(raw, "hostTimestampKeys"),
+        host_cwd_keys=_strings(raw, "hostCwdKeys"),
+        dispatch_tools=frozenset(_strings(raw, "dispatchTools")),
+        dispatch_agent_keys=_strings(raw, "dispatchAgentKeys"),
+        dispatch_model_keys=_strings(raw, "dispatchModelKeys"),
+        dispatch_mode_keys=_strings(raw, "dispatchModeKeys"),
+        async_dispatch_modes=frozenset(_strings(raw, "asyncDispatchModes")),
+        mediated_command_tools=frozenset(_strings(raw, "mediatedCommandTools")),
+        mediated_command_keys=_strings(raw, "mediatedCommandKeys"),
+        powershell_command_tools=frozenset(_strings(raw, "powershellCommandTools")),
+        guarded_shell_tools=frozenset(_strings(raw, "guardedShellTools")),
+        model_bindings={
+            str(slug): str((binding or {}).get("hostModelId"))
+            for slug, binding in models.items()
+        },
+    )
+
+
+__all__ = [
+    "BindingError",
+    "Subcommand",
+    "TargetExtractionError",
+    "ToolBinding",
+    "load_tool_binding",
+]

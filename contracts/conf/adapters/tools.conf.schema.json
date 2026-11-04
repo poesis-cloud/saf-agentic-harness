@@ -105,6 +105,15 @@
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the command string of a mediated-command tool."
     },
+    "powershellCommandTools": {
+      "description": "Mediated-command tools whose command string is PowerShell; the others are POSIX shell. The adapter re-renders an authorized harness command in that tool's dialect.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
+    },
     "guardedShellTools": {
       "description": "Host tool names whose command strings can reach the filesystem outside any write-classified tool (terminals, task runners). A command that textually references a workspace artifact-layout path or the workspace logs path is DENIED at the pre-tool boundary — an advisory-grade guard (textual matching is bypassable; C6's detect-and-remediate plane remains the guarantee), closing the routine write escape hatch.",
       "type": "array",
@@ -112,6 +121,94 @@
         "type": "string",
         "minLength": 1,
         "description": "One host tool name."
+      }
+    },
+    "patchTools": {
+      "description": "Host tool names whose input is freeform patch text naming its targets only in `*** Add/Update/Delete File:` / `*** Move to:` headers. Their target paths are parsed from the patch; a patch whose targets cannot be extracted is DENIED at the pre-tool boundary (fail closed).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
+    },
+    "patchKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered argument field names to probe for a patch tool's patch text (a string tool input is itself the patch text)."
+    },
+    "writeToolSubcommands": {
+      "description": "Write tools whose action depends on one of their own arguments: `key` names that argument, `readOnly` lists values that make the call a non-write, `actions` maps values to an action verb (other values keep the writeTools verb).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The argument naming the subcommand."
+          },
+          "readOnly": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "description": "One read-only subcommand."
+            },
+            "description": "Subcommands that do not write."
+          },
+          "actions": {
+            "type": "object",
+            "additionalProperties": {
+              "enum": [
+                "create",
+                "update"
+              ],
+              "description": "The harness action verb this subcommand performs."
+            },
+            "description": "subcommand -> action verb."
+          }
+        }
+      }
+    },
+    "toolCallsKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for a BATCHED tool-call list (one pre-tool firing covering several calls); when present it takes precedence over toolKeys/inputKeys."
+    },
+    "toolCallNameKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the host tool name."
+    },
+    "toolCallArgsKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the tool's arguments."
+    },
+    "toolCallIdKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the host tool-call id."
+    },
+    "hostTimestampKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host-observed event timestamp."
+    },
+    "hostCwdKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host-observed working directory relative tool paths resolve against."
+    },
+    "dispatchModeKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered argument field names to probe, on a dispatch tool, for its execution mode."
+    },
+    "asyncDispatchModes": {
+      "description": "Dispatch-mode values that return before the dispatched step ends (asynchronous/background dispatch).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One dispatch-mode value."
       }
     }
   },

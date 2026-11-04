@@ -1,7 +1,8 @@
 # Environment adapters
 
-Each supported host environment gets one subfolder here (`vscode-github-copilot-chat/` today;
-Claude Code, Cursor, … follow the same shape). The harness core stays env-agnostic — it never
+Each supported host environment gets one subfolder here — `vscode-github-copilot-chat/` (VS
+Code + Copilot Chat) and `github-copilot-cli/` (the GitHub Copilot app and the Copilot CLI,
+which share one agent runtime); Claude Code, Cursor, … follow the same shape. The harness core stays env-agnostic — it never
 hardcodes a host's event names, tool names, or payload keys; every host-specific detail is
 declared in that adapter's own files. Canonical harness-core documentation lives in
 `../def/core/spec.md`; each adapter's own specification lives in `../def/adapter/<host>/spec.md`.
@@ -22,6 +23,13 @@ nothing in the script itself varies per host.
 adapters/dispatch.sh <event> <env> [<agent>]
 ```
 
+**Exception — hosts that run on Windows without bash.** `github-copilot-cli` does not go through
+`dispatch.sh`: the Copilot runtime can launch a program directly (`exec` + `args`), so each
+rendered hook runs `<venv python> adapters/github-copilot-cli/adapter.py hook --event <event>
+[--agent <slug>] --framework-dir <fw>` with an explicit interpreter and the `FRAMEWORK_*` layout
+in the hook's own `env` — the same contract (payload on stdin, one JSON decision on stdout,
+exit 0), no shell in between. Its installer is `adapters/github-copilot-cli/install.py`.
+
 ## Per-adapter layout
 
 ```text
@@ -41,13 +49,15 @@ saf-agentic-harness/
 
 1. Create `adapters/<new-env>/hooks.yaml` — register the host's lifecycle events, each entry
    calling `adapters/dispatch.sh <event> <new-env>` (plus the scoping agent slug for
-   agent-scoped entries, where the host supports them).
+   agent-scoped entries, where the host supports them) — or, for a host that must run without
+   bash, the adapter entry through an explicit interpreter (see `github-copilot-cli/`).
 2. Create `adapters/<new-env>/tools.yaml` — declare that host's tool names, write verbs, and
    payload keys (see `vscode-github-copilot-chat/tools.yaml` for the shape; validated against
    `contracts/conf/adapters/tools.conf.schema.json`).
 3. Implement `adapters/<new-env>/adapter.py` — the event→boundary classification, session
    identification, and decision rendering for that host (see
-   `../def/adapter/vscode-github-copilot-chat/spec.md` and its class diagram for the
-   reference design). Its only dependency into the core is the twelve function commands.
+   `../def/adapter/vscode-github-copilot-chat/spec.md` and
+   `../def/adapter/github-copilot-cli/spec.md` with their class diagrams for the reference
+   designs). Its only dependency into the core is the twelve function commands.
 4. No change to `dispatch.sh` or the harness core — the new adapter folder is the only new
    surface.
