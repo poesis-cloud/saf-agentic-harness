@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from utils.artifact_path import parse_artifact_path
 from utils.clock import Clock
 from utils.env_loader import EnvLoader
 from utils.json_loader import JsonLoader
@@ -22,4 +23,5 @@ __all__ = [
     "ValidationErrorRecord",
     "YamlLoader",
     "index_unique_stems",
+    "parse_artifact_path",
 ]

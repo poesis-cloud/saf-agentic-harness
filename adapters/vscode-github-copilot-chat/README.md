@@ -28,7 +28,9 @@ inconsistencies it surfaced against the core spec (I1–I15). The harness core i
 - VS Code with GitHub Copilot Chat, agent hooks enabled (a preview feature).
 - Python 3.10–3.12 with this repo's `requirements.txt` (PyYAML, jsonschema, cel-python)
   installed — preferably in a virtualenv. The hooks run under exactly this interpreter.
-- `bash` (for `../dispatch.sh`) and `git` (function 9 commits artifacts).
+- `bash` (for `../dispatch.sh`) and `git` (function 9 commits artifacts). On Windows,
+  that bash is Git for Windows' bash, not WSL's. For the GitHub Copilot app, use the
+  bash-free [`github-copilot-cli`](../github-copilot-cli/README.md) adapter instead.
 - A framework checkout with its `.env` layout (`FRAMEWORK_*_DIR` keys) and workflow catalog
   (`conf/workflows/*.workflow.conf.yaml` naming each `orchestrator:`).
 

@@ -37,6 +37,23 @@ class TestCheckStepArtifactCommand:
             artifact_paths=(Path("a/one.md"), Path("a/two.md")),
         )
 
+    def test_reads_windows_separators_in_every_path_of_the_set(
+        self, schema_validator: SchemaValidator
+    ) -> None:
+        """A Windows host's `a\\one.md` is the artifact `a/one.md` on every OS."""
+        command = CheckStepArtifactCommand(
+            RecordingService("check-step-artifact"), schema_validator
+        )
+
+        inquiry = command.parse_inquiry(
+            {"sessionId": "s1", "artifactPaths": ["a\\one.md", "a/b\\two.md"]}
+        )
+
+        assert [path.as_posix() for path in inquiry.artifact_paths] == [
+            "a/one.md",
+            "a/b/two.md",
+        ]
+
     def test_refuses_an_empty_write_set(
         self, schema_validator: SchemaValidator
     ) -> None:

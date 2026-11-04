@@ -33,7 +33,7 @@ pinned.
     its calls is. Harness commands are mediated: one plain `harness.py <function>` call is
     rewritten to the canonical, attributed command line, and anything else is denied.
 - **Verification**: `make verify` runs the unit, functional, and adapter planes on Python
-  3.10, 3.11 and 3.12.
+  3.10, 3.11 and 3.12. CI also runs the suite on Windows (Python 3.12).
 
 ### Install
 
@@ -89,6 +89,16 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   and `FRAMEWORK_DIR` are recorded in each hook's `env`, and `FRAMEWORK_DIR/.env` is loaded.
 - **Release hygiene:** documentation was corrected, and pre-release tags now publish as
   GitHub pre-releases.
+- **Windows portability:**
+  - Artifact paths are read with `\` and `/` both as separators and reported in POSIX
+    form, so `portfolio\x.md` resolves like `portfolio/x.md` on every OS.
+  - A path that is not workspace-relative (absolute, drive, UNC or `..`) never resolves
+    to an artifact. It is denied as `unresolvable-resource`, even under a root
+    `<placeholder>`.
+  - `harness.py` and both adapter entries answer UTF-8 whatever the console codepage.
+    Child output (Git, the harness, interpreter probes) is decoded as UTF-8 with
+    replacement.
+  - `.gitattributes` keeps `*.sh` LF on Windows checkouts.
 
 ### Known alpha limitations
 

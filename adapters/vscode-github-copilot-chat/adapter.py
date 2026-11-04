@@ -364,9 +364,9 @@ class Adapter:
 
     def _relativize_path(self, path: Path) -> str:
         try:
-            return str(path.relative_to(self._workspace_dir))
+            return path.relative_to(self._workspace_dir).as_posix()
         except ValueError:
-            return str(path)
+            return path.as_posix()
 
 
 def build_default_adapter() -> Adapter:
@@ -422,9 +422,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic (the host's blocking channel), never an exit the host fails open on.
     """
     try:
+        _force_utf8_stdio()
         return run_hook_entry(
             argv=list(argv) if argv is not None else sys.argv[1:],
-            stdin_text=sys.stdin.read(),
+            stdin_text=_read_stdin_text(),
             write_stdout=sys.stdout.write,
             build_adapter=build_default_adapter,
         )
@@ -434,6 +435,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{type(failure).__name__}: {failure}"
         )
         return _EXIT_FAIL_CLOSED
+
+
+def _force_utf8_stdio() -> None:
+    """Answer UTF-8 whatever the console codepage, so the host reads one encoding."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+def _read_stdin_text() -> str:
+    """Read the host payload as UTF-8 (BOM tolerated), not the console codepage."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8-sig")
 
 
 def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:

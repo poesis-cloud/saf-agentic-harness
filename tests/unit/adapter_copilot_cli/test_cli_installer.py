@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from cli_rig import ADAPTER_DIR, load_script
+from posix_shell import write_failing_native_interpreter
 
 INSTALL = load_script("copilot_cli_adapter_install", "install.py")
 LAYOUT = ("agents", "artifacts", "instructions", "skills", "templates", "workflows", "workspace")
@@ -177,9 +178,7 @@ def test_windows_paths_are_quoted_for_powershell() -> None:
 def test_an_interpreter_without_the_harness_requirements_is_refused(
     framework, bundle, tmp_path, capsys
 ) -> None:
-    bare = tmp_path / "bare-python"
-    bare.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    bare.chmod(0o755)
+    bare = write_failing_native_interpreter(tmp_path)
     assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle), "--python", str(bare)) != 0
     assert "cannot import the harness requirements" in capsys.readouterr().err
     assert not (bundle / "hooks.json").exists()

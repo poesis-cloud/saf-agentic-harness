@@ -157,6 +157,7 @@ def test_session_record_falls_back_to_the_default_state_home(
     """
     monkeypatch.delenv("XDG_STATE_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))  # Path.home() on Windows
 
     _fire_session_started()
 

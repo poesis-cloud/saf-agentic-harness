@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from contract_assertions import assert_stdin_matches_contract, assert_stdout_matches_contract
+from posix_shell import child_environment, shell_argv
 
 ADAPTER_ENV = "vscode-github-copilot-chat"
 
@@ -51,16 +52,15 @@ def run_hook(
     is omitted entirely when there is none, exactly as the two rendered registrations do.
     """
     assert_stdin_matches_contract(payload)
-    argv = [str(dispatch_path), event, ADAPTER_ENV]
-    if agent is not None:
-        argv.append(agent)
+    arguments = [event, ADAPTER_ENV] + ([agent] if agent is not None else [])
     completed = subprocess.run(
-        argv,
+        shell_argv(dispatch_path, *arguments),
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
-        env=dict(environment),
+        env=child_environment(environment),
         cwd=str(cwd) if cwd is not None else None,
     )
     return HookRun(

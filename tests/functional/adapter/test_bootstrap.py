@@ -10,6 +10,7 @@ with an exit the host would treat as non-blocking and fail open on.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ import yaml
 
 from harness_stub import HarnessStub
 from hook_dispatch import HookRun, run_hook
+from posix_shell import IS_WINDOWS, find_git_bash
 from host_events import ORCHESTRATOR_AGENT, pre_tool_use, user_prompt_submit
 from stub_framework import INSTRUCTION_BODY, Framework
 
@@ -35,10 +37,20 @@ def bare_path(tmp_path: Path) -> str:
     """A `PATH` with no interpreter on it: only what `dispatch.sh` itself needs."""
     bin_dir = tmp_path / "bare-bin"
     bin_dir.mkdir()
+    located = {}
     for program in ("bash", "dirname"):
-        located = shutil.which(program)
-        assert located is not None, f"{program} is required to run dispatch.sh"
-        (bin_dir / program).symlink_to(located)
+        found = find_git_bash() if program == "bash" else shutil.which(program)
+        if found is None and IS_WINDOWS:
+            pytest.skip(f"Git for Windows {program} is required to run dispatch.sh")
+        assert found is not None, f"{program} is required to run dispatch.sh"
+        located[program] = found
+    try:
+        for program, found in located.items():
+            (bin_dir / program).symlink_to(found)
+    except OSError:
+        # Windows refuses unprivileged symlinks: put the programs' own directories on
+        # PATH instead (Git for Windows ships no Python beside bash or dirname).
+        return os.pathsep.join(dict.fromkeys(str(Path(found).parent) for found in located.values()))
     return str(bin_dir)
 
 

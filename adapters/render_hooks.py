@@ -181,7 +181,12 @@ def _resolve_interpreter(raw: str | None) -> Path:
     probe = "import " + ", ".join(_HARNESS_REQUIREMENT_MODULES)
     try:
         completed = subprocess.run(
-            [str(interpreter), "-c", probe], capture_output=True, text=True, check=False
+            [str(interpreter), "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except OSError as failure:
         raise RenderError(f"the hook interpreter cannot run: {interpreter}: {failure}")

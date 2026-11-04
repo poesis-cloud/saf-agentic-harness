@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from posix_shell import IS_WINDOWS, child_environment, shell_argv, write_fake_interpreter
+
 
 class TestDispatchFunnel:
     def test_dispatch_script_exists_and_can_be_executed_or_invoked_by_sh(self, repo_root):
@@ -50,20 +52,20 @@ class TestDispatchFunnel:
 
 
 def _fake_interpreter(tmp_path: Path, body: str) -> Path:
-    interpreter = tmp_path / "fake-python"
-    interpreter.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
-    interpreter.chmod(0o755)
-    return interpreter
+    return write_fake_interpreter(tmp_path / "fake-python", body)
 
 
 def _run_dispatch(repo_root: Path, environment: dict) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [str(repo_root / "adapters" / "dispatch.sh"), "PreToolUse", "vscode-github-copilot-chat"],
+        shell_argv(
+            repo_root / "adapters" / "dispatch.sh", "PreToolUse", "vscode-github-copilot-chat"
+        ),
         input="{}",
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
-        env={"PATH": os.environ.get("PATH", ""), **environment},
+        env=child_environment({"PATH": os.environ.get("PATH", ""), **environment}),
     )
 
 
@@ -80,10 +82,16 @@ class TestDispatchBootstrap:
         result = _run_dispatch(repo_root, {"SAF_HARNESS_PYTHON": str(interpreter)})
 
         assert result.returncode == 0
-        assert result.stdout.strip() == (
-            f"ran {repo_root / 'adapters' / 'vscode-github-copilot-chat' / 'adapter.py'} "
-            "hook --event PreToolUse"
-        )
+        adapter = repo_root / "adapters" / "vscode-github-copilot-chat" / "adapter.py"
+        if IS_WINDOWS:
+            # Git Bash hands a bash child its POSIX form (`/d/a/...`) of the same path.
+            ran, _, rest = result.stdout.strip().partition(" ")
+            path, _, arguments = rest.partition(" ")
+            assert ran == "ran"
+            assert path.endswith("/adapters/vscode-github-copilot-chat/adapter.py")
+            assert arguments == "hook --event PreToolUse"
+        else:
+            assert result.stdout.strip() == f"ran {adapter} hook --event PreToolUse"
 
     @pytest.mark.parametrize("exit_code", [0, 2])
     def test_passes_the_adapter_own_answer_through(self, repo_root, tmp_path, exit_code):

@@ -41,7 +41,14 @@ ProcessRunner = Callable[[Sequence[str]], "tuple[int, str, str]"]
 
 def run_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
     """Run one command as a child process, answering exit code, stdout, and stderr."""
-    completed = subprocess.run(list(argv), capture_output=True, text=True, check=False)
+    completed = subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     return completed.returncode, completed.stdout, completed.stderr
 
 

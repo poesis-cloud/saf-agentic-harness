@@ -189,7 +189,12 @@ def resolve_interpreter(raw: str | None) -> str:
     probe = "import " + ", ".join(HARNESS_REQUIREMENT_MODULES)
     try:
         completed = subprocess.run(
-            [python, "-c", probe], capture_output=True, text=True, check=False
+            [python, "-c", probe],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
         )
     except OSError as failure:
         raise InstallError(f"the Python interpreter cannot run: {python}: {failure}") from failure

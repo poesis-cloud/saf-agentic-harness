@@ -122,7 +122,16 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(list(argv))
 
 
+def _force_utf8_stdio() -> None:
+    """Answer UTF-8 whatever the console codepage: scoped hooks carry no PYTHONUTF8."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    _force_utf8_stdio()
     return run_hook(
         argv=list(argv) if argv is not None else sys.argv[1:],
         stdin=sys.stdin.buffer,

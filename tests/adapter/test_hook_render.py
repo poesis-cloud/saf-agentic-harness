@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from posix_shell import write_failing_native_interpreter
+
 
 ADAPTER_ENV = "vscode-github-copilot-chat"
 RENDERED_FILENAME = "safe-harness.json"
@@ -224,7 +226,7 @@ class TestHookRenderer:
         "interpreter, reason",
         [
             ("relative/python", "absolute"),
-            ("/nonexistent/python", "does not exist"),
+            ("NONEXISTENT", "does not exist"),
             ("FAKE", "cannot import"),
         ],
     )
@@ -242,10 +244,9 @@ class TestHookRenderer:
         (`requirements.txt`), would fail every hook at the first firing — the renderer
         refuses it at install time and writes nothing."""
         if interpreter == "FAKE":
-            fake = tmp_path / "bare-python"
-            fake.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-            fake.chmod(0o755)
-            interpreter = str(fake)
+            interpreter = str(write_failing_native_interpreter(tmp_path))
+        elif interpreter == "NONEXISTENT":
+            interpreter = str(tmp_path / "nonexistent" / "python")
 
         result = _render(
             repo_root,
