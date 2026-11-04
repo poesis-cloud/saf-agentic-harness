@@ -225,7 +225,13 @@ own permission flow still applies to what the harness lets through.
    without editing or running its command. It is also immune to the permission layer and to
    autopilot's unattended denials, because the hook decides first.
 6. **I9:** any other shell command naming the workspace (by name, relative path or absolute
-   prefix) or `logs/` → deny.
+   prefix) or `logs/` → deny. Read-only commands are included.
+   - A relative path token resolves against the payload's `cwd`. A token counts as a path
+     when it has a separator or a leading `.`, when it exists, or when it follows `--`.
+   - Git pathspecs are path references: every token after `--`, and the `<path>` of a
+     `<rev>:<path>` object name (e.g. `git show HEAD:<path>`), resolved from the workspace
+     when `cwd` is inside it.
+   - The value of a `-option=value` token is checked like a token.
 
 ### H5/H6 — postToolUse / postToolUseFailure
 
