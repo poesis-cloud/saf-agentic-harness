@@ -157,9 +157,9 @@ PLANNING_WORKFLOW: Mapping[str, Any] = {
                 {"kind": "precondition", "slug": "after-draft", "step": "draft"},
                 {
                     "kind": "precondition",
-                    "slug": "report-exists",
+                    "slug": "report-approved",
                     "setSelector": {"setQuery": "artifacts['report']"},
-                    "setPredicate": "size(selected) > 0",
+                    "setPredicate": "selected.exists(a, a.state == 'approved')",
                 },
             ],
         },
@@ -383,6 +383,64 @@ class FunctionalHarness:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         run_git(self.workspace_dir, "add", "--", ref)
         run_git(self.workspace_dir, *_GIT_AUTHOR, "commit", "-q", "-m", f"artifact: add {ref}")
+
+    def deliver_step(
+        self,
+        parent_session_id: str,
+        agent: str,
+        ref: str,
+        data: Mapping[str, Any],
+        *,
+        step_session_id: str | None = None,
+    ) -> str:
+        """Run the in-flight step's session through delivery, and answer its id.
+
+        Spec (function 10, invariant 5): a step outcome passes only once the step's
+        session — registered by function 0 under the dispatching session, as the step's
+        actor — committed one instance of the step's kind through function 9.
+        """
+        step_session_id = step_session_id or self._next_step_session_id(agent)
+        self.invoke(
+            "start-session",
+            sessionId=step_session_id,
+            parentSessionId=parent_session_id,
+            agent=agent,
+        )
+        path = self.workspace_dir / ref
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        run = self.invoke("check-step-artifact", sessionId=step_session_id, artifactPaths=[ref])
+        assert run.status == "valid", run.stdout
+        return step_session_id
+
+    def execute_in_flight_step(
+        self, parent_session_id: str, *, step_session_id: str | None = None
+    ) -> CommandRun:
+        """Deliver the in-flight step's report, then conclude it through function 10.
+
+        The rig binds every step's `report` kind under `report/`; the step session's id
+        is the report's state, so re-executing a step never writes byte-identical bytes.
+        """
+        step = next(
+            entry["report"]["step"]
+            for entry in reversed(self.read_log(parent_session_id))
+            if entry["report"]["context"]["function"] == "resolve-step"
+            and "step" in entry["report"]
+        )
+        step_session_id = step_session_id or self._next_step_session_id(step["actor"])
+        self.deliver_step(
+            parent_session_id,
+            step["actor"],
+            f"report/{step['slug']}.json",
+            {"slug": step["slug"], "state": step_session_id},
+            step_session_id=step_session_id,
+        )
+        return self.invoke("check-step-postconditions", sessionId=parent_session_id)
+
+    def _next_step_session_id(self, agent: str) -> str:
+        """Mint a step session id no earlier session of this rig used."""
+        logged = len(list((self.workspace_dir / "logs").glob(f"*{LOG_FILE_SUFFIX}")))
+        return f"{agent}-step-{logged}"
 
     def list_committed_paths(self) -> tuple[str, ...]:
         """List every path in the workspace's committed state."""

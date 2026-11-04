@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from services.checking import ArtifactCheck, ArtifactCheckReport, Revert
+from stores.artifact_store import Commit
 from stores.session_log_store import Context, Error, Outcome
 from write_boundary_fixtures import list_contract_violations
 
@@ -44,6 +45,30 @@ class TestArtifactCheckReport:
 
         assert "artifactChecks" not in report.to_dict()
         assert list_contract_violations(report) == ()
+
+    def test_records_the_commit_on_the_valid_branch(self) -> None:
+        """Spec (function 9, invariant 3): the `valid` report records its commit —
+        `commitId` and the `committedPaths` it changed."""
+        commit = Commit(commit_id="a" * 40, paths=("portfolio/a.md",))
+        report = ArtifactCheckReport(
+            context=CONTEXT, outcome=Outcome(status="valid"), commit=commit
+        )
+
+        rendered = report.to_dict()
+
+        assert rendered["commitId"] == "a" * 40
+        assert rendered["committedPaths"] == ["portfolio/a.md"]
+        assert list_contract_violations(report) == ()
+
+    def test_records_no_commit_as_null_with_no_paths(self) -> None:
+        """Spec (function 9, invariant 4): a byte-identical set reports `valid` with
+        `commitId: null` and empty `committedPaths`."""
+        report = ArtifactCheckReport(context=CONTEXT, outcome=Outcome(status="valid"))
+
+        rendered = report.to_dict()
+
+        assert rendered["commitId"] is None
+        assert rendered["committedPaths"] == []
 
     def test_omits_the_checks_property_on_an_error_outcome(self) -> None:
         """Spec (Outcomes rule 1): an error outcome carries the error detail and no

@@ -7,11 +7,12 @@ import subprocess
 from itertools import chain
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, StateError, SystemFailureError
 from stores.artifact_store.artifact import Artifact
+from stores.artifact_store.commit import Commit
 from stores.artifact_store.finding import Finding
 from utils.json_loader import JsonLoader
 from utils.markdown_loader import MarkdownLoader
@@ -19,6 +20,7 @@ from utils.schema_validator import SchemaValidator, ValidationErrorRecord
 
 _CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "contracts"
 _MARKDOWN_SUFFIX = ".md"
+_UNRESOLVABLE_RESOURCE = "unresolvable-resource"
 
 
 class ArtifactStore:
@@ -59,30 +61,42 @@ class ArtifactStore:
         )
 
     def discover_artifacts(self, selector: str) -> tuple[Artifact, ...]:
-        """Read committed artifacts under a selector, raising on any invalid one.
+        """Read committed artifacts under a path selector, raising on any invalid one.
 
         C6: `discover()` raises rather than yield a schema-invalid artifact, so
         every reader of committed state fails loudly on foreign corruption.
         """
-        artifacts: list[Artifact] = []
-        findings: list[Finding] = []
-        for artifact_path in self.scan_raw_paths(Path(selector)):
-            ref = artifact_path.as_posix()
-            kind = self._resolve_kind(ref)
-            committed = self._run_git("show", f"HEAD:{ref}")
-            path_findings, data = self._validate_document(ref, kind, committed)
-            if path_findings:
-                findings.extend(path_findings)
-                continue
-            artifacts.append(Artifact(ref=ref, kind=kind, data=data))
-        if findings:
-            first = findings[0]
+        return self._read_committed(
+            (path.as_posix(), self._resolve_kind(path.as_posix()))
+            for path in self.scan_raw_paths(Path(selector))
+        )
+
+    def discover_artifacts_by_kind(self, kind: str) -> tuple[Artifact, ...]:
+        """Read every committed instance of one artifact kind, raising on any invalid one.
+
+        Spec (function 5, invariant 2): `artifacts` maps an artifact (schema) slug to
+        its instances, so membership is the workspace layout's answer for each
+        committed path — never a path prefix. Paths the layout binds to no artifact
+        (the logs plane, foreign files) are not instances of any kind.
+        """
+        if kind not in self._schema_ids:
             raise StateError(
-                "artifact-invalid",
-                f"Committed artifact '{first.source}' is not valid: {first.message}",
+                "artifact-schema-unresolved",
+                f"No artifact schema is declared for the artifact slug '{kind}'.",
                 False,
             )
-        return tuple(sorted(artifacts, key=lambda artifact: artifact.ref))
+        refs: list[tuple[str, str]] = []
+        for path in self.scan_raw_paths(Path(".")):
+            ref = path.as_posix()
+            try:
+                resolved = self._workspace_layout.resolve_resource(ref)
+            except ConfigurationError as failure:
+                if failure.code != _UNRESOLVABLE_RESOURCE:
+                    raise
+                continue
+            if resolved == kind:
+                refs.append((ref, kind))
+        return self._read_committed(refs)
 
     def scan_raw_paths(self, scope: Path) -> Iterator[Path]:
         """Enumerate the raw universe of committed paths under a scope.
@@ -124,21 +138,23 @@ class ArtifactStore:
 
     def commit_artifacts(
         self, artifact_paths: Sequence[Path], *, session_id: str
-    ) -> None:
+    ) -> Commit | None:
         """Promote one validated write set into committed state as ONE commit.
 
         Function 9 invariant 3: 1 validated set = 1 commit, attributed to the
-        acting session. Invariant 4: a set byte-identical to `HEAD` stages
-        nothing and creates no commit. The commit is scoped to the set
+        acting session, returned as its record — the commit id and the paths it
+        changed. Invariant 4: a set byte-identical to `HEAD` stages nothing,
+        creates no commit, and returns `None`. The commit is scoped to the set
         (`--only`): anything else already staged in the index stays staged
         and out of the commit.
         """
         refs = tuple(Path(artifact_path).as_posix() for artifact_path in artifact_paths)
         if not refs:
-            return
+            return None
         self._run_git("add", "--", *refs)
-        if self._run_git("diff", "--cached", "--name-only", "--", *refs) == "":
-            return
+        changed = self._run_git("diff", "--cached", "--name-only", "--", *refs)
+        if changed == "":
+            return None
         self._run_git(
             "commit",
             "--only",
@@ -146,6 +162,10 @@ class ArtifactStore:
             f"artifact: commit validated write set\n\nsession-id: {session_id}",
             "--",
             *refs,
+        )
+        return Commit(
+            commit_id=self._run_git("rev-parse", "HEAD"),
+            paths=tuple(sorted(changed.splitlines())),
         )
 
     def revert_artifact(self, artifact_path: Path) -> Finding:
@@ -165,6 +185,26 @@ class ArtifactStore:
         return Finding(
             source=ref, rule="deleted", message=f"Deleted newly staged '{ref}'."
         )
+
+    def _read_committed(self, refs: Iterable[tuple[str, str]]) -> tuple[Artifact, ...]:
+        """Validate and read committed `(ref, kind)` pairs, raising on any invalid one."""
+        artifacts: list[Artifact] = []
+        findings: list[Finding] = []
+        for ref, kind in refs:
+            committed = self._run_git("show", f"HEAD:{ref}")
+            path_findings, data = self._validate_document(ref, kind, committed)
+            if path_findings:
+                findings.extend(path_findings)
+                continue
+            artifacts.append(Artifact(ref=ref, kind=kind, data=data))
+        if findings:
+            first = findings[0]
+            raise StateError(
+                "artifact-invalid",
+                f"Committed artifact '{first.source}' is not valid: {first.message}",
+                False,
+            )
+        return tuple(sorted(artifacts, key=lambda artifact: artifact.ref))
 
     def _read_schema_id(self, schema_path: Path) -> str:
         """Read one artifact schema's `$id` URI, failing fast when absent."""

@@ -184,7 +184,9 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         ""start_session"" holds the session plane's one
         ACL lookup: a ROOT session's agent is checked
         against the declared actors (is_framework_agent);
-        a STEP session's gate is its correlation.
+        a STEP session's gate is its correlation, which
+        admits one step session per resolution
+        (""step-session-bound"" - 1 step = 1 session).
       end note
     }
 
@@ -236,6 +238,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +check_step_preconditions(session_id: str, parent_session_id: str | None) : CheckStepPreconditionsReport
       }
       class StepPostconditionChecker {
+        -_workspace_layout : WorkspaceLayout
         +check_step_postconditions(session_id: str, parent_session_id: str | None) : CheckStepPostconditionsReport
       }
       class StepAuthorizationChecker {
@@ -263,6 +266,13 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       class CheckStepPreconditionsReport <<dataclass>> {
       }
       class CheckStepPostconditionsReport <<dataclass>> {
+        +artifact_delivery : ArtifactDelivery | None
+      }
+      class ArtifactDelivery <<dataclass>> {
+        +artifact : str
+        +artifact_path : str | None
+        +outcome : str
+        +failure_message : str | None
       }
       class AuthorizationReport <<dataclass>> {
         +authorization : Authorization
@@ -276,6 +286,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       }
       class ArtifactCheckReport <<dataclass>> {
         +artifact_checks : tuple[ArtifactCheck, ...]
+        +commit : Commit | None
       }
       class ArtifactCheck <<dataclass>> {
         +artifact_path : Path
@@ -300,10 +311,11 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         agent write there is ever grantable).
       end note
       note bottom of ConditionCheckReport
-        Functions 5 and 10 return structurally identical
-        results but are bound to DISTINCT output contracts,
-        so each gets its own leaf type - the abstract base
-        carries the shared payload. Which function produced
+        Functions 5 and 10 share the ""conditionChecks""
+        payload (10 adds ""artifactDelivery"") but are bound
+        to DISTINCT output contracts, so each gets its own
+        leaf type - the abstract base carries the shared
+        payload. Which function produced
         a given report is read from ""context.function"",
         never inferred from the type.
       end note
@@ -373,16 +385,21 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         -_workspace_layout : WorkspaceLayout
         -_validator : SchemaValidator
         +discover_artifacts(selector: str) : tuple[Artifact, ...]
+        +discover_artifacts_by_kind(kind: str) : tuple[Artifact, ...]
         +scan_raw_paths(scope: Path) : Iterator[Path]
         +validate_artifact(artifact_path: Path) : tuple[Finding, ...]
         +is_staging_clean(artifact_path: Path) : bool
-        +commit_artifacts(artifact_paths: Sequence[Path], *, session_id: str) : None
+        +commit_artifacts(artifact_paths: Sequence[Path], *, session_id: str) : Commit | None
         +revert_artifact(artifact_path: Path) : Finding
       }
       class Artifact <<dataclass>> {
         +ref : str
         +kind : str
         +data : Mapping[str, Any]
+      }
+      class Commit <<dataclass>> {
+        +commit_id : str
+        +paths : tuple[str, ...]
       }
       class Finding <<dataclass>> {
         +source : str
@@ -417,6 +434,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +mint_workflow_instance_id(workflow_slug: str) : str
         +find_latest_open_instance(workflow_slug: str) : str | None
         +load_session_log(session_id: str) : Log
+        +find_step_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
         +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
         +append_log_entry(session_id: str, entry: LogEntry) : None
       }
@@ -679,6 +697,8 @@ package "CD - Harness core classes (src/)" <<Frame>> {
   ConditionCheckReport o-- ConditionCheck
   AuthorizationReport o-- Authorization
   ArtifactCheckReport o-- ArtifactCheck
+  ArtifactCheckReport o-- Commit
+  CheckStepPostconditionsReport o-- ArtifactDelivery
   ArtifactCheck o-- Revert
   ModelProfileReport o-- ModelProfileBinding
   StepResolutionReport o-- Step : the configured step,\nverbatim

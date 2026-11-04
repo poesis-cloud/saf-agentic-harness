@@ -12,6 +12,13 @@ from stores.session_log_store import Context, LogEntry, Outcome, Report, Session
 from utils.clock import Clock
 from utils.jsonl_store import JsonlStore
 
+# Function 10, invariant 5: every concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "report/delivered.json",
+    "outcome": "pass",
+}
+
 CAPABILITY_TAGS = (
     "deep-reasoning",
     "coding",
@@ -220,7 +227,10 @@ def append_outcome(
             status,
             session_id,
             workflow_instance_id,
-            payload={"conditionChecks": build_condition_checks(status)},
+            payload={
+                "conditionChecks": build_condition_checks(status),
+                "artifactDelivery": DELIVERED,
+            },
         ),
     )
 

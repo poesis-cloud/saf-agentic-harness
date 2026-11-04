@@ -20,6 +20,13 @@ from errors import StateError
 from services.checking import ConditionEvaluator
 from stores.artifact_store import ArtifactStore
 
+# Function 10, invariant 5: every concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "report/delivered.json",
+    "outcome": "pass",
+}
+
 SELECT_DECLARED_ARTIFACT = "artifacts['review-report'].filter(a, a.slug == artifact)"
 
 
@@ -33,7 +40,7 @@ def _executed_view(step_slug: str):
                 "pass",
                 session_id=ORCHESTRATOR_SESSION,
                 workflow_instance_id=INSTANCE_ID,
-                payload={"conditionChecks": []},
+                payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
                 timestamp="2026-01-01T00:02:00Z",
             ),
         ]

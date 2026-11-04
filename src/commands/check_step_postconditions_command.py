@@ -16,8 +16,8 @@ from utils.schema_validator import SchemaValidator
 class CheckStepPostconditionsCommand(Command):
     """Evaluate whether the ended step delivered.
 
-    Spec (Classes, `checking`): functions 5 and 10 return structurally identical
-    results bound to DISTINCT contracts — which function produced a report is read
+    Spec (Classes, `checking`): functions 5 and 10 share the `conditionChecks`
+    payload but are bound to DISTINCT contracts — which function produced a report is read
     from `context.function`, never inferred from the type.
     """
 

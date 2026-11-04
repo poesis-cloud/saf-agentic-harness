@@ -25,6 +25,7 @@ _RESOLVE_STEP_FUNCTION = "resolve-step"
 _STEP_RESOLUTION_STATUS = "step-resolution"
 _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 _SESSION_UNREGISTERED = "session-unregistered"
+_STEP_SESSION_BOUND = "step-session-bound"
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -222,13 +223,30 @@ class SessionLifecycle:
         )
 
     def _admits_session(self, agent: str, parent_session_id: str | None) -> bool:
-        """Tell whether persisted state names a target for this start (rule 2)."""
+        """Tell whether persisted state names a target for this start (rule 2).
+
+        Spec (function 0, invariant 5): 1 step = 1 session — a resolution that already
+        registered its step session admits no second one (`step-session-bound`).
+        """
         if parent_session_id is None:
             return self._acl.is_framework_agent(agent)
         parent_log = self._find_session_log(parent_session_id)
         if parent_log is None:
             return False
-        return _find_correlated_resolution(parent_log, agent) is not None
+        resolution = _find_correlated_resolution(parent_log, agent)
+        if resolution is None:
+            return False
+        bound = self._session_log_store.find_step_session_ids(
+            parent_session_id, agent, resolution.timestamp
+        )
+        if bound:
+            raise StateError(
+                _STEP_SESSION_BOUND,
+                f"The step resolution for '{agent}' under session '{parent_session_id}' "
+                f"already registered its step session '{bound[0]}'.",
+                False,
+            )
+        return True
 
     def _register_session(self, context: Context, agent: str) -> SessionStartReport:
         """Write the registration entry as the new log's first line."""

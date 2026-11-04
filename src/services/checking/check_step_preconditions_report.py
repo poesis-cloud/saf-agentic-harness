@@ -13,7 +13,7 @@ class CheckStepPreconditionsReport(ConditionCheckReport):
     """Report the aggregate precondition outcome and its per-condition checks.
 
     Spec (Classes): a leaf type whose identity is its contract's `$id`, not its
-    shape — structurally identical to function 10's report, contractually distinct.
+    shape — it shares `conditionChecks` with function 10's report, contractually distinct.
     """
 
     CONTRACT_ID: ClassVar[str] = (

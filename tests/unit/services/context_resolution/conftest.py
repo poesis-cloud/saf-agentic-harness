@@ -18,6 +18,13 @@ from stores.session_log_store import (
     SessionLogStore,
 )
 
+# Function 10, invariant 5: every concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "report/delivered.json",
+    "outcome": "pass",
+}
+
 CAPABILITIES = {
     "deep-reasoning": 1,
     "coding": 1,
@@ -201,7 +208,7 @@ def journal_postconditions(session_log_store: SessionLogStore):
                 "pass",
                 session_id,
                 workflow_instance_id=workflow_instance_id,
-                payload={"conditionChecks": []},
+                payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
             ),
         )
 

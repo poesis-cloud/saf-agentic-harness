@@ -18,6 +18,7 @@ from functional_fixtures import (
     assert_contract_round_trip,
     assert_journal_contract,
     assert_report_journaled_byte_identically,
+    run_git,
 )
 from write_boundary_rig import (
     AMBIGUOUS_WORKSPACE_LAYOUT,
@@ -64,7 +65,7 @@ class TestCheckStepArtifact:
         """Spec (function 9, invariant 3): 1 validated set = 1 commit, attributed to the
         acting session (its `sessionId` in the commit message) so Git history and the
         session log correlate — for the WHOLE set of one tool call, markdown and JSON
-        alike."""
+        alike. The `valid` report records that commit: its id and the paths it changed."""
         stage_write(harness, EPIC_REF, epic_markdown("checkout", "draft"))
         stage_write(harness, FEATURE_REF, feature_json("refunds", "approved"))
         commits_before = harness.count_commits()
@@ -76,6 +77,8 @@ class TestCheckStepArtifact:
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "valid"}
         assert "artifactChecks" not in report
+        assert report["commitId"] == run_git(harness.workspace_dir, "rev-parse", "HEAD").strip()
+        assert report["committedPaths"] == [EPIC_REF, FEATURE_REF]
         assert harness.count_commits() == commits_before + 1
         assert f"session-id: {builder_session}" in read_last_commit_message(harness)
         assert harness.list_committed_paths() == (".gitignore", EPIC_REF, FEATURE_REF)
@@ -193,7 +196,7 @@ class TestCheckStepArtifact:
     ) -> None:
         """Spec (function 9, invariant 4): a staged path byte-identical to `HEAD`
         validates vacuously and stages nothing — `valid` asserts validity, not that a
-        commit occurred."""
+        commit occurred: `commitId` is null and `committedPaths` empty."""
         commit_write(harness, EPIC_REF, epic_markdown("checkout", "draft"))
         commits_before = harness.count_commits()
 
@@ -201,7 +204,25 @@ class TestCheckStepArtifact:
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"] == {"status": "valid"}
+        assert report["commitId"] is None
+        assert report["committedPaths"] == []
         assert harness.count_commits() == commits_before
+
+    def test_committed_paths_name_only_the_paths_the_commit_changed(
+        self, harness: FunctionalHarness, builder_session: str
+    ) -> None:
+        """Spec (function 9, invariant 3): `committedPaths` lists only the paths the
+        commit changed — a byte-identical sibling in the same set is not among them."""
+        commit_write(harness, EPIC_REF, epic_markdown("checkout", "draft"))
+        stage_write(harness, FEATURE_REF, feature_json("refunds", "approved"))
+
+        run = harness.invoke(
+            FUNCTION, sessionId=builder_session, artifactPaths=[EPIC_REF, FEATURE_REF]
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["committedPaths"] == [FEATURE_REF]
+        assert_report_journaled_byte_identically(harness, run, 1)
 
     def test_a_path_bound_to_no_schema_discards_the_set_defensively(
         self, harness: FunctionalHarness, builder_session: str

@@ -8,7 +8,7 @@
       "properties": {
         "function": {
           "const": "check-step-preconditions",
-          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the structurally identical check-step-postconditions output."
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the check-step-postconditions output, which shares its conditionChecks payload."
         }
       }
     }

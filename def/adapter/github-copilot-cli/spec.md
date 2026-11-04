@@ -224,7 +224,8 @@ own permission flow still applies to what the harness lets through.
     `modifiedResult` ("write rejected: …") and `additionalContext` with the retry directive.
 - **H6** runs on `postToolUse` *or* `postToolUseFailure` of `task` in the dispatcher's session:
   `check-step-postconditions`. On `fail`, return `additionalContext` with the failing
-  conditions and the "re-resolve" directive. The step's result text is NOT read; the runtime
+  conditions, then `[artifact delivery] fail — <artifactDelivery.failureMessage>` when
+  delivery failed, and the "re-resolve" directive. The step's result text is NOT read; the runtime
   elides it.
 - **H0 fallback:** if the session's context never landed (no `userPromptTransformed` firing),
   the first `postToolUse` appends it as short load directives, which fit the 10 KB cap.

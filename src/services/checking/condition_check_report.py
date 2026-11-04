@@ -16,7 +16,7 @@ _CONDITION_STATUSES = frozenset({"pass", "fail"})
 class ConditionCheckReport(Report, ABC):
     """Carry the per-condition checks beside the report envelope's aggregate outcome.
 
-    Spec (Classes): functions 5 and 10 return structurally identical payloads bound
+    Spec (Classes): functions 5 and 10 share the `conditionChecks` payload, bound
     to DISTINCT output contracts, so each is its own leaf type over this base; which
     function produced a report is read from `context.function`, never from the type.
     """

@@ -1291,7 +1291,9 @@ ordering.
 
 **Output construction** — `pass` → plain success (the orchestrator proceeds to the next
 `resolve-step` per its instructions). `fail` → `decision: "block"` with `reason` serializing
-the `conditionChecks[]` (as H2's construction); `additionalContext` restates the injected
+the `conditionChecks[]` (as H2's construction), followed by
+`[artifact delivery] fail — <artifactDelivery.failureMessage>` when delivery failed, so a
+failure caused only by delivery still shows its reason; `additionalContext` restates the injected
 `reports-handling` reaction so the failure stays inside the workflow. Harness errors →
 block + error detail.
 

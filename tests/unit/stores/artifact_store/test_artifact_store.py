@@ -12,7 +12,7 @@ from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.workspace_layout import WorkspaceLayout
 from errors import StateError
-from stores.artifact_store import Artifact, ArtifactStore, Finding
+from stores.artifact_store import Artifact, ArtifactStore, Commit, Finding
 from stores.session_log_store import Context, LogEntry, Outcome, Report, SessionLogStore
 
 
@@ -132,12 +132,16 @@ class TestArtifactStore:
         )
         before = int(_run_git(workspace, "rev-list", "--count", "HEAD"))
 
-        store.commit_artifacts(
+        commit = store.commit_artifacts(
             (Path("sample/a.json"), Path("sample/b.json")), session_id="sess-1"
         )
 
         assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before + 1
         assert "sess-1" in _run_git(workspace, "log", "-1", "--pretty=%B")
+        assert commit == Commit(
+            commit_id=_run_git(workspace, "rev-parse", "HEAD").strip(),
+            paths=("sample/a.json", "sample/b.json"),
+        )
 
     def test_commit_artifacts_commits_only_the_validated_set_not_foreign_staged_content(
         self, workspace: Path, store: ArtifactStore
@@ -171,9 +175,10 @@ class TestArtifactStore:
         _run_git(workspace, "commit", "-m", "add same")
         before = int(_run_git(workspace, "rev-list", "--count", "HEAD"))
 
-        store.commit_artifacts((Path("sample/same.json"),), session_id="sess-2")
+        commit = store.commit_artifacts((Path("sample/same.json"),), session_id="sess-2")
 
         assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before
+        assert commit is None
 
     def test_a_session_log_never_enters_the_committed_workspace_state(
         self, workspace: Path, store: ArtifactStore
@@ -480,3 +485,33 @@ class TestArtifactStoreOverARealisticLayout:
                 data={"slug": "payments", "status": "approved"},
             ),
         )
+
+
+class TestDiscoverArtifactsByKind:
+    """Function 5, invariant 2: the `artifacts` runtime constant is keyed by KIND."""
+
+    def test_reads_every_committed_instance_the_layout_binds_to_the_kind(
+        self, workspace: Path, portfolio_store: ArtifactStore
+    ) -> None:
+        """Kind membership is the layout's answer per committed path — never a path
+        prefix — and paths the layout binds to nothing (`.gitignore`, `logs/`) are
+        instances of no kind."""
+        _stage(workspace, _EPIC_REF, "---\nslug: payments\nstatus: draft\n---\n\n# Payments\n")
+        _stage(workspace, _FEATURE_REF, '{"slug":"refunds","status":"draft"}\n')
+        _stage(workspace, "logs/01jx.log.jsonl", "{}\n")
+        _stage(workspace, ".gitignore", "tmp/\n")
+        _run_git(workspace, "add", "--", ".")
+        _run_git(workspace, "commit", "-m", "seed")
+
+        epics = portfolio_store.discover_artifacts_by_kind("epic")
+        features = portfolio_store.discover_artifacts_by_kind("feature")
+
+        assert [(artifact.ref, artifact.kind) for artifact in epics] == [(_EPIC_REF, "epic")]
+        assert [artifact.ref for artifact in features] == [_FEATURE_REF]
+        assert portfolio_store.discover_artifacts("epic") == ()
+
+    def test_refuses_a_kind_no_schema_declares(self, portfolio_store: ArtifactStore) -> None:
+        with pytest.raises(StateError) as raised:
+            portfolio_store.discover_artifacts_by_kind("story")
+
+        assert raised.value.code == "artifact-schema-unresolved"

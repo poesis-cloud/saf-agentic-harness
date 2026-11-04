@@ -7,6 +7,7 @@ from pathlib import Path
 from checking_fixtures import (
     INSTANCE_ID,
     ORCHESTRATOR_SESSION,
+    STEP_SESSION,
     build_catalog,
     build_ending_entry,
     build_entry,
@@ -17,7 +18,9 @@ from checking_fixtures import (
     run_git,
     write_artifact,
 )
-from config import StateCondition, StepCondition, WorkflowCatalog
+from config import StateCondition, StepCondition, WorkflowCatalog, WorkspaceLayout
+from config.artifact_node import ArtifactNode
+from config.folder_node import FolderNode
 from errors import SystemFailureError
 from services.checking import (
     CheckStepPostconditionsReport,
@@ -26,7 +29,9 @@ from services.checking import (
 )
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import SessionLogStore
+from write_boundary_fixtures import build_workspace_layout
 
+DELIVERED_REF = "review-report/r1.json"
 SELECT_DECLARED_ARTIFACT = "artifacts['review-report'].filter(a, a.slug == artifact)"
 
 
@@ -38,8 +43,17 @@ class _FailingSessionLogStore(SessionLogStore):
         raise SystemFailureError("log-unreadable", "Session log is unreadable.", True)
 
 
-def _open_session(log_store: SessionLogStore, *, with_step: bool = True) -> None:
-    """Register the orchestrator session and optionally put a step in flight."""
+def _open_session(
+    log_store: SessionLogStore,
+    *,
+    with_step: bool = True,
+    delivered: tuple[str, ...] = (DELIVERED_REF,),
+) -> None:
+    """Register the orchestrator session, put a step in flight, and let it deliver.
+
+    Function 10, invariant 5: a passing step outcome needs its step session to have
+    committed one instance of its kind, so by default the step delivers one.
+    """
     log_store.create_session_log(
         build_registration_entry(ORCHESTRATOR_SESSION, "orchestrator")
     )
@@ -48,16 +62,96 @@ def _open_session(log_store: SessionLogStore, *, with_step: bool = True) -> None
             ORCHESTRATOR_SESSION,
             build_step_resolution_entry(ORCHESTRATOR_SESSION, build_step()),
         )
+        if delivered:
+            _register_step_session(log_store)
+            _commit(log_store, *delivered)
+
+
+def _register_step_session(
+    log_store: SessionLogStore,
+    session_id: str = STEP_SESSION,
+    *,
+    agent: str = "qa-engineer",
+    timestamp: str = "2026-01-01T00:01:30Z",
+) -> None:
+    """Register the step session function 0 correlates to the in-flight resolution."""
+    log_store.create_session_log(
+        build_registration_entry(
+            session_id,
+            agent,
+            parent_session_id=ORCHESTRATOR_SESSION,
+            timestamp=timestamp,
+        )
+    )
+
+
+def _commit(
+    log_store: SessionLogStore,
+    *paths: str,
+    session_id: str = STEP_SESSION,
+    status: str = "valid",
+) -> None:
+    """Journal one function-9 entry in the step session's log (the delivery source)."""
+    payload: dict = (
+        {"commitId": "a" * 40 if paths else None, "committedPaths": list(paths)}
+        if status == "valid"
+        else {
+            "artifactChecks": [
+                {
+                    "artifactPath": paths[0],
+                    "failureMessage": "invalid",
+                    "revert": {"action": "deleted"},
+                }
+            ]
+        }
+    )
+    log_store.append_log_entry(
+        session_id,
+        build_entry(
+            "check-step-artifact",
+            status,
+            session_id=session_id,
+            parent_session_id=ORCHESTRATOR_SESSION,
+            payload=payload,
+            timestamp="2026-01-01T00:01:45Z",
+        ),
+    )
 
 
 def _build_checker(
     artifact_store: ArtifactStore,
     log_store: SessionLogStore,
     catalog: WorkflowCatalog,
+    workspace_layout: WorkspaceLayout | None = None,
 ) -> StepPostconditionChecker:
-    """Wire the checker with its three constructor-injected collaborators."""
+    """Wire the checker with its constructor-injected collaborators."""
     return StepPostconditionChecker(
-        ConditionEvaluator(artifact_store), log_store, catalog
+        ConditionEvaluator(artifact_store),
+        log_store,
+        catalog,
+        workspace_layout or build_workspace_layout(),
+    )
+
+
+def _two_kind_layout() -> WorkspaceLayout:
+    """Bind `review-report/<name>.json` and a second kind, `notes/<name>.json`."""
+    return WorkspaceLayout(
+        nodes=tuple(
+            FolderNode(
+                slug=kind,
+                description=f"{kind} folder",
+                children=(
+                    ArtifactNode(
+                        slug="<name>.json",
+                        description=f"One {kind}",
+                        cardinality="0..*",
+                        artifact=kind,
+                        template=kind,
+                    ),
+                ),
+            )
+            for kind in ("review-report", "notes")
+        )
     )
 
 
@@ -250,9 +344,9 @@ class TestStepPostconditionChecker:
         log_store: SessionLogStore,
         workspace: Path,
     ) -> None:
-        """Function 10, invariant 4: a step declaring zero postconditions passes
-        vacuously — `outcome: pass` with an empty `conditionChecks` array, JOURNALED,
-        and sufficient for the cursor to count the step executed."""
+        """Function 10, invariant 4: declared postconditions may be zero — a delivered
+        step passes with an empty `conditionChecks` array, JOURNALED, and sufficient
+        for the cursor to count the step executed."""
         _open_session(log_store)
         checker = _build_checker(artifact_store, log_store, build_catalog())
 
@@ -384,3 +478,161 @@ class TestStepPostconditionChecker:
 
         assert isinstance(report, CheckStepPostconditionsReport)
         assert report.context.function == "check-step-postconditions"
+
+
+class TestArtifactDelivery:
+    """Function 10, invariants 4-5: delivery is never optional, read from the log."""
+
+    def _check(self, artifact_store, log_store, workspace_layout=None):
+        checker = _build_checker(
+            artifact_store, log_store, build_catalog(), workspace_layout
+        )
+        return checker.check_step_postconditions(ORCHESTRATOR_SESSION, None)
+
+    def test_one_committed_instance_delivers_and_journals_in_the_same_entry(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore, workspace: Path
+    ) -> None:
+        """Invariant 5: exactly one instance of the declared kind, committed through
+        function 9 by the step's session — journaled as `artifactDelivery`."""
+        _open_session(log_store)
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "pass"
+        journaled = read_entries(workspace, ORCHESTRATOR_SESSION)[-1]["report"]
+        assert journaled["artifactDelivery"] == {
+            "artifact": "review-report",
+            "artifactPath": DELIVERED_REF,
+            "outcome": "pass",
+        }
+
+    def test_zero_postconditions_and_no_commit_fails(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore, workspace: Path
+    ) -> None:
+        """Invariant 4: zero declared postconditions no longer pass vacuously —
+        a step session that committed nothing (a byte-identical write: `commitId`
+        null) did not deliver, and the aggregate fails."""
+        _open_session(log_store, delivered=())
+        _register_step_session(log_store)
+        _commit(log_store)
+
+        report = self._check(artifact_store, log_store)
+
+        assert (report.outcome.status, report.condition_checks) == ("fail", ())
+        delivery = read_entries(workspace, ORCHESTRATOR_SESSION)[-1]["report"][
+            "artifactDelivery"
+        ]
+        assert (delivery["outcome"], delivery["artifactPath"]) == ("fail", None)
+        assert "review" in delivery["failureMessage"]
+        assert "review-report" in delivery["failureMessage"]
+
+    def test_no_registered_step_session_fails(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: with no step session, nothing was committed for the step."""
+        _open_session(log_store, delivered=())
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "fail"
+        assert report.artifact_delivery.outcome == "fail"
+
+    def test_an_older_instance_committed_by_another_session_does_not_deliver(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore, workspace: Path
+    ) -> None:
+        """Invariant 5: only the step's session's commits count — an instance that
+        already exists in `HEAD`, committed by an earlier session, proves nothing."""
+        write_artifact(workspace, DELIVERED_REF, {"slug": "r1", "status": "approved"})
+        _open_session(log_store, delivered=())
+        _register_step_session(
+            log_store, "01jearlier", timestamp="2026-01-01T00:00:30Z"
+        )
+        _commit(log_store, DELIVERED_REF, session_id="01jearlier")
+        _register_step_session(log_store)
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "fail"
+        assert report.artifact_delivery.artifact_path is None
+
+    def test_several_commits_to_one_instance_deliver_it_once(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: creating then updating the same instance is a change to
+        exactly one instance."""
+        _open_session(log_store)
+        _commit(log_store, DELIVERED_REF)
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "pass"
+        assert report.artifact_delivery.artifact_path == DELIVERED_REF
+
+    def test_more_than_one_instance_fails(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: exactly one instance — two instances of the kind fail, and
+        the message says so."""
+        _open_session(log_store, delivered=(DELIVERED_REF, "review-report/r2.json"))
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "fail"
+        delivery = report.artifact_delivery
+        assert (delivery.outcome, delivery.artifact_path) == ("fail", None)
+        assert "2" in delivery.failure_message
+
+    def test_writes_to_other_kinds_are_ignored(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: writes to other kinds remain governed by authorization
+        (function 8) only — they neither deliver nor count as a second instance."""
+        _open_session(log_store, delivered=(DELIVERED_REF, "notes/n1.json"))
+
+        report = self._check(artifact_store, log_store, _two_kind_layout())
+
+        assert report.outcome.status == "pass"
+        assert report.artifact_delivery.artifact_path == DELIVERED_REF
+
+    def test_only_other_kinds_committed_fails(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: a commit of another kind is not the step's artifact."""
+        _open_session(log_store, delivered=("notes/n1.json",))
+
+        report = self._check(artifact_store, log_store, _two_kind_layout())
+
+        assert report.outcome.status == "fail"
+
+    def test_a_reverted_write_does_not_deliver(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 5: only a commit through function 9 delivers — a reverted set
+        committed nothing."""
+        _open_session(log_store, delivered=())
+        _register_step_session(log_store)
+        _commit(log_store, DELIVERED_REF, status="reverted")
+
+        report = self._check(artifact_store, log_store)
+
+        assert report.outcome.status == "fail"
+
+    def test_a_failed_delivery_fails_the_aggregate_though_every_condition_passes(
+        self, artifact_store: ArtifactStore, log_store: SessionLogStore, workspace: Path
+    ) -> None:
+        """Invariant 4: the outcome passes only if delivered AND every declared
+        postcondition passes — the report stays contract-valid."""
+        _open_session(log_store, delivered=())
+        catalog = build_catalog(
+            conditions=(
+                StepCondition(kind="postcondition", slug="unblocks-ship", step="ship"),
+            )
+        )
+        checker = _build_checker(artifact_store, log_store, catalog)
+
+        report = checker.check_step_postconditions(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "fail"
+        assert [check.outcome for check in report.condition_checks] == ["pass"]
+        journaled = read_entries(workspace, ORCHESTRATOR_SESSION)[-1]["report"]
+        assert journaled["outcome"]["status"] == "fail"

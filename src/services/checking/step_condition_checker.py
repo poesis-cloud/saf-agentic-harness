@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from config import Step, WorkflowCatalog
 from errors import ConfigurationError, StateError
+from services.checking.artifact_delivery import ArtifactDelivery
 from services.checking.checking_service import CheckingService
 from services.checking.condition_check import ConditionCheck
 from services.checking.condition_check_report import ConditionCheckReport
@@ -77,11 +78,18 @@ class StepConditionChecker(CheckingService, ABC):
         )
         view = self._session_log_store.load_workflow_instance_view(instance_id)
         checks = self._evaluator.evaluate_conditions(conditions, view, step.artifact)
+        delivery = self._check_artifact_delivery(session_id, resolution, step)
         report = self._build_condition_report(
-            session_id, parent_session_id, instance_id, checks
+            session_id, parent_session_id, instance_id, checks, delivery
         )
         self._journal_report(session_id, report)
         return report
+
+    def _check_artifact_delivery(
+        self, session_id: str, resolution: LogEntry, step: Step
+    ) -> ArtifactDelivery | None:
+        """Judge the step's artifact delivery — function 10 only; none for function 5."""
+        return None
 
     def _build_condition_report(
         self,
@@ -89,15 +97,20 @@ class StepConditionChecker(CheckingService, ABC):
         parent_session_id: str | None,
         workflow_instance_id: str | None,
         checks: tuple[ConditionCheck, ...],
+        delivery: ArtifactDelivery | None = None,
     ) -> ConditionCheckReport:
-        """Aggregate the per-condition checks into this function's report."""
-        status = _FAIL if any(check.outcome == _FAIL for check in checks) else _PASS
+        """Aggregate the per-condition checks, and any delivery, into this report."""
+        failed = any(check.outcome == _FAIL for check in checks) or (
+            delivery is not None and delivery.outcome == _FAIL
+        )
+        extra = {} if delivery is None else {"artifact_delivery": delivery}
         return self.REPORT_TYPE(
             context=self._build_context(
                 self.FUNCTION, session_id, parent_session_id, workflow_instance_id
             ),
-            outcome=Outcome(status=status),
+            outcome=Outcome(status=_FAIL if failed else _PASS),
             condition_checks=checks,
+            **extra,
         )
 
     def _build_report(

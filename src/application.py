@@ -301,7 +301,7 @@ class Application:
             ),
             CheckStepPostconditionsCommand(
                 StepPostconditionChecker(
-                    evaluator, session_log_store, catalog, clock
+                    evaluator, session_log_store, catalog, workspace_layout, clock
                 ),
                 validator,
             ),

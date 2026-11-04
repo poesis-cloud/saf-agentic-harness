@@ -215,7 +215,7 @@
           "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step."
         },
         "setSelector": {
-          "description": "The artifact-backed selector. Selection is artifact-backed: `setQuery` (CEL) references artifacts directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug -> matching instances, e.g. `artifacts['review-report']`) \u2014 no separate alias pre-declaration \u2014 to yield the `selected` set to assert on. The same CEL expression can reference the `artifact` runtime constant to scope to the step's declared artifact.",
+          "description": "The artifact-backed selector. Selection is artifact-backed: `setQuery` (CEL) references artifacts directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug -> matching instances, e.g. `artifacts['review-report']`, every committed instance the workspace layout binds to that artifact kind) \u2014 no separate alias pre-declaration \u2014 to yield the `selected` set to assert on. The same CEL expression can reference the `artifact` runtime constant to scope to the step's declared artifact.",
           "type": "object",
           "additionalProperties": false,
           "required": [
@@ -225,7 +225,7 @@
             "setQuery": {
               "type": "string",
               "minLength": 1,
-              "description": "A CEL query referencing artifacts directly by their schema slug via the `artifacts` runtime constant (e.g. `artifacts['review-report'].filter(a, a.slug == artifact)`) to yield the `selected` set. The `artifact` runtime constant (the step's declared artifact slug) is in scope to filter to the step's declared artifact."
+              "description": "A CEL query referencing artifacts directly by their schema slug via the `artifacts` runtime constant (e.g. `artifacts['review-report'].filter(a, a.status == 'approved')`) to yield the `selected` set. The `artifact` runtime constant (the step's declared artifact slug) is in scope to filter to the step's declared artifact."
             }
           }
         },

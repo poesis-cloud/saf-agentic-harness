@@ -79,6 +79,11 @@ class TestStepEndedHook:
                         "report-exists", "no artifact matches 'review-report'"
                     )
                 ],
+                artifactDelivery={
+                    "artifact": "review-report",
+                    "artifactPath": "reviews/r1.json",
+                    "outcome": "pass",
+                },
             ),
         )
 

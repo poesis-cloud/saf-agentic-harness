@@ -27,6 +27,12 @@ from session_tracker import SessionTracker
 HOST_SESSION = "chat-session-guid"
 TURN_SESSION = "chat-session-guid-t2026-07-11t14-32-07-000z"
 TIMESTAMP = "2026-07-11T14:32:07.000Z"
+# Function 10, invariant 5: a concluded step outcome carries its delivery verdict.
+DELIVERED = {
+    "artifact": "review-report",
+    "artifactPath": "reviews/r1.json",
+    "outcome": "pass",
+}
 
 
 @pytest.fixture
@@ -1101,6 +1107,7 @@ class TestAdapter:
                                 "failureMessage": "no artifact matches 'review-report'",
                             }
                         ],
+                        artifactDelivery=DELIVERED,
                     )
                 ]
             )

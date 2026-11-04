@@ -128,7 +128,8 @@ def _drive_scenario(
     """Drive one multi-session, multi-step scenario over the real entry point.
 
     The first orchestrator session resolves and dispatches `draft`, whose own agent
-    session loads its context and closes; the step's outcome journals; the session ends.
+    session loads its context, commits its report through function 9, and closes;
+    the step's outcome journals; the session ends.
     A second orchestrator session then opens, carrying no instance history of its own —
     and, on a hand-off, resolves the instance's next step into ITS log, so the instance's
     history only reads correctly once merged across both logs.
@@ -145,6 +146,13 @@ def _drive_scenario(
         "resolve-step-instructions", sessionId=STEP_SESSION, parentSessionId=primary
     )
     harness.invoke("resolve-step-skills", sessionId=STEP_SESSION, parentSessionId=primary)
+    harness.deliver_step(
+        primary,
+        "builder",
+        "report/draft.json",
+        {"slug": "draft", "state": "drafted"},
+        step_session_id=STEP_SESSION,
+    )
     harness.invoke("end-session", sessionId=STEP_SESSION)
     harness.invoke("check-step-postconditions", sessionId=primary)
     harness.invoke("end-session", sessionId=primary)
@@ -198,6 +206,7 @@ class TestLogReplay:
             ("resolve-step", "step-resolution"),
             ("resolve-step-instructions", "resolved"),
             ("resolve-step-skills", "resolved"),
+            ("check-step-artifact", "valid"),
             ("check-step-postconditions", "pass"),
         )
 
