@@ -1,0 +1,162 @@
+# Adapter — `github-copilot-cli`
+
+This adapter binds the harness to the **GitHub Copilot CLI agent runtime**. The **GitHub
+Copilot app** embeds the same runtime, so the adapter covers the app (Windows, macOS, Linux)
+and the `copilot` CLI alike. The full specification, including the hook → boundary table and
+the limits of this runtime, is
+[`def/adapter/github-copilot-cli/spec.md`](../../def/adapter/github-copilot-cli/spec.md).
+
+```text
+adapters/github-copilot-cli/
+  adapter.py            hook entry:  <python> adapter.py hook --event <event> [--agent <slug>] --framework-dir <fw>
+  install.py            renders hooks.yaml + agent-hooks.yaml with absolute machine paths
+  hooks.yaml            global hooks (source of truth, NOT installable as-is)
+  agent-hooks.yaml      orchestrator-scoped H0 hooks (rendered into agent frontmatter)
+  tools.yaml            tool names + payload keys (validated by contracts/conf/adapters/tools.conf.schema.json)
+  models.yaml           canonical model slug -> host model id
+  contracts/            hook-stdin / hook-stdout JSON Schemas
+  copilot_cli_adapter/  the adapter package
+```
+
+## Prerequisites
+
+- **Python 3.10 or newer**, in a virtual environment that holds `requirements.txt`. The
+  installer records that interpreter's absolute path in every hook, so hooks never depend on
+  `PATH`, on bash, or on a `python` alias.
+- A **framework checkout**, e.g. [`saf-agentic-organization`](https://github.com/poesis-cloud/saf-agentic-organization).
+  It must contain `.env`, `workflows/`, `instructions/`, `skills/` and `workspace/`.
+- The framework's **Copilot plugin bundle**, rendered by the framework itself. For
+  `saf-agentic-organization`, that is `builds/github-copilot-cli/`. The bundle carries the
+  agents and skills; this installer adds the hooks to it.
+- The **framework folder trusted** in the app. Repository hooks and agent-scoped hooks do not
+  run in an untrusted folder, and they fail silently. Without them no harness session opens.
+
+## Install — Windows (PowerShell)
+
+```powershell
+# 1. the harness and its venv
+git clone https://github.com/poesis-cloud/saf-agentic-harness C:\saf\saf-agentic-harness
+cd C:\saf\saf-agentic-harness
+py -3.12 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+
+# 2. render the framework's bundle first (in the framework checkout; see its README)
+
+# 3. add the hooks to the bundle — run with the VENV interpreter: it is the one recorded
+.venv\Scripts\python adapters\github-copilot-cli\install.py `
+    --framework-dir C:\saf\saf-agentic-organization `
+    --bundle-dir    <the rendered bundle> `
+    --workspace-dir C:\saf\saf-agentic-workspace      # optional: a workspace outside the checkout
+```
+
+## Install — Linux / macOS
+
+```bash
+git clone https://github.com/poesis-cloud/saf-agentic-harness ~/saf/saf-agentic-harness
+cd ~/saf/saf-agentic-harness
+python3 -m venv .venv && .venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python adapters/github-copilot-cli/install.py \
+    --framework-dir ~/saf/saf-agentic-organization \
+    --bundle-dir <the rendered bundle> \
+    [--workspace-dir ~/saf/saf-agentic-workspace]
+# or, the same through make (PYTHON defaults to python3 on PATH — activate the venv first,
+# or pass HARNESS_PYTHON=<absolute venv python>):
+make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=…] [HARNESS_PYTHON=…]
+```
+
+## What the installer writes
+
+- **`<bundle>/hooks.json`** holds the global hooks. If the bundle's `plugin.json` names a
+  `hooks` file path, the installer writes there instead; an inline `hooks` object is refused.
+  Every entry is `exec: <venv python>`, `args: [adapter.py, hook, --event, …,
+  --framework-dir, <fw>]`, with `cwd: <fw>` and an `env` holding `FRAMEWORK_DIR` plus every
+  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env` and `--workspace-dir`, plus
+  `SAF_HARNESS_PYTHON` (the recorded interpreter). **No user-level variables (`setx`) are
+  needed:** hooks get their layout from `env`, and agents get absolute paths from the
+  injected hint (see below).
+- The installer **refuses** an interpreter (`--python`, default: the one running it) that
+  cannot import the harness requirements, and a malformed `<fw>/.env`. Nothing is written
+  then.
+- **A managed `hooks:` block** in the frontmatter of every orchestrator's agent file
+  (`<bundle>/agents/<slug>.agent.md`). The orchestrators are the agents that
+  `workflows/**/*.workflow.conf.yaml` names as `orchestrator:`. The block holds the scoped
+  `userPromptSubmitted`/`userPromptTransformed` hooks that open the harness session (H0).
+  Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
+
+**`--framework-dir` is the framework CHECKOUT, not the rendered bundle.** It is where `.env`,
+`workflows/`, `instructions/` and `skills/` live. The bundle is only the package the app
+loads.
+
+Other targets for the global hook file:
+
+- `--hooks-target repo --target-repo <repo>` writes `<repo>/.github/hooks/safe-harness-copilot-cli.json`.
+  This repository git-ignores that path; ignore it in the target repository too, because it
+  holds machine paths.
+- `--hooks-target user` writes `~/.copilot/hooks/` (or `$COPILOT_HOME/hooks/`).
+
+Other options: `--hook-style shell` writes `powershell`/`bash` command strings instead of
+`exec`. `--dry-run` prints what would be written. Everything the installer writes holds
+absolute machine paths: **generated, never committed**. Re-run the installer after moving
+either checkout or recreating the venv.
+
+## Using it in the GitHub Copilot app
+
+1. **Load the bundle through a local marketplace**:
+   `copilot plugin marketplace add <bundle marketplace dir>`, then install the plugin from it.
+   A path-sourced plugin in a local marketplace is read **live**, so re-running `install.py`
+   takes effect at the next session. A direct `copilot plugin install <path>` **copies** the
+   bundle instead; after every re-run of `install.py` you must then run
+   `copilot plugin update <plugin>`, or the app keeps the old copy without hooks.
+2. **Trust the framework folder** in the app, and open the session in it.
+3. **Select an orchestrator agent** (e.g. the Release Train Engineer) and give it its task.
+   Its scoped hook opens the harness session. Every session also receives a short context
+   from `sessionStart` naming the framework root, the workspace, and the exact harness command
+   lines.
+4. The orchestrator asks the harness with ONE plain command, alone in its tool call:
+   `& <venv python> <harness.py> resolve-step --workflow-slug <slug>` (or
+   `… resolve-step-model`; on Linux/macOS without the leading `&`). It may write `python`, `python3`,
+   `py -3` or a full interpreter path, but never `--session-id`, `$env:`, or chaining.
+   **The shell does not run this command, and the adapter never edits it.** The
+   `preToolUse` hook recognizes the request, runs the function itself for the agent's own
+   session (taken from the hook payload), and returns the report as the tool response. The
+   app shows it as a hook denial whose reason starts with
+   `SAFe agentic harness RESULT (resolve-step): …` followed by the JSON report. That is the
+   successful answer: the agent must act on it and not re-issue the command. Only a reason
+   starting with `SAFe agentic harness REJECTED` means the request was refused (it names
+   the problem and the accepted line). Because the hook decides before the app's permission
+   layer, **no permission rule or interactive approval is needed** for harness commands,
+   including in autopilot, and agent shells need no `FRAMEWORK_*` variables.
+5. Steps are dispatched with `task`, synchronously; `mode: background` is denied. Writes go
+   through `create`/`edit`, which the harness authorizes (H3) and validates (H5). `skill`,
+   `ask_user` (the human gate), `view`, `grep` and `glob` are never gated.
+
+**Failure is closed and visible.** If a hook cannot bootstrap, it exits 2 with a stderr
+diagnostic. That happens when the framework root is gone, `.env` is malformed, the binding is
+off-contract, or the payload is unreadable. The app then denies the tool call (`preToolUse`)
+or shows a warning (other events). A broken install therefore blocks tool use wherever the
+plugin's hooks fire. Repair it by re-running `install.py`, or by disabling the plugin.
+
+Session records live in `%LOCALAPPDATA%\saf-agentic-harness\github-copilot-cli`, or
+`$XDG_STATE_HOME/saf-agentic-harness/github-copilot-cli`. `SAF_HARNESS_STATE_DIR` overrides
+both. Hook diagnostics go to stderr.
+
+## Known limitations
+
+These are detailed, with their fallbacks, in the spec's *Limited or unsupported boundaries*.
+
+- **Folder trust.** In an untrusted folder, scoped hooks never run, so no harness session
+  opens. Harness commands are then denied with a diagnosis.
+- **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget.
+- **Shell writes are not mediated.** The adapter denies shell commands that name the
+  workspace or `logs/`, but a determined command can evade a textual check. The core's
+  commit-set check is the backstop. Agents must write through `create`/`edit`.
+- **Batching.** A harness command must be the only tool call in its batch.
+- **The harness answer arrives as a "denial".** The runtime has no other channel for a
+  `preToolUse` hook to answer the agent without running or editing its command. The reason
+  prefix and the session hint say it is the result; a model that still retries just gets the
+  same answer again. If the `preToolUse` hook times out, the agent's line runs in its shell
+  without the hook environment, and the harness refuses it (`FRAMEWORK_DIR is unset`).
+- **Latency.** Plugin hooks start Python for every tool call in every folder. Ungoverned
+  sessions return after one state lookup.
+- **Not yet byte-verified in the app:** `exec` entries (fall back to `--hook-style shell`),
+  the exact wrapper around a deny reason, and scoped hooks inside subagents.

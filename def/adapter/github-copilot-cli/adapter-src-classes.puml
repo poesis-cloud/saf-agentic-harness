@@ -1,0 +1,158 @@
+@startuml adapter-src-classes
+
+' ============================================================
+' VISUAL THEME
+' ============================================================
+skinparam shadowing false
+skinparam linetype ortho
+skinparam classAttributeIconSize 0
+skinparam PackagePadding 12
+skinparam ClassPadding 4
+
+package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
+
+  package "harness core (external, see ../../core/harness-src-classes.puml)" as harness_core #eeeeee {
+    interface "harness.py <function>" as CommandApi <<external>> {
+      +stdin : none
+      +argv : --flag value ...
+      +stdout : Report JSON
+      +exit : 0 | non-zero
+    }
+  }
+
+  package "github-copilot-cli (outside src/, depends ONLY on the harness command API)" as adapter {
+    class "adapter.py" as Entry <<entry>> {
+      +run_hook(argv, stdin, stdout, stderr) : int
+      +build_adapter(framework_dir, workspace_dir) : (Adapter, ToolBinding)
+      +session_may_be_governed(payload) : bool
+    }
+    class Adapter {
+      -_binding : ToolBinding
+      -_tracker : SessionTracker
+      -_context : ContextRenderer
+      -_runner : CommandRunner
+      -_invocation : HarnessInvocation
+      -_workspace_dir : str
+      +handle(hook: HookInput) : Mapping | None
+    }
+    class HookInput <<dataclass>> {
+      +event : str
+      +payload : Mapping[str, Any]
+      +binding : ToolBinding
+      +scoping_agent : str | None
+      +host_id : str | None
+      +raw_parent_host_session_id : str | None
+      +timestamp : str | None
+      +cwd : str | None
+      +read_tool_calls() : tuple[ToolCall, ...]
+    }
+    class ToolCall <<dataclass>> {
+      +name : str
+      +args : Any
+      +call_id : str | None
+    }
+    class ToolBinding <<dataclass>> {
+      +write_tools / patch_tools / dispatch_tools
+      +mediated_command_tools / guarded_shell_tools
+      +powershell_command_tools
+      +tool_calls_keys / tool_keys / input_keys ...
+      +host_session_keys / host_step_session_keys ...
+      +probe(payload, keys) : Any
+      +resolve_write_action(tool, args) : str | None
+      +extract_write_targets(tool, args) : tuple[(str, str), ...]
+      +is_dispatch_tool(tool) : bool
+      +is_mediated_command_tool(tool) : bool
+      +is_guarded_shell_tool(tool) : bool
+    }
+    class "apply_patch" as ApplyPatch <<module>> {
+      +parse_patch_targets(text) : tuple[(str, str), ...]
+    }
+    class "paths" as Paths <<module>> {
+      +resolve_host_path(raw, cwd, workspace_dir) : PurePath
+      +relativize(path, cwd, workspace) : str
+      +host_basename(path) : str
+    }
+    class SessionRecord <<dataclass>> {
+      +session_id : str
+      +agent : str
+      +origin : turn | step
+      +parent_session_id : str | None
+      +parent_host_id : str | None
+      +context_injected : bool
+    }
+    class SessionTracker {
+      -_state_dir : Path
+      +read(host_id) : SessionRecord | None
+      +write(host_id, record) : None
+      +delete(host_id) : None
+      +descendants(host_id) : tuple[str, ...]
+    }
+    interface CommandRunner {
+      +run_function(function, inquiry) : Report
+    }
+    class SubprocessCommandRunner {
+      -_harness_entrypoint : Path
+      -_layout_environment : Mapping[str, str]
+    }
+    class HarnessInvocation <<dataclass>> {
+      +python : str
+      +harness : str
+      +windows : bool
+      +example(arguments) : str
+      +is_harness(raw, cwd) : bool
+      +is_interpreter(raw) : bool
+      +hint() : str
+    }
+    class ContextRenderer {
+      +render(reports, inline) : str
+    }
+    class FrameworkLayout <<dataclass>> {
+      +framework_dir : Path
+      +resolve(variable) : Path
+      +environment : dict[str, str]
+    }
+    class "install.py" as Installer <<entry>> {
+      +main(argv, environment) : int
+    }
+
+    Entry --> Adapter
+    Entry --> FrameworkLayout
+    Adapter --> HookInput
+    HookInput --> ToolCall
+    HookInput --> ToolBinding
+    Adapter --> ToolBinding
+    ToolBinding --> ApplyPatch
+    Adapter --> Paths
+    Adapter --> SessionTracker
+    SessionTracker --> SessionRecord
+    Adapter --> CommandRunner
+    SubprocessCommandRunner ..|> CommandRunner
+    Adapter --> HarnessInvocation
+    Adapter --> ContextRenderer
+    Installer --> FrameworkLayout
+
+    note bottom of Adapter
+      ONE handler per runtime event (see spec.md, "Hook -> boundary
+      binding"). preToolUse is BATCHED: every call is classified
+      (H2 dispatch / H3 write / H4 harness command / I9 shell) and
+      decided; ANY denial denies the firing. An unextractable write
+      target is DENIED (fail closed). H4 never edits a command: an
+      accepted harness request is RUN BY THE HOOK for the observed
+      session and its report returned as the deny reason (the shell
+      never runs it). Framework-agent gating,
+      step correlation and session closure stay inside the invoked
+      harness functions; this class relays their outcomes.
+    end note
+    note bottom of SessionTracker
+      One JSON record per host id, outside every repository
+      (SAF_HARNESS_STATE_DIR | %LOCALAPPDATA% | XDG_STATE_HOME).
+      A subagent's events carry sessionId = its agentId, so a
+      step session is keyed by its own id - no stack, no
+      correlation. A corrupt record raises: preToolUse denies.
+    end note
+  }
+
+  adapter ..> harness_core : the ONLY allowed edge -\nthe harness command API
+}
+
+@enduml

@@ -10,11 +10,12 @@ class EventClass(Enum):
     """Name the boundary a host firing binds to.
 
     Spec (adapter, I14): NINE classes — the seven harness boundaries plus the two host
-    events that reach no harness function. Lifecycle participles avoid the step/session
+    events outside them (no boundary command). Lifecycle participles avoid the step/session
     clash: `STEP_STARTING` is the dispatch about to open the step (it can deny),
     `STEP_STARTED` is the step session having opened (it can only inject), `STEP_ENDED`
-    is the dispatch return (THE evaluation point). `MEDIATED_ATTRIBUTION` (H4) invokes no
-    function at all; `PASS_THROUGH` is every other firing.
+    is the dispatch return (THE evaluation point). `MEDIATED_ATTRIBUTION` (H4) answers an
+    agent's harness request by running functions 3–4 in the hook, attributed from the
+    host-observed session; `PASS_THROUGH` is every other firing.
     """
 
     SESSION_STARTED = "session-started"

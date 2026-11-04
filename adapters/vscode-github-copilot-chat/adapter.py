@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from command_runner import CommandRunner, SubprocessCommandRunner
+from command_runner import CommandRunner, HarnessCommandError, SubprocessCommandRunner
 from event_class import EventClass
 from hook_binding import HookBinding, load_hook_binding
 from hook_classifier import HookClassifier
@@ -44,9 +44,41 @@ _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
 _BOUND_MODEL_FLAG = "--bound-model"
 _MODEL_FUNCTION = "resolve-step-model"
 _HARNESS_COMMAND = re.compile(
-    r"(?:^|[\s;&|(])(?:\S*/)?harness\.py\s+([a-z][a-z0-9-]*)"
+    r"(?:^|[\s;&|(])(?:\S*[/\\])?harness\.py['\"]?\s+([a-z][a-z0-9-]*)"
 )
 _TOKEN_TRIM = "'\"();|&<>"
+# ONE plain request: `[&] [<python|python3|py|interpreter path> [-3[.x]]] <…harness.py> <fn>
+# [--flag value]...` — no chaining, piping, redirection, substitution or subexpression.
+_PLAIN = r"""[^\s'";|&`$()<>{}]"""
+_QUOTED = r"""(?:'[^'`$;|&<>]*'|"[^"`$;|&<>]*")"""
+_HARNESS_PATH = (
+    r"""(?:'(?:[^'`$;|&<>]*[/\\])?harness\.py'"""
+    r"""|"(?:[^"`$;|&<>]*[/\\])?harness\.py\""""
+    rf"""|(?:{_PLAIN}*[/\\])?harness\.py)"""
+)
+_STRICT_HARNESS_REQUEST = re.compile(
+    rf"""^\s*(?:&\s*)?(?:(?P<interpreter>{_QUOTED}|{_PLAIN}+)(?:\s+-[0-9][0-9.]*)?\s+)?"""
+    rf"""(?P<harness>{_HARNESS_PATH})\s+(?P<function>[a-z][a-z0-9-]*)"""
+    rf"""(?P<flags>(?:\s+(?:{_QUOTED}|{_PLAIN}+))*)\s*$"""
+)
+_FLAG_TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
+_INTERPRETER_NAME = re.compile(r"^(?:python(?:[0-9]+(?:\.[0-9]+)*)?|py)(?:\.exe)?$", re.I)
+# The deny reason is the tool result the host hands the agent (`Tool execution denied:
+# <reason>`), so it carries the harness's answer; these prefixes tell a result from a
+# refusal of the request itself.
+HARNESS_RESULT = "SAFe agentic harness RESULT"
+HARNESS_REJECTED = "SAFe agentic harness REJECTED"
+_RESULT_DIRECTIVE = (
+    "this is the successful answer to your harness command, not an error. The harness hook "
+    "ran '{function}' for your session itself, so your terminal did not run the line (the "
+    "host shows that as a denial). Act on this report; do not re-issue the command to get "
+    "it again."
+)
+_RESULT_CONTEXT = (
+    "The 'Tool execution denied' result above is the harness's answer, not a failure: the "
+    "harness hook ran '{function}' for your session and returned its report. Act on it; do "
+    "not re-issue the command."
+)
 _FRAMEWORK_DIR_VARIABLE = "FRAMEWORK_DIR"
 _LAYOUT_ENV_FILENAME = ".env"
 _EXIT_FAIL_CLOSED = 2
@@ -220,7 +252,12 @@ class Adapter:
         return self._renderer.render_permission_decision(reports)
 
     def _handle_mediated_attribution(self, event: HookEvent) -> HookDecision:
-        """H4 — stamp the host-observed session onto a model-authored harness command."""
+        """H4 — answer an agent's harness request by running it in the hook.
+
+        The agent's command is a REQUEST, never a command to run or edit: the hook runs
+        functions 3–4 itself for the session the host-observed `session_id` resolves to,
+        and returns the report as the deny reason (adapter spec H4).
+        """
         command_key = self._find_command_key(event.tool_input)
         if command_key is None:
             return self._renderer.render_pass_through()
@@ -233,7 +270,7 @@ class Adapter:
         if function is None:
             return self._decide_guarded_shell(event, command)
         if function not in _AGENT_INVOCABLE_FUNCTIONS:
-            return self._renderer.render_denial(
+            return self._reject(
                 f"harness function '{function}' is not agent-invocable: only "
                 "resolve-step and resolve-step-model are"
             )
@@ -241,27 +278,54 @@ class Adapter:
             (flag for flag in _ATTRIBUTION_FLAGS if flag in command), None
         )
         if carried_flag is not None:
-            return self._renderer.render_denial(
-                f"model-authored session attribution ('{carried_flag}') is never accepted"
+            return self._reject(
+                f"model-authored session attribution ('{carried_flag}') is never "
+                "accepted: the harness hook attributes the request to your session itself"
             )
         if _BOUND_MODEL_FLAG in command:
-            return self._renderer.render_denial(
+            return self._reject(
                 f"model-authored bound models ('{_BOUND_MODEL_FLAG}') are never accepted: "
                 "the adapter supplies the models this host binds"
             )
+        rejected, inquiry = _parse_harness_request(command, function)
+        if rejected is not None:
+            return self._reject(rejected)
         session_id = self._tracker.resolve_current(
             sanitize_identifier(event.raw_host_session_id)
         )
         if session_id is None:
-            return self._renderer.render_denial(
+            return self._reject(
                 "no registered agent session to attribute this harness command to"
             )
-        bound_models = (
-            tuple(sorted(self._binding.model_ids)) if function == _MODEL_FUNCTION else ()
+        if function == _MODEL_FUNCTION:
+            inquiry = {**inquiry, "boundModels": sorted(self._binding.model_ids)}
+        return self._answer_harness_request(
+            function, {**inquiry, "sessionId": session_id}
         )
-        return self._renderer.render_stamped_input(
-            event.tool_input, command_key, session_id, bound_models
+
+    def _answer_harness_request(
+        self, function: str, inquiry: Mapping[str, Any]
+    ) -> HookDecision:
+        try:
+            report = self._command_runner.run_function(function, inquiry)
+        except HarnessCommandError as failure:
+            _report_diagnostic(f"{function} failed: {failure}")
+            return self._reject(
+                failure.refusal
+                or "the harness could not answer (see the hook diagnostics)"
+            )
+        except Exception as failure:  # noqa: BLE001 - every failure must be contained
+            _report_diagnostic(f"{function} failed: {failure}")
+            return self._reject("the harness could not answer (see the hook diagnostics)")
+        rendered = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+        return self._renderer.render_harness_answer(
+            f"{HARNESS_RESULT} ({function}): "
+            f"{_RESULT_DIRECTIVE.format(function=function)}\n\n{rendered}",
+            _RESULT_CONTEXT.format(function=function),
         )
+
+    def _reject(self, reason: str) -> HookDecision:
+        return self._renderer.render_denial(f"{HARNESS_REJECTED}: {reason}")
 
     def _handle_write_ended(self, event: HookEvent) -> HookDecision:
         """H5 — the commit gate: validate the landed write set, or report its revert."""
@@ -375,9 +439,9 @@ class Adapter:
 
     def _relativize_path(self, path: Path) -> str:
         try:
-            return str(path.relative_to(self._workspace_dir))
+            return path.relative_to(self._workspace_dir).as_posix()
         except ValueError:
-            return str(path)
+            return path.as_posix()
 
 
 def build_default_adapter() -> Adapter:
@@ -433,9 +497,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic (the host's blocking channel), never an exit the host fails open on.
     """
     try:
+        _force_utf8_stdio()
         return run_hook_entry(
             argv=list(argv) if argv is not None else sys.argv[1:],
-            stdin_text=sys.stdin.read(),
+            stdin_text=_read_stdin_text(),
             write_stdout=sys.stdout.write,
             build_adapter=build_default_adapter,
         )
@@ -445,6 +510,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{type(failure).__name__}: {failure}"
         )
         return _EXIT_FAIL_CLOSED
+
+
+def _force_utf8_stdio() -> None:
+    """Answer UTF-8 whatever the console codepage, so the host reads one encoding."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+
+def _read_stdin_text() -> str:
+    """Read the host payload as UTF-8 (BOM tolerated), not the console codepage."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is None:
+        return sys.stdin.read()
+    return buffer.read().decode("utf-8-sig")
 
 
 def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -528,6 +609,51 @@ def _match_harness_function(command: str) -> str | None:
     """Return the harness function a shell command invokes, or None (H4, rule 1)."""
     match = _HARNESS_COMMAND.search(command)
     return match.group(1) if match else None
+
+
+def _parse_harness_request(
+    command: str, function: str
+) -> tuple[str | None, dict[str, str]]:
+    """Read ONE plain harness request into its inquiry, or answer why it is rejected."""
+    example = f"python harness.py {function}" + (
+        " --workflow-slug <workflow-slug>" if function == "resolve-step" else ""
+    )
+    match = _STRICT_HARNESS_REQUEST.match(command)
+    if match is None or match.group("function") != function:
+        return (
+            "a harness command must be one plain invocation, never chained, piped or "
+            f"redirected: {example}"
+        ), {}
+    interpreter = match.group("interpreter")
+    if interpreter is not None and not _INTERPRETER_NAME.match(
+        re.split(r"[/\\]", _unquote(interpreter))[-1]
+    ):
+        return f"'{_unquote(interpreter)}' is not a Python interpreter: {example}", {}
+    tokens = [_unquote(token) for token in _FLAG_TOKEN.findall(match.group("flags"))]
+    inquiry: dict[str, str] = {}
+    for index in range(0, len(tokens), 2):
+        flag = tokens[index]
+        value = tokens[index + 1] if index + 1 < len(tokens) else None
+        if not flag.startswith("--") or len(flag) < 3:
+            return f"'{flag}' is not a '--flag value' argument: {example}", {}
+        if value is None or value.startswith("--"):
+            return f"flag '{flag}' needs a value", {}
+        key = _camel(flag[2:])
+        if key in inquiry:
+            return f"flag '{flag}' is given more than once", {}
+        inquiry[key] = value
+    return None, inquiry
+
+
+def _unquote(token: str) -> str:
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "'\"":
+        return token[1:-1]
+    return token
+
+
+def _camel(kebab: str) -> str:
+    head, *rest = kebab.split("-")
+    return head + "".join(part[:1].upper() + part[1:] for part in rest)
 
 
 def _report_diagnostic(message: str) -> None:

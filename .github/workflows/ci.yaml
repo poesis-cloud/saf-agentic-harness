@@ -23,13 +23,18 @@ concurrency:
 
 jobs:
     verify:
-        name: Verify (Python ${{ matrix.python-version }})
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
+        name: Verify (Python ${{ matrix.python-version }}${{ matrix.os == 'windows-latest' && ', Windows' || '' }})
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 20
         strategy:
             fail-fast: false
             matrix:
+                os: [ubuntu-latest]
                 python-version: ["3.10", "3.11", "3.12"]
+                # The harness runs on Windows in the GitHub Copilot app: keep the suite green there.
+                include:
+                    - os: windows-latest
+                      python-version: "3.12"
         steps:
             - name: Checkout
               uses: actions/checkout@v4
@@ -43,7 +48,16 @@ jobs:
               run: pip install --quiet -r requirements-dev.txt
 
             - name: Run the verification gate
+              if: runner.os != 'Windows'
               run: make verify
+
+            # The same suite `make verify` runs; Windows runners have no portable `make` + POSIX
+            # shell, and no `python3` alias.
+            - name: Run the verification gate (Windows)
+              if: runner.os == 'Windows'
+              env:
+                  PYTHONDONTWRITEBYTECODE: "1"
+              run: python -m pytest -p no:cacheprovider tests -q
 
     lint-markdown:
         name: Lint Markdown

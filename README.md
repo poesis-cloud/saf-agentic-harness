@@ -15,8 +15,10 @@ The canonical harness-core specification — terminology, invariants, the twelve
 contract, design, and implementation — lives in **[`def/core/spec.md`](def/core/spec.md)**.
 Read that first; this file is
 only an orientation pointer. Each host binding has its own specification under
-`def/adapter/<host>/spec.md` (e.g.
-[`def/adapter/vscode-github-copilot-chat/spec.md`](def/adapter/vscode-github-copilot-chat/spec.md)).
+`def/adapter/<host>/spec.md`:
+[`vscode-github-copilot-chat`](def/adapter/vscode-github-copilot-chat/spec.md) (VS Code +
+Copilot Chat) and [`github-copilot-cli`](def/adapter/github-copilot-cli/spec.md) (the GitHub
+Copilot app and the Copilot CLI — install: [`adapters/github-copilot-cli/README.md`](adapters/github-copilot-cli/README.md)).
 
 ## SAF context
 
@@ -38,9 +40,9 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
   the host-agnostic ones, so it is not core-only.
 - `def/core/` — the harness-core specification (`spec.md`) and its class diagram
   (`harness-src-classes.puml`) — `src/` only, host-blind.
-- `def/adapter/<host>/` — one specification + class diagram per host binding (e.g.
-  `vscode-github-copilot-chat/`).
-- `adapters/` — host-specific bindings (e.g. `vscode-github-copilot-chat/`).
+- `def/adapter/<host>/` — one specification + class diagram per host binding
+  (`vscode-github-copilot-chat/`, `github-copilot-cli/`).
+- `adapters/` — host-specific bindings (`vscode-github-copilot-chat/`, `github-copilot-cli/`).
 - `contracts/` — JSON Schema contracts for configuration, artifacts, and the journal.
 - `src/` — the Python implementation; `harness.py` at the root is its entry point
   (`python3 harness.py <function> [flags]`).

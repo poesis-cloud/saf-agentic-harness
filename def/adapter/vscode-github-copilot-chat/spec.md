@@ -26,6 +26,8 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
 | `UserPromptSubmit` firing point + context handling | `extensions/copilot/src/extension/prompt/node/defaultIntentRequestHandler.ts` (`runWithToolCalling`) |
 | `additionalContext` injection semantics | `extensions/copilot/src/extension/prompts/node/agent/agentPrompt.tsx` (`AdditionalHookContextPrompt`), `…/prompts/node/panel/toolCalling.tsx` (`appendHookContext`) |
 | `PreToolUse`/`PostToolUse` result collapsing | `extensions/copilot/src/extension/chat/vscode-node/chatHookService.ts` |
+| `PreToolUse` deny → tool result `Tool execution denied: <reason>`, tool never invoked (H4) | `src/vs/workbench/contrib/chat/browser/tools/languageModelToolsService.ts` (`_handlePreToolUseDenial`) |
+| `PreToolUse` `additionalContext` appended to the tool result even on a deny (H4) | `extensions/copilot/src/extension/prompts/node/panel/toolCalling.tsx` (`appendHookContext`) |
 
 ## Summary
 
@@ -59,8 +61,7 @@ VS Code core (`src/vs/workbench/contrib/chat/`); the former standalone
   which root the registration resolves `adapters/` against
 - [Inconsistencies with the harness spec](#inconsistencies-with-the-harness-spec) — findings
   fed back into [`../../core/spec.md`](../../core/spec.md); all are now **resolved or
-  integrated** except the permanently tracked items (I4's host-native attribution surface,
-  I13(a)/(d) host verifications).
+  integrated** except the permanently tracked items (I13(a)/(d) host verifications).
 
 ---
 
@@ -203,7 +204,8 @@ guard bounds the loop, and the diagnostic names the repair (`make install-hooks`
 hooks), `systemMessage` (user-visible warning); event-specific fields per hook below.
 Multi-hook collapsing: `PreToolUse` decisions collapse most-restrictive-wins
 (`deny > ask > allow`), the **last** `updatedInput` wins (schema-validated against the tool's
-input schema — invalid is discarded), `additionalContext` concatenates across hooks.
+input schema — invalid is discarded; this adapter never emits one), `additionalContext`
+concatenates across hooks.
 A `hookEventName` in the output that mismatches the running hook type causes the output to be
 stripped (one-way compatibility: a `Stop` output is accepted under `SubagentStop`, a
 `SessionStart` output under `SubagentStart`).
@@ -283,22 +285,21 @@ artifact path (function 8) before the write executes.
 { "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "check-step-authorization denied: missing privilege: update epic (portfolio/epics/epic-payments.md)" } }
 ```
 
-**H4 `PreToolUse` — harness-command class — mediated attribution.** Stamps the host-observed
-session id onto a model-authored harness-CLI invocation (functions 3–4) — accepted under the
-core's **narrow tool-boundary-stamp exception** (I4): fixed framework-authored shape, denies
-model-authored attribution outright, backstopped by the harness's own registered-session
-check, and named an explicit interim mechanism, not a permanent design.
+**H4 `PreToolUse` — harness-command class — mediated attribution.** Hook-executed: the hook
+runs the agent's plain `resolve-step` / `resolve-step-model` request itself (functions 3–4),
+attributed from the payload's session, and answers with a deny whose reason IS the report.
+The agent's command never runs and is never edited.
 
 **In** (stdin):
 
 ```json
-{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "run_in_terminal", "tool_input": { "command": "harness.py resolve-step --workflow verification" } }
+{ "hook_event_name": "PreToolUse", "session_id": "chat-session-guid", "tool_name": "run_in_terminal", "tool_input": { "command": "python harness.py resolve-step --workflow-slug verification" } }
 ```
 
 **Out** (stdout, exit 0):
 
 ```json
-{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": { "command": "harness.py resolve-step --workflow verification --session-id chat-session-guid-t2026-07-11t14-32-07-000z" } } }
+{ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "SAFe agentic harness RESULT (resolve-step): … \n\n{\"context\":{…},\"outcome\":{\"status\":\"step-resolution\"},…}", "additionalContext": "The 'Tool execution denied' result above is the harness's answer, not a failure: …" } }
 ```
 
 **H5 `PostToolUse` — write class — write-ended.** The commit gate (function 9) — validates
@@ -522,9 +523,8 @@ resolution
 finds no current session** for a `session_id` — never registered — no harness function is
 invoked at all: the same pass-through (exit 0, empty output) already used elsewhere in this
 binding for a foreign or unregistered session. H4 additionally **denies** rather than passing
-through (see H4, below): its tool call IS the harness command about to
-execute, so letting it run un-rewritten would invoke a harness function with no attributable
-session at all.
+through (see H4, below): its tool call IS a harness request, so passing it through would let
+the terminal run a harness function with no attributable session at all.
 
 ## Session correlation scenarios
 
@@ -1015,23 +1015,18 @@ mapped).
 
 The mediated agent invocation surface for functions 3 (`resolve-step`) and 4
 (`resolve-step-model`) — the orchestrator's loop calls in the SD. Same physical registration
-as H2/H3; classified when `tool_name = run_in_terminal` **and** the command string invokes the
-harness command entry point.
+as H2/H3; classified when `tool_name` is a `mediatedCommandTools` tool (`run_in_terminal`)
+**and** the command string names the harness entry point (`harness.py <function>`).
 
-> **Accepted under the core's narrow tool-boundary-stamp exception**
-> ([`../../core/spec.md`](../../core/spec.md), Invocation surfaces) — a tool-boundary rewrite
-> of a model-authored argument is insufficient by the core's general rule, but this binding
-> qualifies under the exception because all four of its conditions hold: (1) the stamped
-> shape is fixed and framework-authored — the orchestrator's own instructions dictate the
-> exact `harness.py <function> --workflow …` invocation verbatim, never open-ended agent
-> phrasing; (2) any invocation already carrying `--session-id`/`--parent-session-id` is
-> denied outright (Mechanics rule 2, below), never merely overwritten; (3) the
-> [mediated-invocation backstop](../../core/spec.md#invocation-surfaces-one-command-system)
-> is in force — functions 3–4 themselves reject an unresolvable or unregistered id
-> regardless of what this hook stamped; (4) this remains an **explicit, interim**
-> mechanism — see **I4** — pending a host-native surface that passes attribution outside
-> model-visible arguments, which no host of this class (hook-mediated tool interception, no
-> custom-tool session channel) is currently known to offer.
+H4 is a **hook-executed** boundary. The agent's terminal command is a *request*: the hook
+runs the requested function **itself**, attributed from its own event payload and
+`SessionTracker` bookkeeping exactly as every other hook invocation is, and answers with the
+report. The agent's command is never executed and **never edited** — this adapter never
+emits `updatedInput` (the seam-4 stdout contract rejects it). This is the attribution
+mechanism the core's
+[mediated attribution rule](../../core/spec.md#invocation-surfaces-one-command-system)
+accepts: the session id comes from a host-observed source the model did not author, and no
+model-authored command is stamped or rewritten.
 
 **In** (stdin)
 
@@ -1041,36 +1036,57 @@ harness command entry point.
   "hook_event_name": "PreToolUse",
   "session_id": "chat-session-guid",
   "tool_name": "run_in_terminal",
-  "tool_input": { "command": "harness.py resolve-step --workflow verification", "…": "…" },
+  "tool_input": { "command": "python harness.py resolve-step --workflow-slug verification", "…": "…" },
   "tool_use_id": "call_ghi789"
 }
 ```
 
-**Mechanics**
+**Mechanics** (in order; every denial is prefixed `SAFe agentic harness REJECTED:`)
 
-1. Classify: the command string matches the harness invocation pattern
-   (`harness.py <function> …`); otherwise fall through to the **guarded-shell check**: a
-   non-harness command on a `guardedShellTools` tool (`tools.yaml`) that textually references
-   a workspace artifact-layout path or the workspace logs path is **denied** with the offending
-   path named — an advisory-grade guard (textual matching is bypassable; C6's
+1. Classify: the command string names the harness entry point (`…harness.py <function>`,
+   POSIX or Windows path, optionally quoted); otherwise fall through to the **guarded-shell
+   check**: a non-harness command on a `guardedShellTools` tool (`tools.yaml`) that textually
+   references a workspace artifact-layout path or the workspace logs path is **denied** with
+   the offending path named — an advisory-grade guard (textual matching is bypassable; C6's
    detect-and-remediate plane remains the guarantee) closing the routine write escape hatch
-   (I9); anything else passes
-   through. **Deny** a harness invocation whose function is not `resolve-step` or
-   `resolve-step-model`: functions 3–4 are the only agent-invoked surface — every other
-   function belongs to a hook boundary, and a model-authored call to one is never legitimate.
-2. **Deny** any invocation whose command already carries session-attribution arguments
-   (`--session-id`, `--parent-session-id`): model-authored attribution is never accepted.
-   Likewise **deny** one carrying `--bound-model`: the host's bound models are this binding's
-   answer (core function 4, invariant 6), never the agent's.
-3. Resolve `SessionTracker.resolve_current(sanitized(session_id))`. **Deny** if it returns
-   `None` — never registered — there is no session to attribute this call to. (A resolved but
-   already-closed session is not caught here — the adapter has no log access to know that; the
-   harness core itself refuses it via C8 when the call actually runs — see Invariant 4.)
-4. Rewrite via `updatedInput`: inject `--session-id <the resolved current session>`
-   (host-observed, adapter-resolved) into the command. The executed invocation's attribution
-   is then fully adapter-controlled — the model can neither choose nor forge it. For
-   `resolve-step-model`, also inject one `--bound-model <slug>` per canonical slug of
-   `models.yaml` `modelBindings` (sorted), so the core ranks only models this host can run.
+   (I9); anything else passes through. **Deny** a harness invocation whose function is not
+   `resolve-step` or `resolve-step-model`: functions 3–4 are the only agent-requested surface
+   — every other function belongs to a hook boundary.
+2. **Deny** any request carrying session-attribution arguments (`--session-id`,
+   `--parent-session-id`): model-authored attribution is never accepted.
+   Likewise **deny** one carrying `--bound-model`: the host's bound models are this
+   binding's answer (core function 4, invariant 6), never the agent's.
+3. **Deny** anything but ONE plain request: `[&] [<python | python3 | py | interpreter
+   path> [-3[.x]]] <…harness.py> <function> [--flag value]…` — no chaining, piping,
+   redirection, substitution, environment prefix, non-Python interpreter, missing or
+   duplicate flag value, or stray token. The hook never guesses what the agent meant. The
+   interpreter and the `harness.py` path are NOT checked against the installed harness: the
+   hook runs its own (`SAF_HARNESS_PYTHON` / `FRAMEWORK_DIR`), so the agent's spelling is
+   only a request form.
+4. Resolve `SessionTracker.resolve_current(sanitized(session_id))`. **Deny** if it returns
+   `None` — never registered — there is no session to attribute the request to. (A resolved
+   but already-closed session is not caught here — the adapter has no log access to know
+   that; the harness core itself refuses it via C8 — see Invariant 4.)
+5. Invoke the function through the command API with the request's flags (kebab-case →
+   camelCase inquiry fields, e.g. `--workflow-slug` → `workflowSlug`) plus
+   `sessionId: <the resolved current session>`; for `resolve-step-model`, also
+   `boundModels`: every canonical slug of `models.yaml` `modelBindings` (sorted), so the core
+   ranks only models this host can run.
+6. Answer with a **deny** whose `permissionDecisionReason` is
+   `SAFe agentic harness RESULT (<function>): <directive>` followed by a blank line and the
+   report as compact JSON, plus `additionalContext` telling the agent the denial *is* the
+   answer. A harness refusal (`harness: <code>: <message>` on stderr) is relayed as
+   `SAFe agentic harness REJECTED: harness: <code>: <message>`; any other failure is
+   reported generically (`the harness could not answer (see the hook diagnostics)`) with
+   the details on stderr only.
+
+**Why a deny carries the answer.** VS Code has no hook output that replaces a tool's result
+while letting the call succeed. On a `PreToolUse` deny, the tool is never invoked and the
+model receives `Tool execution denied: <permissionDecisionReason>` as that call's tool result
+(`languageModelToolsService.ts` `_handlePreToolUseDenial`). The `additionalContext` of the
+same decision is still appended to the tool result as a `<PreToolUse-context>` note even on
+a deny (`toolCalling.tsx` `appendHookContext`; `chatHookService.ts` collects it regardless of
+the decision). Both channels reach the model in the same turn, with the report inline.
 
 **Out** (stdout, exit 0)
 
@@ -1078,29 +1094,34 @@ harness command entry point.
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
-    "permissionDecision": "allow",
-    "updatedInput": {
-      "command": "harness.py resolve-step --workflow verification --session-id chat-session-guid-t2026-07-11t14-32-07-000z"
-    }
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "SAFe agentic harness RESULT (resolve-step): this is the successful answer to your harness command, not an error. … Act on this report; do not re-issue the command to get it again.\n\n{\"context\":{\"function\":\"resolve-step\",\"sessionId\":\"chat-session-guid-t2026-07-11t14-32-07-000z\",…},\"outcome\":{\"status\":\"step-resolution\"},\"step\":{…}}",
+    "additionalContext": "The 'Tool execution denied' result above is the harness's answer, not a failure: the harness hook ran 'resolve-step' for your session and returned its report. Act on it; do not re-issue the command."
   }
 }
 ```
 
-(The host validates `updatedInput` against the tool's input schema; the object must carry the
-full rewritten `tool_input`, not a patch.)
-
 **Invariants**
 
-1. No harness command with model-authored session attribution ever executes (rule 2 above
-   denies it).
-2. The stamped id is resolved from the envelope `session_id` — the same host-observed value
-   H0's opening derives from; never from any model-authored argument.
-3. Functions 3–4 journal to the stamped session per the harness logging rules; the hook
-   itself journals nothing (it is attribution plumbing, not a boundary function).
-4. A never-registered session is never stamped: rule 3 (above, Mechanics) denies it before
-   rule 4 would rewrite anything. A stamped-but-already-closed session is instead refused by
-   the harness core itself (C8) when functions 3–4 actually run — this hook has no log access
-   to pre-check that; it only guards against a session it has never seen at all.
+1. The adapter never edits an agent's command: no `updatedInput`, ever, and the agent's
+   terminal never runs a harness request — every H4 answer is a deny.
+2. The session id is resolved from the envelope `session_id` — the same host-observed value
+   H0's opening derives from; never from any model-authored argument (rule 2 denies one).
+3. Functions 3–4 journal to the resolved session per the harness logging rules; the hook is
+   their trigger, exactly as for functions 0–2 and 5–11.
+4. A never-registered session never reaches the harness: rule 4 denies it first. A
+   resolved-but-already-closed session is refused by the harness core itself (C8, the
+   [mediated-invocation backstop](../../core/spec.md#invocation-surfaces-one-command-system)).
+5. Inside a dispatched subagent the envelope `session_id` is the PARENT conversation's id
+   (I13), so attribution is the tracker's top-of-stack — the step session H1 pushed — not a
+   per-subagent id from the payload; this is the same caveat every hook of this host carries.
+6. If the hook times out or fails, VS Code fails open (I6) and the terminal runs the line
+   itself. The agent's terminal carries no hook environment (`FRAMEWORK_DIR` and the
+   `FRAMEWORK_*` layout), so the harness refuses at bootstrap, and the line carries no
+   session id either; nothing journals to a guessed session.
+7. The user also sees the deny in the chat as a `Tried to use run_in_terminal - <reason>`
+   block (`chatHookService.ts`), i.e. the raw report. This is a presentation limitation of
+   the host, not a correctness one.
 
 ### H5 `PostToolUse` — write class — write-ended
 
@@ -1416,7 +1437,7 @@ adapters/vscode-github-copilot-chat/adapter.py hook --event <Event> [--agent <ag
   ▼
   │ (4) stdout: host decision JSON ── contracts/hook-stdout.schema.json [adapter-owned]
   ▼
-VS Code hook engine (permissionDecision / decision:block / additionalContext / updatedInput)
+VS Code hook engine (permissionDecision / decision:block / additionalContext; never updatedInput)
 ```
 
 - **Seam 1 and 4 are this adapter's normative I/O contracts** —
@@ -1694,8 +1715,8 @@ truth keep the placeholders and are not installable verbatim).
 ## Inconsistencies with the harness spec
 
 Findings surfaced by rooting the harness in this concrete host. *Status:* all findings are
-now **resolved or integrated** except the permanently tracked items in I4 (host-native
-attribution surface) and I13(a)/(d) (host verifications only live experimentation can close).
+now **resolved or integrated** except the permanently tracked items in I13(a)/(d) (host
+verifications only live experimentation can close).
 
 - **I1 — RESOLVED.** The SD carries a distinct **Adapter** participant labeled with this
   host's actual events (H0–H7, no `SessionStart`), and the core spec's Boundary
@@ -1728,25 +1749,25 @@ attribution surface) and I13(a)/(d) (host verifications only live experimentatio
   session-started / step-started boundary is **mandatory**, not an optimization. This
   adapter's H0/H1 output construction realizes exactly that rule under the verified
   [context-injection semantics](#context-injection-semantics).
-- **I4 — RESOLVED: the core now names an explicit, narrow exception for this class of host.**
-  Functions 3–4 require host-observed session attribution "outside the tool arguments visible
-  to the agent"; a tool-boundary rewrite of a model-authored argument is insufficient by the
-  core's general rule. This host's only mechanism is exactly that — `PreToolUse`
-  `updatedInput` (H4) — and a dedicated-tool alternative was investigated and set aside: MCP
-  is host-agnostic and carries no standard, model-inaccessible "which chat session called
-  this" field a server could trust over the model's own arguments, and no VS Code extension
-  API surfacing one was found. Rather than leave this an unresolved contradiction against a
-  mechanism that likely doesn't exist for hosts of this shape, the core's mediated attribution
-  rule now states a **narrow tool-boundary-stamp exception** (fixed framework-authored
-  invocation shape, deny-on-model-authored-attribution, the mediated-invocation backstop, and
-  explicit interim-not-permanent status) that H4 satisfies point-for-point — see H4, below,
-  and [`../../core/spec.md`](../../core/spec.md), Invocation surfaces. The real fix — a
-  host-native surface that passes attribution outside model-visible arguments — remains
-  tracked, not scheduled.
+- **I4 — RESOLVED: H4 is hook-executed; the core's tool-boundary-stamp exception is
+  retired.** Functions 3–4 require host-observed session attribution "outside the tool
+  arguments visible to the agent". H4 used to stamp `--session-id` onto the agent's command
+  via `PreToolUse` `updatedInput`, accepted under a narrow, explicitly interim core
+  exception. It now runs the agent's request in the hook itself — attributed from the
+  payload's `session_id` through `SessionTracker`, exactly like every other hook
+  invocation — and answers with a deny whose reason is the report (see H4). No adapter edits
+  an agent's command, so the core's mediated attribution rule holds without exception and
+  the exception (with its tdd-plan tracking) is removed from
+  [`../../core/spec.md`](../../core/spec.md), Invocation surfaces. A dedicated-tool
+  alternative remains unnecessary: MCP carries no model-inaccessible "which chat session
+  called this" field, and no VS Code extension API surfacing one was found. The I13 subagent
+  caveat (the envelope `session_id` is the parent conversation's inside a subagent) still
+  applies to H4's attribution, as it does to every hook of this host.
 - **I5 — RESOLVED: the exit-2-centric dispatch contract is gone.** `dispatch.sh` and
   `adapters/README.md` now state the real control surface — **structured stdout JSON on exit
   0** (`permissionDecision` for H2/H3, `decision: block` for H5/H6, `additionalContext` for
-  H0/H1, `updatedInput` for H4), rendered by this adapter's `HookRenderer`; exit 2 remains
+  H0/H1, a deny carrying the hook-run report for H4), rendered by this adapter's
+  `HookRenderer`; exit 2 remains
   only the hard-failure fallback — and the shim forwards to this adapter's own hook entry
   (the core has no `hook` command, I14), with the optional third scoping-agent argument H0
   needs (I13(c)).
@@ -1837,7 +1858,7 @@ attribution surface) and I13(a)/(d) (host verifications only live experimentatio
   H0–H6's **output
   construction** — report `outcome` → `permissionDecision` mapping, `conditionChecks[]`
   serialization into reasons, instruction/skill refs rendered to inlined content + load
-  directives, `updatedInput` stamping — is real behavior that must live neither in the
+  directives, H4's hook-run report as a deny reason — is real behavior that must live neither in the
   function commands (host contamination) nor in shell. Adopted resolution, now integrated in
   the harness core spec and this adapter's own class diagram: the harness core drops the
   `hook` command — `harness.py`

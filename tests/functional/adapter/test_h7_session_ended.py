@@ -46,26 +46,28 @@ class TestSessionEndedHook:
         self,
         open_turn: Callable[[], HookRun],
         dispatch: Callable[..., HookRun],
+        harness_stub: HarnessStub,
     ) -> None:
         """Adapter spec H7, Harness invocation 1: the adapter pops the tracker stack,
         restoring the dispatching orchestrator session — without this, the orchestrator's
-        next mediated call (H4) would misattribute to the now-closed step session.
+        next harness request (H4) would misattribute to the now-closed step session.
         """
         open_turn()
         dispatch("SubagentStart", subagent_start())
         dispatch("SubagentStop", subagent_stop())
+        harness_stub.forget_calls()
 
         run = dispatch(
             "PreToolUse",
             pre_tool_use(
                 "run_in_terminal",
-                {"command": "harness.py resolve-step --workflow verification"},
+                {"command": "harness.py resolve-step --workflow-slug verification"},
             ),
         )
 
         assert run.exit_code == 0
-        stamped = run.decision()["hookSpecificOutput"]["updatedInput"]["command"]
-        assert stamped.endswith(f"--session-id {TURN_SESSION_ID}")
+        (request,) = harness_stub.find_calls("resolve-step")
+        assert request.value("--session-id") == TURN_SESSION_ID
 
     def test_stop_closes_the_resolved_turn_session_never_the_raw_conversation_id(
         self,

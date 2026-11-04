@@ -1,0 +1,105 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://saf/adapters/github-copilot-cli/contracts/hook-stdin/v1",
+    "title": "github-copilot-cli hook stdin contract",
+    "description": "Seam 3 of the adapter's invocation plumbing: the camelCase hook input the Copilot CLI runtime (and the GitHub Copilot app that embeds it) writes to a command hook's stdin. Grounded in https://docs.github.com/en/copilot/reference/hooks-reference and in payloads captured from the GitHub Copilot app on Windows (runtime 1.0.102), which are authoritative where they differ: preToolUse is BATCHED (`toolCalls`), postToolUse/postToolUseFailure carry `toolName`/`toolArgs`, and inside a subagent every event's `sessionId` is the subagent's `agentId`. Deliberately permissive (unknown fields allowed): the runtime adds fields between releases and the adapter reads only the keys tools.yaml names, failing closed on a tool-call shape it cannot read.",
+    "type": "object",
+    "properties": {
+        "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The host session — inside a subagent, the subagent's agentId."
+        },
+        "cwd": {
+            "type": "string",
+            "description": "The working directory of the session (absolute; a Windows path on Windows)."
+        },
+        "timestamp": {
+            "type": ["integer", "string"],
+            "description": "Event time (epoch milliseconds in the observed runtime). Absent on preToolUse."
+        },
+        "agentId": {
+            "type": "string",
+            "description": "subagentStart/subagentStop: the subagent's id; inside a subagent: its own id."
+        },
+        "agentType": {
+            "type": "string",
+            "description": "The custom agent's name (the `task` tool's agent_type)."
+        },
+        "agentName": {
+            "type": "string"
+        },
+        "parentAgentId": {
+            "type": "string",
+            "description": "The dispatching session's id, on subagent events and inside a subagent."
+        },
+        "toolCalls": {
+            "type": "array",
+            "description": "preToolUse (observed): every tool call of the batch the model issued.",
+            "items": {
+                "$ref": "#/$defs/toolCall"
+            }
+        },
+        "toolName": {
+            "type": "string",
+            "description": "postToolUse/postToolUseFailure (and the documented single-call preToolUse shape)."
+        },
+        "toolArgs": {
+            "description": "The tool's arguments — an object, or (documented shape) a JSON-encoded string.",
+            "type": ["object", "string"]
+        },
+        "toolResult": {
+            "type": "object",
+            "properties": {
+                "resultType": {
+                    "type": "string"
+                },
+                "textResultForLlm": {
+                    "type": "string"
+                }
+            }
+        },
+        "error": {
+            "description": "postToolUseFailure / errorOccurred: the failure.",
+            "type": ["string", "object"]
+        },
+        "prompt": {
+            "type": "string"
+        },
+        "transformedPrompt": {
+            "type": "string",
+            "description": "userPromptTransformed: the model-facing prompt the hook may replace."
+        },
+        "source": {
+            "type": "string"
+        },
+        "reason": {
+            "type": "string"
+        },
+        "stopReason": {
+            "type": "string"
+        },
+        "response": {
+            "type": "string",
+            "description": "subagentStop: the subagent's final response."
+        }
+    },
+    "$defs": {
+        "toolCall": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "args": {
+                    "type": ["object", "string"]
+                }
+            }
+        }
+    }
+}

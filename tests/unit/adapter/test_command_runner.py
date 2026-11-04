@@ -54,7 +54,7 @@ class TestSubprocessCommandRunner:
 
         assert process.argv == (
             sys.executable,
-            "/framework/harness.py",
+            str(Path("/framework/harness.py")),
             "check-step-authorization",
             "--session-id",
             "s-1",

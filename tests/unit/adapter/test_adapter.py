@@ -10,7 +10,14 @@ from typing import Any, Mapping
 import pytest
 
 from adapter import Adapter, run_hook_entry
-from conftest import FakeCommandRunner, build_error_report, build_report, queue_reports
+from command_runner import HarnessCommandError
+from conftest import (
+    FakeCommandRunner,
+    RunnerCall,
+    build_error_report,
+    build_report,
+    queue_reports,
+)
 from hook_binding import load_hook_binding
 from hook_classifier import HookClassifier
 from hook_event import HookEvent
@@ -683,7 +690,7 @@ class TestAdapter:
             _event(
                 _pre_tool_payload(
                     "run_in_terminal",
-                    {"command": "harness.py resolve-step --workflow v --session-id forged"},
+                    {"command": "harness.py resolve-step --workflow-slug v --session-id forged"},
                 )
             )
         )
@@ -708,7 +715,7 @@ class TestAdapter:
                     "run_in_terminal",
                     {
                         "command": (
-                            "harness.py resolve-step-model --workflow v "
+                            "harness.py resolve-step-model --workflow-slug v "
                             "--parent-session-id forged"
                         )
                     },
@@ -749,8 +756,7 @@ class TestAdapter:
         self, make_adapter, assert_valid_stdout
     ) -> None:
         """Adapter spec H4, rule 3 / invariant 4: deny when resolution returns None — the
-        tool call IS the harness command about to execute, so letting it run un-rewritten
-        would invoke a harness function with no attributable session at all.
+        hook would otherwise invoke a harness function with no attributable session.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -759,7 +765,7 @@ class TestAdapter:
             _event(
                 _pre_tool_payload(
                     "run_in_terminal",
-                    {"command": "harness.py resolve-step --workflow verification"},
+                    {"command": "harness.py resolve-step --workflow-slug verification"},
                 )
             )
         )
@@ -768,14 +774,15 @@ class TestAdapter:
         assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert runner.calls == []
 
-    def test_stamps_the_resolved_session_onto_the_allowed_command(
+    def test_runs_the_agent_request_itself_with_the_resolved_session(
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
-        """Adapter spec H4, rule 4 / invariant 2: the stamped id is resolved from the
-        envelope `session_id` — the same host-observed value H0's opening derives from,
-        never from any model-authored argument (core function 0, invariant 2).
+        """Adapter spec H4, rule 4 / invariant 2: the hook invokes function 3 itself, with
+        the session resolved from the envelope `session_id` — the same host-observed value
+        H0's opening derives from, never from any model-authored argument.
         """
-        runner = FakeCommandRunner()
+        report = build_report("resolve-step", "no-next-step", session_id=TURN_SESSION)
+        runner = FakeCommandRunner(reports=queue_reports(resolve_step=[report]))
         adapter = make_adapter(runner)
         tracker.reset_current(HOST_SESSION, TURN_SESSION)
 
@@ -783,30 +790,146 @@ class TestAdapter:
             _event(
                 _pre_tool_payload(
                     "run_in_terminal",
-                    {"command": "harness.py resolve-step --workflow verification"},
+                    {"command": "harness.py resolve-step --workflow-slug verification"},
                 )
             )
         )
 
-        rendered = assert_valid_stdout(decision.stdout)
-        assert rendered["hookSpecificOutput"]["updatedInput"]["command"] == (
-            f"harness.py resolve-step --workflow verification --session-id {TURN_SESSION}"
+        assert runner.calls == [
+            RunnerCall(
+                function="resolve-step",
+                inquiry={"workflowSlug": "verification", "sessionId": TURN_SESSION},
+            )
+        ]
+        hook_output = assert_valid_stdout(decision.stdout)["hookSpecificOutput"]
+        assert hook_output["permissionDecision"] == "deny"
+        reason = hook_output["permissionDecisionReason"]
+        assert reason.startswith("SAFe agentic harness RESULT (resolve-step)")
+        assert json.loads(reason.split("\n\n", 1)[1]) == report
+        assert "not a failure" in hook_output["additionalContext"]
+
+    def test_never_edits_the_agent_command(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        """Adapter spec H4, invariant 1: no adapter writes an agent's command — no
+        `updatedInput`, and the payload's own `tool_input` is left untouched; the terminal
+        never runs the line (the decision is always a deny carrying the answer).
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        tool_input = {
+            "command": "python3 harness.py resolve-step-model --workflow-slug verification",
+            "explanation": "pick the model",
+            "isBackground": False,
+        }
+        payload = _pre_tool_payload("run_in_terminal", tool_input)
+
+        decision = adapter.handle_hook_event(_event(payload))
+
+        hook_output = assert_valid_stdout(decision.stdout)["hookSpecificOutput"]
+        assert "updatedInput" not in hook_output
+        assert "updatedInput" not in decision.stdout
+        assert hook_output["permissionDecision"] == "deny"
+        assert payload["tool_input"] == tool_input
+        assert runner.list_functions() == ["resolve-step-model"]
+
+    def test_attributes_a_request_inside_a_subagent_to_the_step_session(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        """Adapter spec H4, rule 3: attribution is the tracker's current session for the
+        envelope `session_id` — inside a dispatched subagent that is the step session.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        tracker.push_current(HOST_SESSION, "step-session-a")
+
+        adapter.handle_hook_event(
+            _event(
+                _pre_tool_payload(
+                    "run_in_terminal",
+                    {"command": "harness.py resolve-step --workflow-slug verification"},
+                )
+            )
+        )
+
+        assert [call.inquiry["sessionId"] for call in runner.calls] == ["step-session-a"]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            r"& C:\venv\Scripts\python.exe C:\fw\harness.py resolve-step --workflow-slug v",
+            "py -3 'C:/Program Files/fw/harness.py' resolve-step --workflow-slug v",
+            "/opt/venv/bin/python3 /opt/fw/harness.py resolve-step --workflow-slug v",
+        ],
+    )
+    def test_accepts_a_plain_request_with_any_python_interpreter_and_harness_path(
+        self, make_adapter, tracker: SessionTracker, command: str
+    ) -> None:
+        """Adapter spec H4, rule 4: the request form is the plain harness line — Windows
+        backslash paths, quoted paths and `py -3` included; the hook runs its OWN harness.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        adapter.handle_hook_event(_event(_pre_tool_payload("run_in_terminal", {"command": command})))
+
+        assert runner.calls == [
+            RunnerCall(
+                function="resolve-step",
+                inquiry={"workflowSlug": "v", "sessionId": TURN_SESSION},
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "harness.py resolve-step --workflow-slug v && rm -rf portfolio",
+            "harness.py resolve-step --workflow-slug v > out.json",
+            "FRAMEWORK_DIR=/x harness.py resolve-step --workflow-slug v",
+            "node harness.py resolve-step --workflow-slug v",
+            "harness.py resolve-step --workflow-slug",
+            "harness.py resolve-step --workflow-slug v --workflow-slug w",
+            "harness.py resolve-step stray --workflow-slug v",
+        ],
+    )
+    def test_rejects_anything_but_one_plain_request_without_running_the_harness(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout, command: str
+    ) -> None:
+        """Adapter spec H4, rule 4: chaining, redirection, env prefixes, a non-Python
+        interpreter, a missing/duplicate value or a stray token are rejected — the hook
+        never guesses what the agent meant, and the shell never runs the line.
+        """
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        decision = adapter.handle_hook_event(
+            _event(_pre_tool_payload("run_in_terminal", {"command": command}))
+        )
+
+        hook_output = assert_valid_stdout(decision.stdout)["hookSpecificOutput"]
+        assert hook_output["permissionDecision"] == "deny"
+        assert hook_output["permissionDecisionReason"].startswith(
+            "SAFe agentic harness REJECTED"
         )
         assert runner.calls == []
 
-    def test_stamps_the_hosts_bound_models_onto_a_model_resolution_request(
-        self, make_adapter, adapter_dir: Path, tracker: SessionTracker, assert_valid_stdout
+    def test_supplies_the_hosts_bound_models_to_a_model_resolution_request(
+        self, make_adapter, adapter_dir: Path, tracker: SessionTracker
     ) -> None:
         """Core function 4, invariant 6: the model is ranked only among the models this
-        host binds — the adapter stamps one `--bound-model` per `models.yaml` slug onto
-        `resolve-step-model`, and onto nothing else.
+        host binds — the adapter adds every `models.yaml` slug as `boundModels` to the
+        `resolve-step-model` inquiry it runs, and to nothing else.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
         tracker.reset_current(HOST_SESSION, TURN_SESSION)
         bound = sorted(load_hook_binding(adapter_dir).model_ids)
 
-        decision = adapter.handle_hook_event(
+        adapter.handle_hook_event(
             _event(
                 _pre_tool_payload(
                     "run_in_terminal", {"command": "harness.py resolve-step-model"}
@@ -814,15 +937,13 @@ class TestAdapter:
             )
         )
 
-        command = assert_valid_stdout(decision.stdout)["hookSpecificOutput"][
-            "updatedInput"
-        ]["command"]
         assert bound
-        assert command == (
-            f"harness.py resolve-step-model --session-id {TURN_SESSION}"
-            + "".join(f" --bound-model {slug}" for slug in bound)
-        )
-        assert runner.calls == []
+        assert runner.calls == [
+            RunnerCall(
+                function="resolve-step-model",
+                inquiry={"boundModels": bound, "sessionId": TURN_SESSION},
+            )
+        ]
 
     def test_denies_a_command_carrying_model_authored_bound_models(
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
@@ -846,6 +967,38 @@ class TestAdapter:
         rendered = assert_valid_stdout(decision.stdout)
         assert rendered["hookSpecificOutput"]["permissionDecision"] == "deny"
         assert "--bound-model" in rendered["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_relays_a_harness_refusal_and_hides_any_other_failure(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout, capsys
+    ) -> None:
+        """Adapter spec H4, Output: a harness refusal line (`harness: <code>: <msg>`) is the
+        agent's to read; any other failure is reported generically, details to stderr.
+        """
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        command = {"command": "harness.py resolve-step --workflow-slug verification"}
+        refused = FakeCommandRunner(
+            failure=HarnessCommandError(
+                "exit 2", refusal="harness: usage-error: unknown workflow 'verification'"
+            )
+        )
+        crashed = FakeCommandRunner(failure=RuntimeError("secret /home/x/traceback"))
+
+        refusal = assert_valid_stdout(
+            make_adapter(refused).handle_hook_event(
+                _event(_pre_tool_payload("run_in_terminal", command))
+            ).stdout
+        )["hookSpecificOutput"]["permissionDecisionReason"]
+        failure = assert_valid_stdout(
+            make_adapter(crashed).handle_hook_event(
+                _event(_pre_tool_payload("run_in_terminal", command))
+            ).stdout
+        )["hookSpecificOutput"]["permissionDecisionReason"]
+
+        assert refusal.startswith("SAFe agentic harness REJECTED")
+        assert "unknown workflow 'verification'" in refusal
+        assert failure.startswith("SAFe agentic harness REJECTED")
+        assert "secret" not in failure
+        assert "secret" in capsys.readouterr().err
 
     def test_checks_the_landed_write_once_per_tool_call_with_the_whole_path_set(
         self, make_adapter, tracker: SessionTracker, assert_valid_inquiry, assert_valid_stdout
@@ -1174,7 +1327,7 @@ class TestAdapter:
         self, make_adapter, tmp_path: Path, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
         """Adapter spec H4, rule 3: an unresolvable current session denies — the adapter
-        never stamps a session it cannot resolve.
+        never runs a harness request for a session it cannot resolve.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -1184,7 +1337,7 @@ class TestAdapter:
             _event(
                 _pre_tool_payload(
                     "run_in_terminal",
-                    {"command": "python3 harness.py resolve-step-model --workflow v"},
+                    {"command": "python3 harness.py resolve-step-model --workflow-slug v"},
                 )
             )
         )

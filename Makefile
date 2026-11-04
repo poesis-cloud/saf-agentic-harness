@@ -13,7 +13,7 @@ PYTHON ?= python3
 PYTEST := PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -p no:cacheprovider
 HOOKS_DEST ?= $(FRAMEWORK_DIR)/.github/hooks
 
-.PHONY: verify test unit functional adapter install-hooks
+.PHONY: verify test unit functional adapter install-hooks install-hooks-copilot-cli
 
 ## verify: the full pytest suite in one invocation — the unit plane (src/ units + the adapter's
 ## own units), the functional plane (every harness function end to end through the composition
@@ -87,3 +87,21 @@ install-hooks:
 		--agents-dir "$(AGENTS_DIR)" \
 		--agents-dest "$(AGENTS_DEST)" \
 		--settings-dest "$(SETTINGS_DEST)"
+
+## install-hooks-copilot-cli: render the GitHub Copilot app / Copilot CLI hooks
+## (adapters/github-copilot-cli) into the framework's rendered plugin bundle: the global
+## hooks.json and the orchestrators' agent-scoped H0 block. Machine-specific output, never
+## committed. On Windows run install.py directly (see adapters/github-copilot-cli/README.md).
+##
+##   FRAMEWORK_DIR  required — the framework CHECKOUT (not the bundle).
+##   BUNDLE_DIR     required — the framework's rendered Copilot plugin bundle.
+##   WORKSPACE_DIR  optional — absolute FRAMEWORK_WORKSPACE_DIR override.
+##   HARNESS_PYTHON absolute interpreter the hooks run under; defaults to the interpreter
+##                  running the installer ($(PYTHON)). It must import requirements.txt or the
+##                  install is refused. Recorded as `exec` and SAF_HARNESS_PYTHON in every entry.
+install-hooks-copilot-cli:
+	$(PYTHON) adapters/github-copilot-cli/install.py \
+		$(if $(HARNESS_PYTHON),--python "$(HARNESS_PYTHON)") \
+		--framework-dir "$(FRAMEWORK_DIR)" \
+		--bundle-dir "$(BUNDLE_DIR)" \
+		$(if $(WORKSPACE_DIR),--workspace-dir "$(WORKSPACE_DIR)")

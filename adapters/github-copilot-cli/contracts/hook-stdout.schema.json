@@ -1,0 +1,91 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://saf/adapters/github-copilot-cli/contracts/hook-stdout/v1",
+    "title": "github-copilot-cli hook stdout contract",
+    "description": "Seam 4 of the adapter's invocation plumbing: the single JSON object the adapter prints on stdout (exit 0) for the Copilot CLI runtime to honor. Empty stdout is a valid pass-through and is NOT governed by this contract. The adapter never emits `permissionDecision: allow` (an authorized call passes through to the runtime's normal permission flow) and never `ask` (denied in autopilot and cloud agent), and never `modifiedArgs`: it never edits an agent's command. Grounded in https://docs.github.com/en/copilot/reference/hooks-reference (preToolUse decision control, postToolUse output, userPromptTransformed, sessionStart/subagentStart additionalContext).",
+    "type": "object",
+    "oneOf": [
+        {
+            "$ref": "#/$defs/denyDecision"
+        },
+        {
+            "$ref": "#/$defs/transformedPromptDecision"
+        },
+        {
+            "$ref": "#/$defs/postToolUseDecision"
+        },
+        {
+            "$ref": "#/$defs/contextDecision"
+        }
+    ],
+    "$defs": {
+        "denyDecision": {
+            "description": "preToolUse — H2/H3 deny, H4 (the hook-executed harness request: its report as a RESULT reason, or a REJECTED reason), and every fail-closed path. Covers the whole batch.",
+            "type": "object",
+            "required": ["permissionDecision", "permissionDecisionReason"],
+            "additionalProperties": false,
+            "properties": {
+                "permissionDecision": {
+                    "const": "deny"
+                },
+                "permissionDecisionReason": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "transformedPromptDecision": {
+            "description": "userPromptTransformed — H0: the orchestrator's workflow context prepended to the model-facing prompt (userPromptSubmitted output is ignored by the runtime).",
+            "type": "object",
+            "required": ["modifiedTransformedPrompt"],
+            "additionalProperties": false,
+            "properties": {
+                "modifiedTransformedPrompt": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            }
+        },
+        "postToolUseDecision": {
+            "description": "postToolUse — H5 write rejected: the tool result replaced (resultType must be success) plus the retry directive.",
+            "type": "object",
+            "required": ["modifiedResult"],
+            "additionalProperties": false,
+            "properties": {
+                "modifiedResult": {
+                    "type": "object",
+                    "required": ["resultType", "textResultForLlm"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "resultType": {
+                            "const": "success"
+                        },
+                        "textResultForLlm": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                },
+                "additionalContext": {
+                    "$ref": "#/$defs/context"
+                }
+            }
+        },
+        "contextDecision": {
+            "description": "sessionStart (harness command line), subagentStart (H1 step context), postToolUse (H5/H6 directives, late H0 context).",
+            "type": "object",
+            "required": ["additionalContext"],
+            "additionalProperties": false,
+            "properties": {
+                "additionalContext": {
+                    "$ref": "#/$defs/context"
+                }
+            }
+        },
+        "context": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10240
+        }
+    }
+}

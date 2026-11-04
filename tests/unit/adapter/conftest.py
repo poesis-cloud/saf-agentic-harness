@@ -165,6 +165,11 @@ _DEFAULT_SUCCESS: Mapping[str, tuple[str, Mapping[str, Any]]] = {
     "check-step-postconditions": ("pass", {"conditionChecks": []}),
     "check-step-authorization": ("allowed", {"authorization": _DEFAULT_AUTHORIZATION}),
     "check-step-artifact": ("valid", {}),
+    "resolve-step": ("no-next-step", {}),
+    "resolve-step-model": (
+        "resolved",
+        {"profile": {"slug": "balanced", "score": 7, "costRank": 2, "reason": "default"}},
+    ),
 }
 
 
