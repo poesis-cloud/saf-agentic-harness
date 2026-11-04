@@ -135,6 +135,17 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   unrelated id. The scoped H0 of an orchestrator acting a step no longer re-registers the
   step as a root turn, and injects no workflow context into it. Before this fix, the actor's
   commits landed in a stray root session, and function 10 found no delivery.
+- **YAML artifacts:** `.yaml`/`.yml` artifacts are read as YAML, no longer with `json.loads`,
+  in validation, discovery and CEL data. Artifact YAML, frontmatter included, loads in the
+  JSON data model: an unquoted `2026-11-04` stays a string, as JSON Schema 2020-12 expects.
+  Malformed YAML is a `parse` finding.
+- **`github-copilot-cli`, shell guard (I9):** a relative path token resolves against the
+  payload `cwd`, and git pathspecs (`<rev>:<path>`, tokens after `--`) count as path
+  references. So `New-Item portfolio\…` run in the workspace, or `git show HEAD:<path>`, is
+  denied like an absolute path.
+- **Hook-executed H4 attribution:** both adapters pass the tracked parent session with a
+  `resolve-step`/`resolve-step-model` request, so a step session's request is journaled under
+  its parent instead of `parentSessionId: null`.
 
 ### Known alpha limitations
 
