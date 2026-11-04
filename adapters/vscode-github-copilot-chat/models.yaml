@@ -10,7 +10,9 @@
 #
 # Scope: every `model_picker_enabled: true` chat model from this host's models.json catalog as of
 # 2026-07-04 (20 models). Disabled/legacy/embedding catalog entries are intentionally excluded —
-# they are not selectable dispatch targets.
+# they are not selectable dispatch targets. This file MUST track the models the host currently
+# offers, which can change after install: every hook load refuses a framework catalogue naming a
+# profile slug this file does not bind.
 modelBindings:
   gpt-5.5:
     hostModelId: "GPT-5.5 (copilot)"

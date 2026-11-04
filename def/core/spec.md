@@ -1613,43 +1613,25 @@ journaling or step-scoped function refuses a correctly-attributed session.
 
 **Mediated attribution rule.** A trusted mediated-invocation surface is valid only when it can
 populate `sessionId` and `parentSessionId` from a host-observed source that the model
-did not author. Acceptable mechanisms include a per-session process environment or a
+did not author. Acceptable mechanisms include a per-session process environment, a
 host-native command/tool surface that passes session identity outside the tool arguments
-visible to the agent. A tool-boundary stamp that merely rewrites a model-authored command
-argument is not sufficient. If a host lacks such a mechanism, functions 3–4 are not exposed
-as mediated commands for that host; whatever specifies that host's binding must state that
-limitation.
-
-**Narrow tool-boundary-stamp exception.** A host binding MAY still expose functions 3–4
-through a tool-boundary stamp — otherwise insufficient per the rule above — ONLY when ALL of
-the following hold, each stated explicitly in that host's binding:
-
-1. The stamped invocation's shape is **fully framework-authored and structurally
-   recognized** (a fixed command pattern the framework's own instructions dictate verbatim),
-   never a loosely-matched heuristic over open-ended agent phrasing.
-2. Any invocation already carrying model-authored attribution is **denied outright**, never
-   merely overwritten.
-3. The [mediated-invocation backstop](#invocation-surfaces-one-command-system) below is in
-   force, so an unresolvable or unregistered id fails closed at the harness itself regardless
-   of the stamp's own reliability.
-4. The binding names this an **explicit, interim exception** — not a permanent design — and
-   tracks the structural fix that would remove the need for it (a host-native surface that
-   passes attribution outside model-visible arguments, per the rule above, once one exists
-   for that host).
-
-Without all four, the rule above applies without exception: the host MUST NOT expose
-functions 3–4 as mediated commands.
+visible to the agent, or a host hook that intercepts the agent's request at the tool boundary
+and invokes the command ITSELF — attributed from its own event payload and bookkeeping,
+exactly as a hook invocation is — returning the report to the agent as the tool's response,
+so the agent's own call never executes. Editing a model-authored command — rewriting or
+stamping an attribution argument onto it — is never sufficient and never allowed: whatever
+binds a host adapts host events to harness commands; it does not author the agent's
+commands. If a host lacks such a mechanism, functions 3–4 are not exposed as mediated
+commands for that host; whatever specifies that host's binding must state that limitation.
 
 **Mediated-invocation backstop.** Independent of whatever attribution mechanism a host
-binding uses — sufficient, exception-qualified, or neither — every mediated invocation's
-`sessionId` is validated
+binding uses, every mediated invocation's `sessionId` is validated
 against the harness's own session registry before functions 3–4 proceed: an id that does not
 resolve to a currently open, registered session (C7/C8) is rejected outright, never silently
 trusted and never defaulted to some other session. This is a backstop, not a substitute for
 the rule above: it bounds the damage of a weaker-than-required host mechanism (a
-misattributed or model-guessed id fails closed at the harness itself, visibly, rather than
-silently corrupting a foreign session's log) but does not by itself make that mechanism
-sufficient — a host binding relying on the exception above still MUST state it explicitly.
+misattributed id fails closed at the harness itself, visibly, rather than silently corrupting
+a foreign session's log) but does not by itself make that mechanism sufficient.
 
 There is no hook logic inside the harness core: the **harness core** (`src/` + the function
 commands) is hook- and host-blind by package graph — it exposes exactly one command per

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping
 
 from commands.check_step_authorization_inquiry import CheckStepAuthorizationInquiry
 from commands.command import Command
 from services.checking.step_authorization_checker import StepAuthorizationChecker
 from stores.session_log_store.report import Report
+from utils.artifact_path import parse_artifact_path
 from utils.schema_validator import SchemaValidator
 
 
@@ -35,7 +35,7 @@ class CheckStepAuthorizationCommand(Command):
         return CheckStepAuthorizationInquiry(
             session_id=data["sessionId"],
             parent_session_id=data.get("parentSessionId"),
-            artifact_path=Path(data["artifactPath"]),
+            artifact_path=parse_artifact_path(data["artifactPath"]),
             action=data["action"],
         )
 

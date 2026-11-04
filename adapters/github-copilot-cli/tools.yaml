@@ -1,0 +1,65 @@
+# GitHub Copilot CLI / GitHub Copilot app environment binding (env-specific tool/payload map).
+# Validated by contracts/conf/adapters/tools.conf.schema.json. Every tool name and payload key
+# the adapter classifies on is DATA here, so a runtime that renames a field is corrected in this
+# file, not in code. Field names are AUTHORITATIVE from live captures — the Copilot app on
+# Windows (runtime 1.0.102) and the standalone CLI on Linux (1.0.105), see
+# tests/functional/adapter_copilot_cli/fixtures/ — where they differ from the public reference.
+
+# Write tools -> ACL action. The runtime's file tools take an absolute host path in `path`.
+writeTools:
+  create: create
+  edit: update
+  str_replace_editor: update # legacy multi-command editor; its `command` refines the action below
+deleteTools: []
+# Freeform patch tools: targets live only in the patch text's `*** Add/Update/Delete File:` and
+# `*** Move to:` headers. Not offered by the runtime as of 1.0.105 (CLI) / 1.0.102 (app) — declared so that, if a
+# model/runtime ever exposes one, a patch whose targets cannot be parsed is DENIED (fail closed).
+patchTools: [apply_patch]
+patchKeys: [input, patch]
+writeToolSubcommands:
+  str_replace_editor:
+    key: command
+    readOnly: [view]
+    actions: { create: create }
+
+# Single-call shape: postToolUse / postToolUseFailure on both hosts, and preToolUse on the
+# standalone CLI (observed, 1.0.105: one firing per tool call).
+toolKeys: [toolName]
+inputKeys: [toolArgs]
+# BATCHED preToolUse shape observed in the app (1.0.102): {"toolCalls": [{"id", "name", "args"}, ...]}.
+toolCallsKeys: [toolCalls]
+toolCallNameKeys: [name]
+toolCallArgsKeys: [args]
+toolCallIdKeys: [id]
+pathKeys: [path]
+nestedPathKeys: []
+
+# Session identity (host-observed, never model-authored). Inside a subagent EVERY event carries
+# sessionId = that subagent's agentId and parentAgentId = its dispatcher's id; subagentStart /
+# subagentStop carry the DISPATCHER's sessionId and the subagent's agentId / agentType.
+hostSessionKeys: [sessionId]
+hostParentSessionKeys: [parentAgentId]
+hostStepSessionKeys: [agentId]
+hostStepActorKeys: [agentType, agentName]
+# Plugin-delivered agents are namespaced by the runtime: agentType / agentName (and the `task`
+# agent_type) read '<plugin-name>:<agent>' (observed live, standalone CLI 1.0.105). The acting
+# framework agent is the part after the last ':'.
+hostAgentNamespaceSeparator: ":"
+hostTimestampKeys: [timestamp]
+hostCwdKeys: [cwd]
+
+# Subagent dispatch: `task` (args agent_type, name, description, prompt, model?, mode?).
+dispatchTools: [task]
+dispatchAgentKeys: [agent_type]
+dispatchModelKeys: [model]
+# `mode: background` returns before the step ends — its postconditions could never be checked
+# at the dispatch's return, so it is denied in governed sessions.
+dispatchModeKeys: [mode]
+asyncDispatchModes: [background]
+
+# Harness request surface (H4): a shell command naming `harness.py resolve-step[-model]` is a
+# REQUEST the preToolUse hook answers by running the function itself; the shell never runs it.
+mediatedCommandTools: [powershell, bash]
+mediatedCommandKeys: [command]
+# Guarded shell class (I9): advisory textual guard on every other shell command.
+guardedShellTools: [powershell, bash]

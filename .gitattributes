@@ -1,0 +1,4 @@
+# Shell entries are exec'd by bash (Git Bash on Windows): a CRLF checkout breaks them.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

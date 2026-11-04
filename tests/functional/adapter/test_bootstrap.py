@@ -10,6 +10,7 @@ with an exit the host would treat as non-blocking and fail open on.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -20,7 +21,9 @@ import yaml
 
 from harness_stub import HarnessStub
 from hook_dispatch import HookRun, run_hook
+from posix_shell import IS_WINDOWS, find_git_bash
 from host_events import ORCHESTRATOR_AGENT, pre_tool_use, user_prompt_submit
+from model_catalogue import write_catalogue
 from stub_framework import INSTRUCTION_BODY, Framework
 
 _LAYOUT_ENV_FILE = (
@@ -35,10 +38,20 @@ def bare_path(tmp_path: Path) -> str:
     """A `PATH` with no interpreter on it: only what `dispatch.sh` itself needs."""
     bin_dir = tmp_path / "bare-bin"
     bin_dir.mkdir()
+    located = {}
     for program in ("bash", "dirname"):
-        located = shutil.which(program)
-        assert located is not None, f"{program} is required to run dispatch.sh"
-        (bin_dir / program).symlink_to(located)
+        found = find_git_bash() if program == "bash" else shutil.which(program)
+        if found is None and IS_WINDOWS:
+            pytest.skip(f"Git for Windows {program} is required to run dispatch.sh")
+        assert found is not None, f"{program} is required to run dispatch.sh"
+        located[program] = found
+    try:
+        for program, found in located.items():
+            (bin_dir / program).symlink_to(found)
+    except OSError:
+        # Windows refuses unprivileged symlinks: put the programs' own directories on
+        # PATH instead (Git for Windows ships no Python beside bash or dirname).
+        return os.pathsep.join(dict.fromkeys(str(Path(found).parent) for found in located.values()))
     return str(bin_dir)
 
 
@@ -146,4 +159,27 @@ class TestHookBootstrap:
 
         assert run.exit_code == 2
         assert "tools.conf.schema.json" in run.stderr
+        assert harness_stub.calls == ()
+
+    def test_a_catalogue_profile_the_binding_does_not_bind_fails_closed_visibly(
+        self,
+        framework: Framework,
+        registration_env: dict[str, str],
+        harness_stub: HarnessStub,
+    ) -> None:
+        """Core fn 4: a framework catalogue naming a profile `models.yaml` does not bind is
+        unroutable — every hook load refuses it (exit 2, the unbound slug named), whatever
+        the event, before any harness command runs."""
+        write_catalogue(framework.root, ["claude-haiku-4.5", "not-a-host-model"])
+
+        run = _fire(
+            framework,
+            registration_env,
+            event="PreToolUse",
+            payload=pre_tool_use("create_file", {"filePath": "portfolio/a.md"}),
+            agent=None,
+        )
+
+        assert run.exit_code == 2
+        assert "not-a-host-model" in run.stderr and "models.yaml" in run.stderr
         assert harness_stub.calls == ()

@@ -17,6 +17,7 @@ from binding_contract import (  # noqa: E402
     TOOLS_CONTRACT,
     BindingContractError,
     load_contract_bound_yaml,
+    require_catalogue_bound,
     require_non_empty,
 )
 
@@ -211,19 +212,27 @@ def _is_verbatim_path(raw: str) -> bool:
 
 
 def load_hook_binding(
-    adapter_dir: Path, guarded_path_markers: tuple[str, ...] = ()
+    adapter_dir: Path,
+    guarded_path_markers: tuple[str, ...] = (),
+    *,
+    framework_dir: Path | None = None,
 ) -> HookBinding:
     """Load this adapter's binding from its own YAML sources.
 
     Spec (adapter, I15): loaded with the adapter's own tools — the harness's
     `ConfigLoader` is not a dependency of this component. Both files are validated
     against their adapter contracts at load (fail-fast): a malformed binding raises
-    `BindingContractError` rather than degrading into empty probes.
+    `BindingContractError` rather than degrading into empty probes. Given the framework
+    root (the hook bootstrap always passes it), the framework model catalogue is checked
+    against `models.yaml` on this very load: an unbound profile slug is refused.
     """
     tools_path = adapter_dir / _TOOLS_FILENAME
     tools = load_contract_bound_yaml(tools_path, TOOLS_CONTRACT)
     _require_gating_probes(tools, source=str(tools_path))
-    models = load_contract_bound_yaml(adapter_dir / _MODELS_FILENAME, MODELS_CONTRACT)
+    models_path = adapter_dir / _MODELS_FILENAME
+    models = load_contract_bound_yaml(models_path, MODELS_CONTRACT)
+    if framework_dir is not None:
+        require_catalogue_bound(models, framework_dir, source=str(models_path))
     model_bindings = models.get(_MODEL_BINDINGS_KEY) or {}
     return HookBinding(
         write_tools=dict(tools.get("writeTools") or {}),

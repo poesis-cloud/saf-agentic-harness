@@ -57,7 +57,7 @@
     },
     "patchKeys": {
       "$ref": "#/$defs/keyList",
-      "description": "Ordered payload field names to probe for a patch document (the '*** Begin Patch' format): every '*** Add File:' / '*** Update File:' / '*** Delete File:' / '*** Move to:' header names an artifact path, with the action the header performs."
+      "description": "Ordered payload field names to probe for a patch document (the '*** Begin Patch' format): every '*** Add File:' / '*** Update File:' / '*** Delete File:' / '*** Move to:' header names an artifact path, with the action the header performs. For an adapter declaring `patchTools`, the keys are probed in that tool's arguments, and a string tool input is itself the patch text."
     },
     "hostSessionKeys": {
       "$ref": "#/$defs/keyList",
@@ -74,6 +74,11 @@
     "hostStepActorKeys": {
       "$ref": "#/$defs/keyList",
       "description": "Ordered payload field names to probe for the step session's acting agent identity."
+    },
+    "hostAgentNamespaceSeparator": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Separator the host prefixes package-delivered agent identities with (e.g. ':' in '<plugin>:<agent>'). When set, the adapter keeps only the part after the LAST separator as the acting agent, so a plugin-delivered agent still resolves to its framework agent name."
     },
     "dispatchTools": {
       "description": "Host tool names that start a child step-session (subagent dispatch).",
@@ -93,7 +98,7 @@
       "description": "Ordered payload field names to probe for the model profile identifier."
     },
     "mediatedCommandTools": {
-      "description": "Host tool names carrying agent-authored command strings that may invoke the harness command entry point (the mediated attribution surface — functions 3–4 only).",
+      "description": "Host tool names whose agent-authored command strings the adapter reads as harness REQUESTS (functions 3–4 only): the hook runs the requested function itself for the host-observed session; the command is never run or edited.",
       "type": "array",
       "items": {
         "type": "string",
@@ -112,6 +117,90 @@
         "type": "string",
         "minLength": 1,
         "description": "One host tool name."
+      }
+    },
+    "patchTools": {
+      "description": "Host tool names whose input is freeform patch text naming its targets only in `*** Add/Update/Delete File:` / `*** Move to:` headers. Their target paths are parsed from the patch; a patch whose targets cannot be extracted is DENIED at the pre-tool boundary (fail closed).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
+    },
+    "writeToolSubcommands": {
+      "description": "Write tools whose action depends on one of their own arguments: `key` names that argument, `readOnly` lists values that make the call a non-write, `actions` maps values to an action verb (other values keep the writeTools verb).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The argument naming the subcommand."
+          },
+          "readOnly": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "description": "One read-only subcommand."
+            },
+            "description": "Subcommands that do not write."
+          },
+          "actions": {
+            "type": "object",
+            "additionalProperties": {
+              "enum": [
+                "create",
+                "update"
+              ],
+              "description": "The harness action verb this subcommand performs."
+            },
+            "description": "subcommand -> action verb."
+          }
+        }
+      }
+    },
+    "toolCallsKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for a BATCHED tool-call list (one pre-tool firing covering several calls); when present it takes precedence over toolKeys/inputKeys."
+    },
+    "toolCallNameKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the host tool name."
+    },
+    "toolCallArgsKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the tool's arguments."
+    },
+    "toolCallIdKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in one batched tool-call entry, for the host tool-call id."
+    },
+    "hostTimestampKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host-observed event timestamp."
+    },
+    "hostCwdKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host-observed working directory relative tool paths resolve against."
+    },
+    "dispatchModeKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered argument field names to probe, on a dispatch tool, for its execution mode."
+    },
+    "asyncDispatchModes": {
+      "description": "Dispatch-mode values that return before the dispatched step ends (asynchronous/background dispatch).",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One dispatch-mode value."
       }
     }
   },

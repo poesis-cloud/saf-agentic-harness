@@ -19,8 +19,15 @@ class HarnessCommandError(RuntimeError):
     """Raised when a harness command produced no usable report.
 
     Spec (adapter, H2 invariant 1 / H3 invariant 3): the caller renders this as a DENIAL
-    at a gating boundary — a missing outcome is never an implicit allow.
+    at a gating boundary — a missing outcome is never an implicit allow. `refusal` carries
+    the harness's own refusal line (`harness: …`, its exit plane) when it printed one —
+    the only part of a failed run that may be relayed to the model (H4).
     """
+
+    def __init__(self, message: str, refusal: str | None = None) -> None:
+        """Create the error, keeping the harness's own refusal line apart."""
+        super().__init__(message)
+        self.refusal = refusal
 
 
 class CommandRunner(Protocol):
@@ -41,7 +48,14 @@ ProcessRunner = Callable[[Sequence[str]], "tuple[int, str, str]"]
 
 def run_subprocess(argv: Sequence[str]) -> tuple[int, str, str]:
     """Run one command as a child process, answering exit code, stdout, and stderr."""
-    completed = subprocess.run(list(argv), capture_output=True, text=True, check=False)
+    completed = subprocess.run(
+        list(argv),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
     return completed.returncode, completed.stdout, completed.stderr
 
 
@@ -72,7 +86,8 @@ class SubprocessCommandRunner:
         exit_code, stdout, stderr = self._run_process(argv)
         if exit_code != 0:
             raise HarnessCommandError(
-                f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}"
+                f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}",
+                refusal=_read_refusal(stderr),
             )
         try:
             report = json.loads(stdout)
@@ -85,6 +100,14 @@ class SubprocessCommandRunner:
                 f"harness command '{function}' answered {type(report).__name__}, not a report"
             )
         return report
+
+
+def _read_refusal(stderr: str) -> str | None:
+    """The harness's own refusal line — never a traceback or any other raw output."""
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    if lines and lines[-1].startswith("harness: "):
+        return lines[-1][:2000]
+    return None
 
 
 def _render_flags(inquiry: Mapping[str, Any]) -> list[str]:

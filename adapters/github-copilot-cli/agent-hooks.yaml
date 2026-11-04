@@ -1,0 +1,18 @@
+# H0 agent-scoped hook registration (env-specific) for the GitHub Copilot CLI / GitHub Copilot app.
+#
+# A `hooks:` map in a custom agent's FRONTMATTER registers hooks that run only while that agent
+# is selected — the only mechanism tying an event to an agent identity (no payload names the
+# active agent). `install.py` renders these entries once per framework ORCHESTRATOR (derived
+# from the framework's workflow catalog) into that orchestrator's agent file, between managed
+# markers, with `--agent <slug>`:
+#
+#   command: '<python>' '<adapter.py>' hook --event <event> --agent <slug> --framework-dir '<fw>'
+#   windows: & '<python>' '<adapter.py>' hook --event <event> --agent <slug> --framework-dir '<fw>'
+#
+# userPromptSubmitted registers the turn (its output is ignored by the runtime);
+# userPromptTransformed registers it if still needed and injects the workflow context through
+# `modifiedTransformedPrompt`. The background sessions the app spawns (title summarizers) never
+# select an orchestrator, so they never reach H0 and create no harness state.
+agentHooks:
+  userPromptSubmitted: { timeoutSec: 120 }
+  userPromptTransformed: { timeoutSec: 120 }

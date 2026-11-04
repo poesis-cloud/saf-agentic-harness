@@ -19,11 +19,30 @@ pinned.
   all driven by declarative workflow contracts with CEL conditions.
 - **Contracts** (`contracts/`): JSON Schemas for the framework configuration, the session and
   report logs, and the adapter bindings.
-- **One host adapter**: `vscode-github-copilot-chat`, which binds VS Code with GitHub Copilot
-  Chat agent hooks. It ships the H0–H7 hooks, the shared `adapters/dispatch.sh` funnel, and
-  the `adapters/render_hooks.py` installer.
+- **Two host adapters**:
+  - `vscode-github-copilot-chat` binds VS Code with GitHub Copilot Chat agent hooks. It ships
+    the H0–H7 hooks, the shared `adapters/dispatch.sh` funnel, and the
+    `adapters/render_hooks.py` installer. Agent harness commands are hook-executed, as for
+    the Copilot app: the `PreToolUse` hook runs one plain `run_in_terminal`
+    `resolve-step`/`resolve-step-model` request itself, for the session its tracker
+    resolves, and returns the report as the deny reason plus `additionalContext`. It no
+    longer stamps `--session-id` through `updatedInput`.
+  - `github-copilot-cli` binds the GitHub Copilot app and the Copilot CLI, which share one
+    agent runtime ([spec](def/adapter/github-copilot-cli/spec.md),
+    [README](adapters/github-copilot-cli/README.md)). It is Windows-first: hooks run
+    `adapter.py` through the recorded venv interpreter (`exec` + `args`), with no bash. Its
+    `install.py` (or `make install-hooks-copilot-cli`) adds the hooks to a framework's
+    Copilot plugin bundle: a global `hooks.json` plus the orchestrators' agent-scoped H0
+    block. It handles both `preToolUse` shapes: the standalone CLI's one call per firing and
+    the app's batch, which is denied when any of its calls is. Plugin agents, which the
+    runtime names `<plugin>:<agent>`, are governed under their framework agent name. The
+    standalone CLI (1.0.105) was verified live with a scripted model. Agent harness commands are hook-executed: the `preToolUse` hook runs one
+    plain `resolve-step`/`resolve-step-model` request itself, for the session named by the
+    payload, and returns the report as the deny reason (`SAFe agentic harness RESULT …`).
+    It never edits or runs the command, and needs no permission rule. Anything else that
+    names `harness.py` is denied.
 - **Verification**: `make verify` runs the unit, functional, and adapter planes on Python
-  3.10, 3.11 and 3.12.
+  3.10, 3.11 and 3.12. CI also runs the suite on Windows (Python 3.12).
 
 ### Install
 
@@ -33,8 +52,15 @@ pip install -r requirements.txt
 make install-hooks FRAMEWORK_DIR=<framework root> BUNDLE_DIR=<rendered bundle>
 ```
 
-Full steps are in the
-[adapter README](adapters/vscode-github-copilot-chat/README.md).
+For the GitHub Copilot app / Copilot CLI (Windows, PowerShell):
+
+```powershell
+.venv\Scripts\python adapters\github-copilot-cli\install.py `
+    --framework-dir <framework checkout> --bundle-dir <rendered plugin bundle>
+```
+
+Full steps are in the [VS Code adapter README](adapters/vscode-github-copilot-chat/README.md)
+and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 
 ### Integrity boundaries
 
@@ -50,6 +76,10 @@ Full steps are in the
 - **Hook bootstrap fails closed:** every rendered hook records `FRAMEWORK_DIR` and its
   validated interpreter. A hook that cannot bootstrap exits 2, which the host treats as
   blocking.
+- **Unroutable model catalogue fails closed:** on every hook load, both adapters refuse a
+  framework model catalogue (`conf/model-profiles.conf.yaml`) that is missing or names a
+  profile slug the adapter's `models.yaml` does not bind. Nothing is cached from install, so
+  `models.yaml` must track the models the host currently offers.
 
 ### Fixed since `v1.0.0-beta.1`
 
@@ -72,14 +102,38 @@ Full steps are in the
   and `FRAMEWORK_DIR` are recorded in each hook's `env`, and `FRAMEWORK_DIR/.env` is loaded.
 - **Release hygiene:** documentation was corrected, and pre-release tags now publish as
   GitHub pre-releases.
+- **Windows portability:**
+  - Artifact paths are read with `\` and `/` both as separators and reported in POSIX
+    form, so `portfolio\x.md` resolves like `portfolio/x.md` on every OS.
+  - A path that is not workspace-relative (absolute, drive, UNC or `..`) never resolves
+    to an artifact. It is denied as `unresolvable-resource`, even under a root
+    `<placeholder>`.
+  - `harness.py` and both adapter entries answer UTF-8 whatever the console codepage.
+    Child output (Git, the harness, interpreter probes) is decoded as UTF-8 with
+    replacement.
+  - `.gitattributes` keeps `*.sh` LF on Windows checkouts.
 
 ### Known alpha limitations
 
-- **Supported hosts:** only VS Code with GitHub Copilot Chat. Hooks are a VS Code preview
-  feature, so settings and events may drift; adapter spec I13 lists the open host
-  verifications.
-- **Session attribution:** it relies on the core's interim tool-boundary-stamp exception
-  (adapter spec I4). A host-native attribution surface is tracked, not scheduled.
+- **Supported hosts:** VS Code with GitHub Copilot Chat, and the GitHub Copilot app /
+  Copilot CLI. VS Code hooks are a preview feature, so settings and events may drift;
+  adapter spec I13 lists the open host verifications.
+- **Copilot app / CLI:** the following limits apply.
+  - Repository hooks run only in a **trusted folder**; plugin hooks run regardless.
+  - A timed-out `preToolUse` **fails open**.
+  - **Shell writes** are guarded textually only. The core's commit-set check is the
+    backstop.
+  - The harness answer to an agent reaches it as a hook denial whose reason starts with
+    `SAFe agentic harness RESULT`.
+  - `exec` hook entries and scoped hooks inside subagents are not yet byte-verified in the
+    app. The standalone CLI was verified live only on Linux, offline with a scripted model.
+  - The CLI's non-interactive `copilot -p` offers no `ask_user` (no human gate).
+  - See the adapter spec's *Limited or unsupported boundaries*.
+- **Session attribution:** no adapter edits an agent's command. Both hooks run the agent's
+  harness request themselves, so the core's former tool-boundary-stamp exception is retired
+  (VS Code adapter spec I4). In VS Code, the answer arrives as `Tool execution denied: …`,
+  and the user also sees a `Tried to use run_in_terminal` block. Inside a VS Code subagent,
+  attribution comes from the adapter's session stack (I13).
 - **Host fail-open:** the host proceeds when a hook times out or fails to spawn (I6).
 - **`Stop` hooks:** a bootstrap failure at `Stop`/`SubagentStop` exits 2. That asks the
   agent to continue, bounded by the host's `stop_hook_active` guard.

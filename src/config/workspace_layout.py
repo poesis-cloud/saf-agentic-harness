@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Mapping, Sequence
 
 from config.artifact_node import ArtifactNode
@@ -137,6 +137,20 @@ def _bind_segment(
     return extended
 
 
+def _escapes_workspace(path: Path) -> bool:
+    """Tell whether a path is not workspace-relative: anchored on any OS, or climbing out.
+
+    An absolute POSIX path, a Windows drive or UNC path, or a `..` segment names nothing
+    under the workspace root — it never resolves, whatever a `<name>` placeholder would bind.
+    """
+    text = path.as_posix()
+    return (
+        PurePosixPath(text).is_absolute()
+        or bool(PureWindowsPath(text).anchor)
+        or ".." in PurePosixPath(text).parts
+    )
+
+
 def _strip_fragment(path: Path) -> tuple[str, ...]:
     """Drop any `#property` suffix: authorization is whole-resource (function 8, invariant 3)."""
     parts = path.parts
@@ -160,20 +174,26 @@ class WorkspaceLayout:
     def resolve_resource(self, path: str | Path) -> str:
         """Resolve a workspace-relative path to the artifact slug it is bound to."""
         segments = _strip_fragment(Path(path))
-        matched = tuple(
-            sorted({node.artifact for node in self._match_artifact_nodes(self.nodes, segments, {})})
+        matched = (
+            ()
+            if _escapes_workspace(Path(path))
+            else tuple(
+                sorted(
+                    {node.artifact for node in self._match_artifact_nodes(self.nodes, segments, {})}
+                )
+            )
         )
 
         if not matched:
             raise ConfigurationError(
                 "unresolvable-resource",
-                f"Path '{path}' is unresolvable against the workspace layout.",
+                f"Path '{Path(path).as_posix()}' is unresolvable against the workspace layout.",
                 False,
             )
         if len(matched) > 1:
             raise ConfigurationError(
                 "ambiguous-resource",
-                f"Path '{path}' is ambiguous across artifact types "
+                f"Path '{Path(path).as_posix()}' is ambiguous across artifact types "
                 f"{', '.join(matched)}: the layout was not refused at load.",
                 False,
             )

@@ -12,7 +12,6 @@ from hook_event import HookDecision
 _ALLOWING_STATUSES = frozenset({"pass", "allowed"})
 _VALID_STATUS = "valid"
 _PASS_STATUS = "pass"
-_SESSION_ID_FLAG = "--session-id"
 _INSTRUCTIONS_HEADER = "# Instructions"
 _SKILLS_HEADER = "# Skills"
 _LOAD_DIRECTIVE = "Read `{path}` before acting."
@@ -37,8 +36,9 @@ class HookRenderer:
 
     Spec (adapter, I14): output construction — report `outcome` to `permissionDecision`,
     `conditionChecks[]` serialization into reasons, instruction/skill refs rendered to
-    inlined content plus load directives, `updatedInput` stamping — is this adapter's
-    own behavior, governed by its own seam-4 stdout contract.
+    inlined content plus load directives, the H4 harness answer — is this adapter's own
+    behavior, governed by its own seam-4 stdout contract. It never renders `updatedInput`:
+    no adapter edits an agent's tool input.
     """
 
     def __init__(self, instructions_dir: Path, skills_dir: Path) -> None:
@@ -118,24 +118,21 @@ class HookRenderer:
             }
         )
 
-    def render_stamped_input(
-        self, tool_input: Mapping[str, Any], command_key: str, session_id: str
-    ) -> HookDecision:
-        """Render H4's attribution stamp as a FULL rewritten `updatedInput`.
+    def render_harness_answer(self, reason: str, directive: str) -> HookDecision:
+        """Render H4's answer: the hook-run report as a deny reason, plus its directive.
 
-        Spec (adapter, H4 rule 4): the host validates `updatedInput` against the tool's
-        input schema and the object must carry the whole `tool_input`, never a patch.
+        Spec (adapter, H4 Output): the host turns a PreToolUse deny into the tool result
+        `Tool execution denied: <reason>` and appends `additionalContext` to that result
+        as a `<PreToolUse-context>` tag — the agent's command itself never runs and is
+        never edited.
         """
-        updated_input = dict(tool_input)
-        updated_input[command_key] = (
-            f"{tool_input[command_key]} {_SESSION_ID_FLAG} {session_id}"
-        )
         return _decide(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                    "updatedInput": updated_input,
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                    "additionalContext": directive,
                 }
             }
         )
@@ -207,7 +204,8 @@ class HookRenderer:
 
     def _render_skill(self, skill: str) -> str:
         path = self._skills_dir / f"{skill}{_SKILL_FILE_SUFFIX}"
-        return f"## {skill}\n\n{_LOAD_DIRECTIVE.format(path=path)}"
+        # One path form for the agent on every OS; Windows tools accept `C:/...` too.
+        return f"## {skill}\n\n{_LOAD_DIRECTIVE.format(path=path.as_posix())}"
 
 
 def _decide(rendered: Mapping[str, Any]) -> HookDecision:

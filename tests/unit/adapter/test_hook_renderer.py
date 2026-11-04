@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from conftest import build_error_report, build_report
+from contract_assertions import assert_stdout_matches_contract
 from event_class import EventClass
 from hook_renderer import HookRenderer
 
@@ -124,7 +126,7 @@ class TestHookRenderer:
         context = assert_valid_stdout(decision.stdout)["hookSpecificOutput"][
             "additionalContext"
         ]
-        assert str(skills_dir / "code-review.skill.md") in context
+        assert (skills_dir / "code-review.skill.md").as_posix() in context
         assert "# Code review" not in context
 
     def test_renders_the_same_reports_byte_identically(
@@ -358,32 +360,41 @@ class TestHookRenderer:
             "model-authored session attribution is never accepted"
         )
 
-    def test_renders_the_stamped_command_as_a_full_updated_input(
+    def test_renders_a_harness_answer_as_a_deny_carrying_the_report_and_context(
         self, renderer: HookRenderer, assert_valid_stdout
     ) -> None:
-        """Adapter spec H4, rule 4: rewrite via `updatedInput`, injecting
-        `--session-id <resolved current session>` — the object must carry the FULL
-        rewritten `tool_input`, never a patch.
+        """Adapter spec H4, Output: the hook ran the agent's harness request itself; the
+        report travels back as the deny reason (the host relays it as the tool result,
+        so the terminal never runs the line) plus an `additionalContext` directive. The
+        adapter never edits the agent's command: no `updatedInput`.
         """
-        decision = renderer.render_stamped_input(
-            tool_input={
-                "command": "harness.py resolve-step --workflow verification",
-                "explanation": "resolve the next step",
-            },
-            command_key="command",
-            session_id="chat-session-guid-t2026-07-11t14-32-07-000z",
+        decision = renderer.render_harness_answer(
+            reason="SAFe agentic harness RESULT (resolve-step): ...",
+            directive="The 'Tool execution denied' result above is the harness's answer.",
         )
 
         rendered = assert_valid_stdout(decision.stdout)
         hook_output = rendered["hookSpecificOutput"]
-        assert hook_output["permissionDecision"] == "allow"
-        assert hook_output["updatedInput"] == {
-            "command": (
-                "harness.py resolve-step --workflow verification "
-                "--session-id chat-session-guid-t2026-07-11t14-32-07-000z"
-            ),
-            "explanation": "resolve the next step",
+        assert hook_output["permissionDecision"] == "deny"
+        assert hook_output["permissionDecisionReason"].startswith(
+            "SAFe agentic harness RESULT (resolve-step)"
+        )
+        assert hook_output["additionalContext"].startswith("The 'Tool execution denied'")
+        assert "updatedInput" not in hook_output
+
+    def test_the_stdout_contract_refuses_an_updated_input(self) -> None:
+        """Adapter spec H4, Invariants: no adapter edits an agent's command — the seam-4
+        contract itself rejects a `PreToolUse` decision carrying `updatedInput`.
+        """
+        stamped = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": {"command": "harness.py resolve-step --session-id x"},
+            }
         }
+        with pytest.raises(AssertionError):
+            assert_stdout_matches_contract(json.dumps(stamped))
 
     def test_renders_a_valid_write_as_a_plain_continue(
         self, renderer: HookRenderer, assert_valid_stdout

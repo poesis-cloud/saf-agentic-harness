@@ -24,6 +24,11 @@ ADAPTER_CONTRACTS_DIR = (
 )
 TOOLS_CONTRACT = "tools.conf.schema.json"
 MODELS_CONTRACT = "models.conf.schema.json"
+# The framework's model catalogue, where the core's config loader reads it.
+MODEL_CATALOGUE_PATH = Path("conf") / "model-profiles.conf.yaml"
+_MODEL_BINDINGS_KEY = "modelBindings"
+_MODEL_PROFILES_KEY = "modelProfiles"
+_PROFILE_SLUG_KEY = "slug"
 
 
 class BindingContractError(ValueError):
@@ -87,3 +92,43 @@ __all__ = [
     "require_non_empty",
     "validate_binding",
 ]
+
+
+def require_catalogue_bound(
+    models: Mapping[str, Any], framework_dir: Path, *, source: str
+) -> None:
+    """Refuse a framework model catalogue naming a profile this adapter does not bind.
+
+    Core function 4: unroutable configurations die at load. A catalogue slug absent from
+    `models.yaml` could be resolved by `resolve-step-model` yet never run on this host, so
+    the hook stops here. The catalogue is re-read on every load, never cached at install:
+    the host's model list (and so `models.yaml`) can evolve after the harness install.
+    """
+    catalogue_path = Path(framework_dir) / MODEL_CATALOGUE_PATH
+    try:
+        catalogue = yaml.safe_load(catalogue_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as failure:
+        raise BindingContractError(
+            f"framework model catalogue '{catalogue_path}' cannot be loaded, so the "
+            f"adapter binding '{source}' cannot be checked against it: {failure}"
+        ) from failure
+    profiles = catalogue.get(_MODEL_PROFILES_KEY) if isinstance(catalogue, Mapping) else None
+    if not isinstance(profiles, list) or not all(
+        isinstance(profile, Mapping) and isinstance(profile.get(_PROFILE_SLUG_KEY), str)
+        for profile in profiles
+    ):
+        raise BindingContractError(
+            f"framework model catalogue '{catalogue_path}' is not a "
+            f"'{_MODEL_PROFILES_KEY}' list of profiles with a '{_PROFILE_SLUG_KEY}'"
+        )
+    bound = models.get(_MODEL_BINDINGS_KEY) or {}
+    unbound = sorted(
+        {profile[_PROFILE_SLUG_KEY] for profile in profiles} - set(bound)
+    )
+    if unbound:
+        raise BindingContractError(
+            f"framework model catalogue '{catalogue_path}' names model profile(s) the "
+            f"adapter binding '{source}' does not bind: {', '.join(unbound)} — every "
+            "catalogue slug must map to a model this host offers; update models.yaml to "
+            "the host's available models, or drop those profiles from the catalogue"
+        )

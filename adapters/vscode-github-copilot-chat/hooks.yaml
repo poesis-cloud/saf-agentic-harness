@@ -14,7 +14,7 @@
 # native SessionEnd). The host has NO per-tool matcher: PreToolUse/PostToolUse fire for every
 # tool call and the harness classifies by tool_name via tools.yaml. The canonical control
 # surface is structured stdout JSON on exit 0 (permissionDecision / decision:block /
-# additionalContext / updatedInput); exit 2 is only the hard-failure fallback.
+# additionalContext; never updatedInput); exit 2 is only the hard-failure fallback.
 #
 # NOT here: the session-started boundary (H0) is an AGENT-SCOPED UserPromptSubmit hook,
 # rendered into each framework orchestrator's .agent.md frontmatter with its own slug as the

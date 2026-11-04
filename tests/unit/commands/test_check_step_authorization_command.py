@@ -42,6 +42,24 @@ class TestCheckStepAuthorizationCommand:
             action="create",
         )
 
+    def test_reads_a_windows_separator_as_a_path_separator(
+        self, schema_validator: SchemaValidator
+    ) -> None:
+        """A Windows host names `portfolio\\epics\\one.md`: it is the same artifact as
+        `portfolio/epics/one.md` on every OS, so layout matching never depends on where
+        the harness runs.
+        """
+        command = CheckStepAuthorizationCommand(
+            RecordingService("check-step-authorization"), schema_validator
+        )
+
+        inquiry = command.parse_inquiry(
+            {"sessionId": "s1", "artifactPath": "portfolio\\epics\\one.md", "action": "create"}
+        )
+
+        assert inquiry.artifact_path.parts == ("portfolio", "epics", "one.md")
+        assert inquiry.artifact_path.as_posix() == "portfolio/epics/one.md"
+
     def test_refuses_an_action_outside_the_declared_vocabulary(
         self, schema_validator: SchemaValidator
     ) -> None:

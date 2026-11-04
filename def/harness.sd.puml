@@ -64,32 +64,30 @@ loop until ""3 resolve-step"" resolves no-next-step
 
 == Step resolution ==
 note over Host, Adapter
-  H4 (""PreToolUse"" — harness-command class) is accepted
-  under the core's narrow tool-boundary-stamp exception (I4)
-  — fixed framework-authored shape, denies model-authored
-  attribution outright, and is backstopped by the harness's
-  own check (below): a stamped sessionId that is not
-  currently open and registered is rejected at
-  ""3 resolve-step"" / ""4 resolve-step-model"" themselves,
-  never silently trusted. Explicit interim mechanism, not a
-  permanent design — no stronger host-native surface is
-  known to exist for this class of host.
+  H4 (""PreToolUse"" — harness-command class) is a HOOK-EXECUTED
+  boundary: the adapter runs ""3 resolve-step"" /
+  ""4 resolve-step-model"" itself, attributed from its own event
+  payload and bookkeeping (like every other hook invocation),
+  and answers with a deny whose reason IS the report — the host
+  relays it as the tool result, so the agent's command never runs
+  and is never edited. The harness's own backstop (below) still
+  rejects a sessionId that is not currently open and registered.
 end note
-Orch -> Host : mediated invocation — tool call:\n""resolve-step""(workflowSlug) — model-authored, no session id
+Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step --workflow-slug <slug>""\n— plain line, no session id
 Host -> Adapter : hook ""PreToolUse"" — harness-command class
-Adapter -> Adapter : deny if the command already carries\nsession attribution; else resolve the current\nsession via ""SessionTracker""
-Adapter --> Host : permissionDecision: allow +\nupdatedInput (stamped --session-id)
-Host -> Harness : ""3 resolve-step""(sessionId: stamped, parentSessionId: null, workflowSlug)
+Adapter -> Adapter : deny if not one plain resolve-step / resolve-step-model\nrequest or if it carries session attribution; else\nresolve the current session via ""SessionTracker""
+Adapter -> Harness : ""3 resolve-step""(sessionId: resolved, parentSessionId: null, workflowSlug)
 Harness -> Harness : deduce the instance — continue the latest open one,\nor mint a new instance id (the opening is this very\nlog entry — no dedicated file, no id returned)
-Harness --> Host : { outcome: step-resolution,\nstep: { slug, actor, skills, instructions, artifact,\nconditions, capabilities } }\n(context.workflowInstanceId minted or continued)
-Host --> Orch : step resolution relayed
-Orch -> Host : mediated invocation — tool call:\n""resolve-step-model""() — session attribution only
+Harness --> Adapter : { outcome: step-resolution,\nstep: { slug, actor, skills, instructions, artifact,\nconditions, capabilities } }\n(context.workflowInstanceId minted or continued)
+Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step)" + report\n(+ additionalContext: act on it, do not re-issue)
+Host --> Orch : tool result — the step resolution\n(the terminal never ran the line)
+Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step-model --workflow-slug <slug>""
 Host -> Adapter : hook ""PreToolUse"" — harness-command class
-Adapter --> Host : permissionDecision: allow +\nupdatedInput (stamped --session-id)
-Host -> Harness : ""4 resolve-step-model""(sessionId: stamped, parentSessionId: null)
+Adapter -> Harness : ""4 resolve-step-model""(sessionId: resolved, parentSessionId: null)
 Harness -> Harness : deduce the session's in-flight step;\ncapabilities × catalog → model profile
-Harness --> Host : { outcome: resolved,\nprofile: { slug, score, costRank, reason } }
-Host --> Orch : model profile relayed
+Harness --> Adapter : { outcome: resolved,\nprofile: { slug, score, costRank, reason } }
+Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step-model)" + report
+Host --> Orch : tool result — the model profile
 Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resolution + profile verbatim
 
 == Step dispatch (1 step = 1 agent = 1 session = 1 artifact) ==
@@ -167,12 +165,12 @@ end
 end
 
 == Workflow return ==
-Orch -> Host : mediated invocation — tool call:\n""resolve-step""(workflowSlug)
+Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step --workflow-slug <slug>""
 Host -> Adapter : hook ""PreToolUse"" — harness-command class
-Adapter --> Host : permissionDecision: allow +\nupdatedInput (stamped --session-id)
-Host -> Harness : ""3 resolve-step""(sessionId: stamped, parentSessionId: null, workflowSlug)
-Harness --> Host : { outcome: no-next-step }\n(a reversible observation — never "done")
-Host --> Orch : no-next-step relayed
+Adapter -> Harness : ""3 resolve-step""(sessionId: resolved, parentSessionId: null, workflowSlug)
+Harness --> Adapter : { outcome: no-next-step }\n(a reversible observation — never "done")
+Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step)" + report
+Host --> Orch : tool result — no-next-step
 Orch -> Orch : per ""no-next-step-handling"" instruction\n(it names the advisory successors)
 Orch --> User : end-to-end workflow results (delivered artifacts)\n+ options: reiterate the workflow / take a successor
 note right of Orch

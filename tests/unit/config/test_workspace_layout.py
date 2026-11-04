@@ -91,6 +91,47 @@ class TestWorkspaceLayout:
 
         assert failure.value.code == "ambiguous-resource"
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/payments.md",
+            "C:/payments.md",
+            "/payments/payments.md",
+            "C:/payments/payments.md",
+            "C:payments/payments.md",
+            "//server/share/payments.md",
+            "../payments/payments.md",
+            "payments/../payments/payments.md",
+        ],
+    )
+    def test_a_path_that_is_not_workspace_relative_never_resolves(
+        self, config_loader, framework_root, path: str
+    ) -> None:
+        """Spec (function 8, invariant 5): only workspace-relative paths name artifacts.
+        A root `<placeholder>` would otherwise bind an anchor (`/`, `C:`) or `..` and
+        resolve a write OUTSIDE the workspace root — on every OS, that is unresolvable."""
+        write_yaml(
+            framework_root / "conf" / "workspace.conf.yaml",
+            """nodes:
+  - slug: <epic-slug>
+    description: Epic folder
+    children:
+      - slug: <item-slug>.md
+        description: Epic file
+        cardinality: "0..*"
+        artifact: epic
+        template: epic
+""",
+        )
+        layout = config_loader.load_workspace_layout(framework_root)
+        assert layout.resolve_resource(Path("payments/payments.md")) == "epic"
+
+        with pytest.raises(ConfigurationError) as failure:
+            layout.resolve_resource(Path(path))
+
+        assert failure.value.code == "unresolvable-resource"
+        assert "\\" not in failure.value.message
+
     def test_repeated_placeholders_must_bind_consistently(self, config_loader, framework_root) -> None:
         """Spec: placeholder names may recur across descendants and share one binding."""
         write_yaml(

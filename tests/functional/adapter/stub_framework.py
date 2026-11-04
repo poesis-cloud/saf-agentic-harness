@@ -13,11 +13,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
 from harness_stub import HarnessStub
+from model_catalogue import write_bound_catalogue
+from posix_shell import IS_WINDOWS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 REPO_ADAPTERS_DIR = REPO_ROOT / "adapters"
@@ -55,6 +58,9 @@ def build_framework(root: Path, script_path: Path, journal_path: Path) -> Framew
     # ships beside `adapters/` (fail-fast load), so the copy carries them too.
     shutil.copytree(REPO_ADAPTER_CONTRACTS_DIR, root / "contracts" / "conf" / "adapters")
     shutil.copy2(STUB_ENTRYPOINT, root / "harness.py")
+    write_bound_catalogue(
+        root, root / "adapters" / "vscode-github-copilot-chat" / "models.yaml"
+    )
     instructions_dir = root / "instructions"
     instructions_dir.mkdir()
     (instructions_dir / f"{INSTRUCTION_REF}.instructions.md").write_text(
@@ -85,6 +91,8 @@ def build_framework(root: Path, script_path: Path, journal_path: Path) -> Framew
             "FRAMEWORK_SKILLS_DIR": "skills",
             "HARNESS_STUB_SCRIPT": str(script_path),
             "HARNESS_STUB_JOURNAL": str(journal_path),
+            # Windows has no `python3` for dispatch.sh's fallback; name this interpreter.
+            **({"SAF_HARNESS_PYTHON": sys.executable} if IS_WINDOWS else {}),
         },
     )
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping
 
 from commands.check_step_artifact_inquiry import CheckStepArtifactInquiry
 from commands.command import Command
 from services.checking.step_artifact_checker import StepArtifactChecker
 from stores.session_log_store.report import Report
+from utils.artifact_path import parse_artifact_path
 from utils.schema_validator import SchemaValidator
 
 
@@ -34,7 +34,9 @@ class CheckStepArtifactCommand(Command):
         return CheckStepArtifactInquiry(
             session_id=data["sessionId"],
             parent_session_id=data.get("parentSessionId"),
-            artifact_paths=tuple(Path(path) for path in data["artifactPaths"]),
+            artifact_paths=tuple(
+                parse_artifact_path(path) for path in data["artifactPaths"]
+            ),
         )
 
     def execute_function(self, inquiry: CheckStepArtifactInquiry) -> Report:
