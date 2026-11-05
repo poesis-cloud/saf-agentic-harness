@@ -32,7 +32,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
 from .folders import make_contained_folders
-from .invocation import HarnessInvocation, unquote
+from .invocation import HarnessInvocation, quoted_pattern, unquote
 from .paths import host_basename, is_within, relativize, resolve_host_path, workspace_parts
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
@@ -80,14 +80,22 @@ _TURN_MARKER = "-t"
 _HARNESS_MENTION = re.compile(r"harness\.py", re.IGNORECASE)
 # ONE plain invocation: `[&] <python|python3|py|abs interpreter> [-3[.x]] <harness.py> <fn>
 # [--flag [value]]...` — no chaining, piping, redirection, substitution or subexpression.
+# A quoted token takes exactly the forms the hint renders for the host's shell (PowerShell
+# on Windows, POSIX elsewhere), apostrophes included: see `invocation.quoted_pattern`.
 _PLAIN = r"""[^\s'";|&`$()<>{}]"""
-_QUOTED = r"""(?:'[^'`$;|&<>]*'|"[^"`$;|&<>]*")"""
-_STRICT_HARNESS_COMMAND = re.compile(
-    rf"""^\s*(?:&\s*)?(?P<interpreter>{_QUOTED}|{_PLAIN}+)(?:\s+-[0-9][0-9.]*)?"""
-    rf"""\s+(?P<harness>{_QUOTED}|{_PLAIN}+)\s+(?P<function>[a-z][a-z0-9-]*)"""
-    rf"""(?:\s+--[a-z][a-z0-9-]*(?:\s+(?!--)(?:{_QUOTED}|{_PLAIN}+))?)*\s*$"""
-)
-_TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
+
+
+def _command_grammar(powershell: bool) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    quoted = quoted_pattern(powershell)
+    strict = re.compile(
+        rf"""^\s*(?:&\s*)?(?P<interpreter>{quoted}|{_PLAIN}+)(?:\s+-[0-9][0-9.]*)?"""
+        rf"""\s+(?P<harness>{quoted}|{_PLAIN}+)\s+(?P<function>[a-z][a-z0-9-]*)"""
+        rf"""(?:\s+--[a-z][a-z0-9-]*(?:\s+(?!--)(?:{quoted}|{_PLAIN}+))?)*\s*$"""
+    )
+    return strict, re.compile(rf"{quoted}|{_PLAIN}+")
+
+
+_COMMAND_GRAMMARS = {flavor: _command_grammar(flavor) for flavor in (False, True)}
 _TOKEN_TRIM = "'\"();|&<>`"
 # A `<rev>:<path>` git object name (`HEAD:portfolio/x.md`): never a drive (`C:`), a variable
 # (`$env:TEMP`) or a URL.
@@ -459,7 +467,9 @@ class Adapter:
         self, hook: HookInput, command: str
     ) -> tuple[str | None, HarnessRequest | None]:
         example = self._invocation.example("resolve-step --workflow-slug <slug>")
-        match = _STRICT_HARNESS_COMMAND.match(command)
+        powershell = self._invocation.windows
+        strict, token_pattern = _COMMAND_GRAMMARS[powershell]
+        match = strict.match(command)
         if match is None:
             return (
                 "a harness command must be one plain invocation, never chained or piped: "
@@ -478,20 +488,23 @@ class Adapter:
                 "harness hook attributes the request to your session itself; run: "
                 f"{self._invocation.example(function)}"
             ), None
-        interpreter = unquote(match.group("interpreter"))
+        interpreter = unquote(match.group("interpreter"), powershell)
         if not self._invocation.is_interpreter(interpreter):
             return (
                 f"'{interpreter}' is not a Python interpreter the harness runs under: "
                 f"{self._invocation.example(function)}"
             ), None
-        harness = unquote(match.group("harness"))
+        harness = unquote(match.group("harness"), powershell)
         if not self._invocation.is_harness(harness, hook.cwd):
             return (
                 f"'{harness}' is not the installed harness entry point: "
                 f"{self._invocation.example(function)}"
             ), None
         inquiry: dict[str, str] = {}
-        tokens = [unquote(token) for token in _TOKEN.findall(command[match.end("function") :])]
+        tokens = [
+            unquote(token, powershell)
+            for token in token_pattern.findall(command[match.end("function") :])
+        ]
         index = 0
         while index < len(tokens):
             flag = tokens[index]

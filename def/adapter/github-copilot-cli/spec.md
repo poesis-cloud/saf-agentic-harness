@@ -219,6 +219,9 @@ own permission flow still applies to what the harness lets through.
    `&&`, redirection, `$()`, backtick or `$env:`.
    - The interpreter must be any `python`, `python3`, `python3.x` or `py`, bare or a path.
    - The harness path must resolve to the INSTALLED `harness.py`.
+   - A quoted path takes exactly the forms the hint renders for the host's shell, decoded
+     by that shell's rules: PowerShell `'…'` with an apostrophe doubled (`'o''neil'`),
+     POSIX `'…'` with an apostrophe as `'"'"'`, or `"…"` in either.
    - The function must be `resolve-step` or `resolve-step-model`.
    - `--session-id`/`--parent-session-id` must be absent.
    - Every flag takes one value, given once.
