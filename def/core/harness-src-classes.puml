@@ -415,13 +415,13 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         ""scan_raw_paths"" enumerates the raw universe for
         sweeps; ""is_staging_clean"" backs function 8's
         invariant 5 (target absent, or tracked and clean
-        against the step ref); ""commit_artifacts"" commits a
+        against HEAD); ""commit_artifacts"" commits a
         validated staged SET onto the step ref as ONE commit
         (function 9's call-level atomicity) and
         ""revert_artifact"" discards an invalid one - function
         9's deliberate Git actions. The Git operations of
-        functions 5, 0, and 10 (return, create, rebase,
-        promote) join the
+        functions 0, 8, and 10 (create the step ref, claim
+        locks, rebase, promote, sync the index) join the
         class model with their implementation. Finding is
         homed here and stays internal to this store: it is
         what ""validate_artifact"" and ""revert_artifact""

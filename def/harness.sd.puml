@@ -94,7 +94,6 @@ Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resol
 Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model profile, skills, instructions)
 Host -> Adapter : hook ""PreToolUse"" — dispatch class
 Adapter -> Harness : ""5 check-step-preconditions""(sessionId, parentSessionId: null)
-Harness -> Harness : evaluate the preconditions; require a clean\nworking tree (else state-error workspace-not-clean);\non pass, return the working tree to the workspace branch
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 alt preconditions hold
   Adapter --> Host : permissionDecision: allow
@@ -107,7 +106,7 @@ Host -> Adapter : hook ""SubagentStart""
 alt agent_type correlates to an unresolved step-resolution entry
   Adapter -> Harness : ""0 start-session""(agent: agent_type, sessionId,\nparentSessionId: the dispatching session)
   Harness -> Harness : correlates to the parent's latest unresolved\nstep-resolution entry for agent_type
-  Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) and check it out
+  Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) — no checkout:\nthe working tree stays on the workspace branch
   Harness --> Adapter : { session: { agent, sessionId, parentSessionId } }
   Adapter -> Harness : ""6 resolve-step-instructions""(sessionId, parentSessionId)
   Harness --> Adapter : { instructions: [the step's declared refs] }
@@ -124,12 +123,13 @@ end
 Sub -> Host : write artifact (host write tool)
 Host -> Adapter : hook ""PreToolUse"" — write class
 Adapter -> Harness : ""8 check-step-authorization""(sessionId, parentSessionId,\nartifactPath, action)
+Harness -> Harness : claim the artifact lock ""refs/harness/locks/<artifactPath>""\n(create-only; held by this step instance, or re-pointed from the\nstep instance a retry continues; held by another: deny)
 Harness --> Adapter : { outcome: allowed | denied,\nauthorization: { actor, artifactPath, action, resource, failureMessage? } }
 alt privilege granted
-  Adapter --> Host : permissionDecision: allow\n(step instance in flight; staging baseline clean against its step ref)
+  Adapter --> Host : permissionDecision: allow\n(step instance in flight; artifact lock held;\nan unclaimed path was clean against HEAD)
   Host -> Host : execute the write — lands in the working tree\n(the staging area, not yet workspace state)
-else no grant, or no step instance in flight
-  Adapter --> Host : permissionDecision: deny (missing privilege / no step instance in flight)
+else no grant, no step instance in flight, or lock held by another
+  Adapter --> Host : permissionDecision: deny (missing privilege / no step instance in flight /\nlock held by another step instance)
   Host --> Sub : write blocked, report returned
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
@@ -137,10 +137,10 @@ Host -> Adapter : hook ""PostToolUse"" — write class
 Adapter -> Harness : ""9 check-step-artifact""(sessionId, parentSessionId, artifactPaths)
 Harness --> Adapter : { outcome: valid | reverted,\nartifactChecks?: [{ artifactPath, failureMessage, revert: { action, from } }, …] }
 alt write is schema-valid
-  Harness -> Harness : commit the staged write onto the step ref,\nattributed to the session — workspace state\ndoes not advance (only promotion does)
+  Harness -> Harness : commit the validated bytes onto the step ref\n(temporary index; HEAD and working tree unmoved),\nattributed to the session — workspace state\ndoes not advance (only promotion does)
   Adapter --> Host : { ""continue"": true }
 else invalid write
-  Harness -> Harness : discard the staged write — restore from the step\nref tip / delete new: no commit ever held the invalid\nbytes (C6 — transactional by construction)
+  Harness -> Harness : discard the staged write — restore from the step\nref tip or HEAD / delete new: no commit ever held the invalid\nbytes (C6 — transactional by construction)
   Adapter --> Host : decision: ""block"" + reason\n(additionalContext restates the retry instruction)
   Host --> Sub : failure message returned
   Sub -> Sub : per its step instructions — rewrite per the\nfailure message and retry the write
@@ -154,11 +154,11 @@ Harness --> Adapter : { outcome: ended }\n(never surfaced to the host)
 Adapter -> Adapter : ""SessionTracker"" pops the worker session —\nthe dispatching orchestrator session is current again
 Host -> Adapter : hook ""PostToolUse"" — dispatch class
 Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
-Harness -> Harness : rebase the step ref onto the workspace branch if it moved\n(conflict: state-error step-rebase-conflict); evaluate\ndelivery (whole step state + own commits) + postconditions\non the step state
+Harness -> Harness : rebase the step ref onto the workspace branch in memory\n(merge-tree) if it moved (conflict: state-error\nstep-rebase-conflict); evaluate\ndelivery (whole step state + own commits) + postconditions\non the step state
 alt step instance passes
-  Harness -> Harness : promote — ONE atomic fast-forward of the workspace\nbranch ref to the step ref (compare-and-swap): the\nacceptance point, no Git act after it; step ref kept\n(branch moved meanwhile: state-error step-rebase-conflict)
+  Harness -> Harness : promote — ONE atomic fast-forward of the workspace\nbranch ref to the step ref (compare-and-swap): the\nacceptance point; then sync the promoted paths' index\nentries, locks released; step ref kept\n(branch moved meanwhile: state-error step-rebase-conflict)
 else step instance fails
-  Harness -> Harness : withhold — no Git act: workspace branch untouched,\nstep-instance ref kept for a retry to build on
+  Harness -> Harness : withhold — no promotion or lock act: workspace branch and locks\nuntouched, step ref kept: a retry inherits both
 end
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …],\npromotion: { outcome: promoted | withheld, workspaceCommit } }
 alt postconditions hold — step journaled executed
