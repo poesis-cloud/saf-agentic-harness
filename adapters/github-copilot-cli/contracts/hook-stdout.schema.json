@@ -72,20 +72,27 @@
             }
         },
         "contextDecision": {
-            "description": "sessionStart (harness command line), subagentStart (H1 step context), postToolUse (H5/H6 directives, late H0 context).",
+            "description": "sessionStart (harness command line), subagentStart (H1 step context), postToolUse (H5/H6 directives, late H0 context). The runtime caps a postToolUse additionalContext at 10 KB (the adapter cuts it there); sessionStart/subagentStart context is bounded only by the 10 MiB hook-output limit.",
             "type": "object",
             "required": ["additionalContext"],
             "additionalProperties": false,
             "properties": {
                 "additionalContext": {
-                    "$ref": "#/$defs/context"
+                    "$ref": "#/$defs/sessionContext"
                 }
             }
         },
         "context": {
+            "description": "A postToolUse additionalContext: capped by the runtime at 10 KB.",
             "type": "string",
             "minLength": 1,
             "maxLength": 10240
+        },
+        "sessionContext": {
+            "description": "A sessionStart/subagentStart additionalContext: bounded by the 10 MiB hook-output limit.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10485760
         }
     }
 }

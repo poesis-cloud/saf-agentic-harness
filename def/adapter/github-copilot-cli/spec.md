@@ -41,7 +41,9 @@ replayed from a live capture in the process tests).
    `modifiedResult` (`resultType: "success"`) and add `additionalContext`.
    `userPromptTransformed` may replace the model-facing prompt through
    `modifiedTransformedPrompt`. `sessionStart` and `subagentStart` take `additionalContext`.
-   `additionalContext` is capped at 10 KB.
+   `postToolUse`'s `additionalContext` is capped at 10 KB (joined across hooks). A
+   `sessionStart`/`subagentStart` `additionalContext` is bounded only by the 10 MiB
+   hook-output limit, so H1 inlines its step context whole.
 3. **Failure semantics.** A crash or a non-zero exit DENIES at `preToolUse`. A **timeout fails
    OPEN**.
 4. **`preToolUse` shape is host-conditional.**
@@ -168,7 +170,8 @@ own permission flow still applies to what the harness lets through.
 - **Context:** at `userPromptTransformed`, while `contextInjected` is false, resolve the
   workflow instructions and skills, inline the instruction bodies and add skill load
   directives. Return `modifiedTransformedPrompt` = hint + context + the runtime's transformed
-  prompt. Mark the record injected only when both resolutions answered `resolved`.
+  prompt. Mark the record injected only when both resolutions answered `resolved` and the
+  context was delivered whole (see *Context size* below).
 
 ### H1 — subagentStart
 
@@ -179,6 +182,13 @@ own permission flow still applies to what the harness lets through.
 - **Effect:** `start-session --agent <agentType> --session-id <agentId> --parent-session-id
   <dispatcher session>`. On `started`, record it with `origin: step` and return
   `additionalContext` = hint + step context.
+- **Context size:** the runtime caps only `postToolUse`'s `additionalContext` at 10 KB; H0's
+  `modifiedTransformedPrompt` and H1's `additionalContext` are bounded by the 10 MiB
+  hook-output limit. Instruction bodies are inlined when the output fits that limit, else
+  rendered as load directives; a context that fits neither is not injected. The record is
+  marked injected only when its whole context was delivered, so the H0 fallback (or the
+  next firing) still delivers what is missing. The fallback marks it only when its
+  directives fit the 10 KB cap whole.
 
 ### H2/H3/H4 — preToolUse (one firing, N calls)
 

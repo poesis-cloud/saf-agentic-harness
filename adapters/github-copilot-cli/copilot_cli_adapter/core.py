@@ -214,8 +214,14 @@ class Adapter:
         transformed = hook.payload.get("transformedPrompt")
         if not isinstance(transformed, str) or not transformed:
             return None
-        context, resolved = self._resolve_context(record, inline=True)
-        if resolved:
+        context, delivered = self._resolve_context(
+            record,
+            inline=True,
+            fits=lambda text: renderer.fits_hook_output(
+                renderer.transformed_prompt(text, transformed)
+            ),
+        )
+        if delivered:
             self._tracker.write(host_id, record.with_context_injected())
         if not context:
             return None
@@ -271,11 +277,15 @@ class Adapter:
             parent_session_id=parent.session_id,
             parent_host_id=parent_host,
         )
-        context, resolved = self._resolve_context(record, inline=True)
-        self._tracker.write(step_host, record.with_context_injected() if resolved else record)
+        context, delivered = self._resolve_context(
+            record,
+            inline=True,
+            fits=lambda text: renderer.fits_hook_output(renderer.step_context(text)),
+        )
+        self._tracker.write(step_host, record.with_context_injected() if delivered else record)
         if not context:
             return None
-        return {"additionalContext": context}
+        return renderer.step_context(context)
 
     # H2 / H3 / H4 ---------------------------------------------------------------------
 
@@ -686,15 +696,27 @@ class Adapter:
     def _append_late_context(
         self, host_id: str, record: SessionRecord, decision: dict[str, Any]
     ) -> dict[str, Any]:
-        """H0 fallback — when no prompt hook could inject, the first tool result does."""
-        context, resolved = self._resolve_context(record, inline=False)
-        if resolved:
+        """H0 fallback — when no prompt hook could inject, the first tool result does.
+
+        Its `additionalContext` is capped at 10 KB, so the context goes as load directives,
+        and is marked injected only when it fits whole next to what the decision already says.
+        """
+        existing = decision.get("additionalContext")
+
+        def joined(text: str) -> str:
+            return f"{existing}\n\n{text}" if existing else text
+
+        context, delivered = self._resolve_context(
+            record,
+            inline=False,
+            fits=lambda text: renderer.fits_additional_context(joined(text)),
+            truncate=True,
+        )
+        if delivered:
             self._tracker.write(host_id, record.with_context_injected())
         if not context:
             return decision
-        existing = decision.get("additionalContext")
-        joined = f"{existing}\n\n{context}" if existing else context
-        return {**decision, **renderer.additional_context(joined)}
+        return {**decision, **renderer.additional_context(joined(context))}
 
     # H7 -------------------------------------------------------------------------------
 
@@ -734,8 +756,21 @@ class Adapter:
 
     # helpers --------------------------------------------------------------------------
 
-    def _resolve_context(self, record: SessionRecord, *, inline: bool) -> tuple[str, bool]:
-        """Answer the rendered context and whether it was fully resolved."""
+    def _resolve_context(
+        self,
+        record: SessionRecord,
+        *,
+        inline: bool,
+        fits: Callable[[str], bool],
+        truncate: bool = False,
+    ) -> tuple[str, bool]:
+        """Answer the context to inject and whether ALL of it is delivered by doing so.
+
+        Instruction bodies are inlined when `inline` and the output `fits` the event's limit;
+        otherwise they become load directives. Delivered means both resolutions answered
+        `resolved` AND the injected text fits whole. A context that cannot fit is answered
+        anyway when `truncate` (the renderer cuts it to the cap), else not at all.
+        """
         scope = "step" if record.origin == STEP_ORIGIN else "workflow"
         inquiry = {"sessionId": record.session_id, "parentSessionId": record.parent_session_id}
         reports: list[Mapping[str, Any]] = []
@@ -743,15 +778,24 @@ class Adapter:
             report = self._run_safely(f"resolve-{scope}-{kind}", inquiry)
             if report is not None:
                 reports.append(report)
-        try:
-            resolved = sum(read_status(report) == _RESOLVED for report in reports) == 2
-            context = self._context.render(reports, inline=inline)
-        except (OSError, ValueError) as failure:
-            self._diagnostic(f"[{ADAPTER_ID}] context rendering failed: {failure}")
-            return "", False
-        # Every governed agent learns the one harness line it may run — a nested orchestrator
-        # dispatched as a step needs it as much as a top-level one.
-        return "\n\n".join(part for part in (self._invocation.hint(), context) if part), resolved
+        resolved = sum(read_status(report) == _RESOLVED for report in reports) == 2
+        context = ""
+        for mode in (True, False) if inline else (False,):
+            try:
+                rendered = self._context.render(reports, inline=mode)
+            except (OSError, ValueError) as failure:
+                self._diagnostic(f"[{ADAPTER_ID}] context rendering failed: {failure}")
+                return "", False
+            # Every governed agent learns the one harness line it may run — a nested
+            # orchestrator dispatched as a step needs it as much as a top-level one.
+            context = "\n\n".join(part for part in (self._invocation.hint(), rendered) if part)
+            if fits(context):
+                return context, resolved
+        self._diagnostic(
+            f"[{ADAPTER_ID}] the {scope} context of '{record.session_id}' exceeds what the "
+            "runtime accepts for this event; it is not marked injected"
+        )
+        return (context if truncate else ""), False
 
     def _run_safely(self, function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any] | None:
         """Run a harness function; a failure is a diagnostic, never a raw leak to the model."""

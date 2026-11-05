@@ -112,6 +112,68 @@ def test_h1_starts_the_step_under_the_dispatcher_and_injects_its_context(rig: Ri
     assert record.parent_session_id == TURN_SESSION and record.parent_host_id == HOST
 
 
+def test_h1_inlines_a_step_context_larger_than_the_post_tool_use_cap(rig: Rig, tmp_path) -> None:
+    """The 10 KB cap is `postToolUse`'s (hooks reference); a `subagentStart` context is
+    bounded only by the 10 MiB hook-output limit. So H1 delivers the whole context, untruncated,
+    and only then marks the step's context injected."""
+    from copilot_cli_adapter.renderer import ADDITIONAL_CONTEXT_LIMIT
+
+    body = "Handle reports carefully. " * (2 * ADDITIONAL_CONTEXT_LIMIT // 26)
+    (tmp_path / "instructions" / "reports-handling.instructions.md").write_text(
+        body + "END-OF-INSTRUCTION\n", encoding="utf-8"
+    )
+    rig.open_turn()
+    context = rig.open_step()["additionalContext"]
+    assert len(context.encode("utf-8")) > ADDITIONAL_CONTEXT_LIMIT
+    assert "END-OF-INSTRUCTION" in context and "truncated" not in context
+    assert rig.tracker.read(SUBAGENT).context_injected
+
+
+def test_h1_falls_back_to_load_directives_past_the_hook_output_limit(
+    rig: Rig, tmp_path, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    (tmp_path / "instructions" / "reports-handling.instructions.md").write_text(
+        "x" * 4000 + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(renderer, "HOOK_OUTPUT_LIMIT", 3500)
+    rig.open_turn()
+    context = rig.open_step()["additionalContext"]
+    assert "Read `" in context and "reports-handling.instructions.md" in context
+    assert "x" * 100 not in context
+    assert rig.tracker.read(SUBAGENT).context_injected
+
+
+def test_h1_marks_nothing_injected_when_even_directives_cannot_fit(
+    rig: Rig, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    monkeypatch.setattr(renderer, "HOOK_OUTPUT_LIMIT", 200)
+    rig.open_turn()
+    assert rig.open_step() is None
+    assert rig.tracker.read(SUBAGENT) is not None
+    assert not rig.tracker.read(SUBAGENT).context_injected
+    assert any("exceeds what the runtime accepts" in line for line in rig.diagnostics)
+
+
+def test_the_late_context_is_marked_injected_only_when_delivered_whole(
+    rig: Rig, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    rig.open_turn()
+    monkeypatch.setattr(renderer, "ADDITIONAL_CONTEXT_LIMIT", 300)
+    decision = rig.fire("postToolUse", post_tool_use("view", {"path": "C:\\a"}))
+    assert "truncated" in decision["additionalContext"]
+    assert not rig.tracker.read(HOST).context_injected
+    monkeypatch.setattr(renderer, "ADDITIONAL_CONTEXT_LIMIT", 10_000)
+    decision = rig.fire("postToolUse", post_tool_use("view", {"path": "C:\\a"}))
+    assert "truncated" not in decision["additionalContext"]
+    assert rig.tracker.read(HOST).context_injected
+
+
 def test_h1_under_an_ungoverned_parent_is_ignored(rig: Rig) -> None:
     assert rig.open_step() is None
     assert rig.runner.calls == []
