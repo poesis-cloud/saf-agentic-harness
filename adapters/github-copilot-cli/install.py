@@ -525,12 +525,20 @@ def write_all_or_nothing(
 
 
 def _make_parents(folder: Path) -> list[Path]:
+    """Create the missing folders down to `folder`; on a failure, remove the ones this call
+    created before raising, since the caller never learns of them."""
     missing: list[Path] = []
     while not folder.exists():
         missing.append(folder)
         folder = folder.parent
-    for current in reversed(missing):
-        current.mkdir()
+    created: list[Path] = []
+    try:
+        for current in reversed(missing):
+            current.mkdir()
+            created.append(current)
+    except OSError:
+        _discard((), created)
+        raise
     return missing
 
 

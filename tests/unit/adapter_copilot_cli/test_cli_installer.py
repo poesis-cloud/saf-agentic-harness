@@ -283,3 +283,39 @@ def test_a_write_error_is_a_refusal_not_a_crash(framework, bundle, capsys) -> No
     for slug in ORCHESTRATORS:
         text = (bundle / "agents" / f"{slug}.agent.md").read_text(encoding="utf-8")
         assert INSTALL.BLOCK_OPEN not in text
+
+
+def test_a_failed_folder_creation_removes_the_folders_it_already_made(tmp_path, monkeypatch) -> None:
+    """`a` and `a/b` are created, `a/b/c` fails: the helper raises before returning them,
+    so it must remove them itself or a refused first install leaves them behind."""
+    target = tmp_path / "a" / "b" / "c"
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *arguments, **options):
+        if self == target:
+            raise PermissionError("denied")
+        return real_mkdir(self, *arguments, **options)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    with pytest.raises(OSError):
+        INSTALL._make_parents(target)
+    assert not (tmp_path / "a").exists()
+
+
+def test_a_refused_first_install_leaves_no_new_ancestor_folder(framework, tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for slug in ORCHESTRATORS:
+        (framework / "agents" / f"{slug}.agent.md").write_text(
+            AGENT.format(slug=slug), encoding="utf-8"
+        )
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *arguments, **options):
+        if self.name == "hooks":
+            raise PermissionError("denied")
+        return real_mkdir(self, *arguments, **options)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    assert _install("--framework-dir", str(framework), "--target-repo", str(repo)) == 1
+    assert list(repo.iterdir()) == []
