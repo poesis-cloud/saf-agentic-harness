@@ -382,10 +382,30 @@ def test_h5_never_claims_a_restore_for_an_error_outcome(rig: Rig) -> None:
     )
     decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
     text = decision["modifiedResult"]["textResultForLlm"]
-    assert "WRITE NOT VALIDATED" in text and "log-unreadable" in text
+    assert "WRITE OUTCOME UNKNOWN" in text and "log-unreadable" in text
     assert "WRITE REJECTED" not in text
     assert "restored from HEAD" not in decision["additionalContext"]
     assert "log-unreadable" in decision["additionalContext"]
+
+
+def test_h5_leaves_the_commit_state_open_for_an_error_after_the_commit(rig: Rig) -> None:
+    """`log-append-failed` arrives after the harness committed: the result must claim
+    neither a commit nor a restore, and direct the actor to inspect before retrying."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.runner.script["check-step-artifact"] = build_error_report(
+        "check-step-artifact",
+        "system-error",
+        "log-append-failed",
+        "The session log could not be appended.",
+    )
+    decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
+    context = decision["additionalContext"]
+    assert "UNKNOWN" in context and "may already be committed" in context
+    assert "Inspect the artifact" in context
+    for claim in ("neither committed", "was not committed", "restored from HEAD", "discarded)"):
+        assert claim not in context
+    assert "OUTCOME UNKNOWN" in decision["modifiedResult"]["textResultForLlm"]
 
 
 def test_a_failed_write_is_not_validated(rig: Rig) -> None:

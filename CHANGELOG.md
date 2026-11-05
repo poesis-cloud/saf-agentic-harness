@@ -165,7 +165,7 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   - The H4 recognizer accepts the hinted line when a path holds an apostrophe, in the exact
     PowerShell or POSIX quoting the hint renders.
   - H5 claims a restore only for a `reverted` write; an error report is relayed as
-    "write not validated".
+    "write outcome unknown", and the actor inspects the artifact before retrying.
   - Every harness call of a firing is bounded by a deadline inside the hook's registered
     timeout, so a stalled call is a denial, not a fail-open timeout.
   - Context injection follows the documented limits (10 KB for `postToolUse`, 10 MiB of

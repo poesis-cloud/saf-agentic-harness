@@ -23,11 +23,14 @@ _WRITE_RETRY_DIRECTIVE = (
     "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its "
     "schema and retry."
 )
-_WRITE_UNVALIDATED = "WRITE NOT VALIDATED by the SAFe agentic harness: "
+_WRITE_UNVALIDATED = "WRITE OUTCOME UNKNOWN — the SAFe agentic harness answered an error: "
+# An error can follow the commit (`log-append-failed`: the harness commits, then journals),
+# so neither the commit nor a restore can be claimed or denied.
 _WRITE_ERROR_DIRECTIVE = (
-    "The harness answered an error instead of validating this write, so it was neither "
-    "committed nor necessarily restored: its bytes may still be in the working tree. Fix "
-    "what the error names, then redo the write so it is validated."
+    "The harness answered an error for this write, so its state is UNKNOWN: it may already "
+    "be committed, may have been restored, or may still be uncommitted in the working tree. "
+    "Do not assume it was saved or discarded. Inspect the artifact (view it) before retrying, "
+    "fix what the error names, then redo the write only if it does not hold what you intended."
 )
 _STEP_RETRY_DIRECTIVE = (
     "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed "

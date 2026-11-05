@@ -289,9 +289,11 @@ own permission flow still applies to what the harness lets through.
   - `valid` → pass.
   - `reverted` → the harness has already restored or deleted the files. Return
     `modifiedResult` ("write rejected: …") and `additionalContext` with the retry directive.
-  - any other status (an error report) → `modifiedResult` ("write not validated: …") and
-    `additionalContext` naming the error. The write was neither committed nor necessarily
-    restored, so restoration is never claimed.
+  - any other status (an error report) → `modifiedResult` ("write outcome unknown: …") and
+    `additionalContext` naming the error. Its commit and restoration state are both unknown
+    (an error such as `log-append-failed` can follow the commit, since the harness commits
+    before it journals), so neither is claimed: the actor is directed to inspect the
+    artifact before retrying.
 - **H6** runs on `postToolUse` *or* `postToolUseFailure` of `task` in the dispatcher's session:
   `check-step-postconditions`. On `fail`, return `additionalContext` with the failing
   conditions, then `[artifact delivery] fail — <artifactDelivery.failureMessage>` when
