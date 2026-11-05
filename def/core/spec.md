@@ -75,9 +75,9 @@ and implementation parts prescribe its realization.
   which never authors artifact content: its only deliberate Git actions are committing a
   validated staged write onto the step ref and discarding an invalid one (restore / delete)
   at the write boundary (function 9), creating and checking out the step ref when the step
-  session registers (function 0), and rebasing, promoting, and returning to the workspace
-  branch when the step ends (function 10, or function 5 on crash recovery) — none of which
-  authors new content. Artifacts attach
+  session registers (function 0), rebasing and promoting it when the step ends (function
+  10), and returning the working tree to the workspace branch before the next step instance
+  (function 5) — none of which authors new content. Artifacts attach
   to **steps**, never to workflows: each step instance delivers exactly one artifact
   instance — its step's `artifact` field names it by schema slug (the artifact kind) or URI
   (a specific artifact instance) — and a workflow's deliverables in workspace state are simply the
@@ -160,11 +160,12 @@ and implementation parts prescribe its realization.
   is created from the previous step instance's ref tip (a retry of the same step in the same
   workflow instance) when the workspace branch has not moved since that step instance's base, so
   the retry continues the failed work; otherwise from the workspace branch tip. Nothing is
-  renamed or reused: a failed step instance's ref simply remains. It is local-only, never
+  renamed, reused, or deleted: every step instance's ref is kept, promoted or not, as the
+  audit trail of that step instance (pruning is out of scope). It is local-only, never
   synced, and never workspace state. The **step state** is workspace state plus the step
   instance's commits on its step ref — what function 10 evaluates.
-- **Promotion** — fast-forwarding the workspace branch to a step ref whose step instance
-  passed function 10 — the only way artifacts enter workspace state.
+- **Promotion** — fast-forwarding the workspace branch, in one atomic ref update, to a step
+  ref whose step instance passed function 10 — the only way artifacts enter workspace state.
 
 ### Definitions and executions
 
@@ -500,11 +501,11 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
 6. A step session's registration creates its **step instance**'s step ref and checks it out:
    from the ref tip of the step's previous step instance in the same workflow instance when
    the workspace branch has not moved since that step instance's base — the retry continues the
-   failed work — otherwise from the workspace branch tip. Nothing is renamed or reused; a
-   failed step instance's ref remains. A replayed registration (invariant 4) creates no second
-   ref. The working tree's cleanliness is function 5's check, made at step-starting where it
-   can deny the dispatch and is journaled (function 5, `workspace-not-clean`); this function
-   does not repeat it. A failed creation or checkout — a Git failure, or a tree dirtied
+   failed work — otherwise from the workspace branch tip. Nothing is renamed, reused, or
+   deleted: every step instance's ref remains (function 10). A replayed registration (invariant 4) creates no second
+   ref. The working tree's preparation is function 5's — clean, and on the workspace branch
+   — made at step-starting where it can deny the dispatch and is journaled (function 5,
+   `workspace-not-clean`); this function does not repeat it. A failed creation or checkout — a Git failure, or a tree dirtied
    between the two boundaries — is the uniform `system-error` (rule 1). The bound: such a
    step instance has no checked-out step ref, so function 8 denies every write it attempts
    (function 8, invariant 7), and function 10 finds no delivery and withholds — it can never
@@ -923,8 +924,9 @@ Contract schemas — [contracts/api/resolve-step-model.input.schema.json](../../
 May this step start? The gate the orchestrator consults between resolution and dispatch.
 Evaluated strictly against persisted workspace state
 (C1) and the instance view of the logs — never against anything an agent merely remembers.
-It also checks that the working tree is clean, so the step session's **step ref** — created
-by function 0 once the session exists — can be checked out over it.
+It also prepares the working tree: it requires it clean and, on a pass, returns it to the
+workspace branch, so the step session's **step ref** — created by function 0 once the
+session exists — is always created over a clean working tree on the workspace branch.
 
 **Interface**
 
@@ -985,9 +987,9 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
 - (E) The working tree is clean — no uncommitted tracked change and no untracked file (the
   logs path is excluded from Git, see [Logging](#logging)) — violation: `state-error`
   (`workspace-not-clean`), journaled in the dispatching session's log; as at any non-pass
-  outcome of this enforcement point, the dispatch is refused. A working tree left on a step
-  ref by an earlier step instance — of whichever orchestrator session — is first returned to
-  the workspace branch (function 10, invariant 7); that return is not a violation.
+  outcome of this enforcement point, the dispatch is refused. A clean working tree still on
+  an earlier step instance's ref — function 10 leaves it there, and a crashed step instance
+  of whichever orchestrator session too (function 10, invariant 7) — is not a violation.
 - Trigger — the step-starting boundary (THE enforcement point: a failing precondition denies
   the dispatch), in the dispatching (orchestrator) session: the step
   session does not exist yet at this boundary. There is no agent-facing probe: the mediated
@@ -999,10 +1001,14 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
 - One log entry records the invocation: the per-condition checks plus the aggregate outcome —
   appended to the dispatching (orchestrator) session's log, the session the step-starting
   boundary belongs to.
+- On `pass`, the working tree is on the workspace branch: function 5 checks it out from
+  whatever step-instance ref it was left on — after the previous step instance's function
+  10, or after a crashed one (function 10, invariant 7). This is the harness's only return to
+  the workspace branch. On `fail` or any error outcome, the working tree is not moved.
 - No artifact is touched — the invocation's own log entry is the only write: checking never
-  mutates artifacts. (Returning a working tree left on a step ref to the workspace branch,
-  above, only materializes already-committed content.) The step ref itself is created later,
-  by function 0, once the step session — and with it the step instance — exists.
+  mutates artifacts, and the checkout only materializes already-committed content. The step
+  ref itself is created later, by function 0, once the step session — and with it the step
+  instance — exists.
 
 **Enforcement scope.** "THE enforcement point" holds while the boundary fires — a host whose
 hook plane fails open (timeout, spawn failure) can let a dispatch bypass this function. The
@@ -1393,9 +1399,8 @@ Contract schemas — [contracts/api/check-step-artifact.input.schema.json](../..
    acting step instance's own step ref, attributed to the acting session (its `sessionId` in
    the commit message — the step instance's identity) so Git history and the session log
    correlate. The commit and the discard are function 9's deliberate Git actions (the
-   harness's only others are function 0's step-ref creation and checkout, and function 10's
-   rebase, promotion, and return to the workspace branch — also function 5's, on crash
-   recovery), both recorded inside the validation entry's report: the discard as the revert
+   harness's only others are function 5's return to the workspace branch, function 0's
+   step-ref creation and checkout, and function 10's rebase and promotion), both recorded inside the validation entry's report: the discard as the revert
    records, the commit as `commitId` + `committedPaths` — so the session log alone states what
    each session committed, and the commit message's `sessionId` correlates the Git history
    back to it (also across a function-10 rebase, which rewrites commit ids but keeps the
@@ -1426,17 +1431,20 @@ instances that passed here.
   evaluated, so a host event payload need not echo the step session's own id — hosts whose
   dispatch-return events carry no step identity are fully supported. The step's session is
   the single step session function 0 registered under the in-flight resolution (function 0,
-  invariant 5); delivery (invariant 5) is read from that session's log — the
-  `committedPaths` of its function-9 `valid` entries (function 9, invariant 3), each path's
-  kind resolved through the workspace layout.
+  invariant 5). Delivery (invariant 5) is read from two sources: the diff between that
+  session's step-instance ref and its base — the workspace branch tip, after any rebase —
+  and that session's log — the `committedPaths` of its function-9 `valid` entries (function
+  9, invariant 3); each path's kind is resolved through the workspace layout.
 - **Out** — `CheckStepPostconditionsReport`: the aggregate `outcome` (`pass` / `fail`) +
   `conditionChecks`, exactly as function 5 (distinct type — one output contract each), plus
   its own `artifactDelivery` (invariant 5), journaled in the same entry: the step's
-  `artifact` kind, the delivered instance's `artifactPath` (or `null`), the delivery
+  `artifact` kind, the delivered artifact instance's `artifactPath` (or `null`), the delivery
   `outcome` (`pass` / `fail`), and on failure a `failureMessage` naming the step, the kind,
-  and why — zero artifact instances, or more than one. A failed delivery fails the aggregate. The
-  report also carries its own `promotion` (invariant 6), journaled in the same entry:
-  `{outcome: promoted | withheld, workspaceCommit}` — whether the step ref was promoted, and
+  and why — the step state changes zero artifact instances of the kind, or more than one, or
+  the step session's own commits do not change the one it changes. A failed delivery fails
+  the aggregate. The report also carries its own `promotion` (invariant 6), journaled in the
+  same entry: `{outcome: promoted | withheld, workspaceCommit}` — whether the step ref was
+  promoted, and
   the workspace branch tip the invocation leaves (the evaluated step state's commit when
   promoted, the unchanged tip when withheld). The output contract gains `promotion` in the
   implementation change that follows this specification change.
@@ -1509,31 +1517,39 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
   function 3's cursor — and its `promotion`, appended to the dispatching (orchestrator)
   session's log.
 - No artifact content is authored; on pass, workspace state advances exactly to the evaluated
-  step state. On fail or any error outcome, workspace state is untouched and the step
-  instance's ref remains, for the retry's new step instance to build on (function 0,
-  invariant 6).
-- Except on a `system-error`, the working tree is back on the workspace branch.
+  step state. On fail or any error outcome, workspace state is untouched.
+- The step-instance ref is kept whatever the outcome — the audit trail of each step instance,
+  and on failure the base a retry's new step instance may build on (function 0, invariant
+  6); pruning step-instance refs is out of scope. The working tree is left as it is: function
+  5 returns it to the workspace branch before the next step instance.
 
 **Order of operations.** On the in-flight step instance — the step session function 0
-registered under the in-flight resolution, and that session's own step ref — the function:
+registered under the in-flight resolution, and that session's own step ref — the function
+performs exactly two Git acts, the rebase and the promotion:
 
 1. If the workspace branch moved since the step ref's base — in v1 only a foreign commit can
    move it (C6, guarantee scope) — rebases the step ref onto the branch tip, so history stays
    linear. A conflict is `state-error` (`step-rebase-conflict`), journaled: the rebase is
-   abandoned, the step instance concludes not executed, the workspace branch is untouched and
-   checked out, and the step ref remains.
+   abandoned, leaving the step ref as it was, the step instance concludes not executed, and
+   the workspace branch is untouched.
 2. Evaluates delivery (invariant 5) and the declared postconditions on the step state.
-3. On `pass`, promotes: fast-forwards the workspace branch to the step ref, checks the
-   workspace branch out, and deletes the step ref.
-4. On `fail`, withholds: leaves the workspace branch untouched, leaves the step ref in place,
-   and checks the workspace branch out.
+3. On `pass`, promotes: ONE atomic fast-forward of the workspace branch ref to the step ref
+   tip, conditional on the branch still holding its expected old value (a compare-and-swap
+   ref update, e.g. `git update-ref <branch> <new> <old>`). **This ref update is the
+   acceptance point**: no checkout and no ref deletion follow it — only the invocation's
+   journal entry.
+4. On `fail`, withholds: no Git act at all.
 
 A step instance whose ref function 0 could not create or check out (function 0, invariant
 6) has no checked-out step ref: function 8 denied all its writes, so its step state is
-workspace state, its delivery fails, and it is withheld with nothing to keep. A Git failure mid-rebase,
-mid-promotion, or mid-checkout is the uniform `system-error` (rule 1), never a partial
-promotion: the workspace branch either advanced to the evaluated step state or did not
-move.
+workspace state, its delivery fails, and it is withheld with nothing to keep. A Git failure
+during the rebase or at the promotion update — including the branch having moved since the
+rebase — is the uniform `system-error` (rule 1) with the workspace branch unmoved: the ref
+update is atomic, so acceptance either happened or did not, and no Git act can fail after
+it. The one residual is the journal: if the append fails after promotion, rule 4 applies
+(`log-append-failed`, the entry is lost). Function 3's cursor then re-resolves an
+already-promoted step, and the new step instance must deliver again — bounded and visible,
+and an environment failure, not an outcome.
 
 **Invariants**
 
@@ -1551,26 +1567,40 @@ move.
 4. A step's outcome passes only if its artifact was delivered (invariant 5) and every
    declared postcondition passes. Declared postconditions may be zero; delivery is never
    optional.
-5. Delivery. The step's session committed, through function 9, a change to exactly one
-   instance of the step's declared artifact kind — creating it or updating it (the workflow
-   schema's "produces or updates"). A step that decides "no change" or "none" records that
-   decision in the artifact itself, which is a real change, so it still delivers. A write
-   identical to the step ref tip creates no commit (function 9, invariant 4) and does not
-   deliver. Writes to other kinds remain governed by authorization (function 8) only.
+5. Delivery is checked over the whole step state being promoted, and holds when both:
+   (a) the diff between the step-instance ref and its base — the workspace branch tip,
+   after any rebase — changes **exactly one** artifact instance of the step's declared
+   artifact kind, creating it or updating it (the workflow schema's "produces or updates");
+   and (b) the step session's own commits, through function 9, include a change to that same
+   artifact instance. (a) keeps a retry built on a previous step instance's ref (function 0,
+   invariant 6) from promoting more than one artifact instance of the kind; (b) keeps "no
+   valid step instance without its artifact": a retry that agrees with the earlier work
+   still records its decision in the artifact. A step instance that decides "no change" or
+   "none" records that decision in the artifact itself, which is a real change, so it still
+   delivers. A write identical to the step ref tip creates no commit (function 9, invariant
+   4) and does not deliver. Writes to other kinds remain governed by authorization
+   (function 8) only.
 6. Atomic acceptance: workspace state advances once per passing step instance, to exactly the state
    that was evaluated; a failed, abandoned, or crashed step instance never advances it.
    Workspace state therefore only ever holds the output of step instances that passed this
    function (C6).
 7. Crash recovery: a step session ending without a function-10 outcome leaves its step
-   instance's ref. The next function-5 or function-10 call — whichever orchestrator session
-   makes it, never tied to the original session — finds the working tree on that ref (the
-   trigger is the workspace's Git state, not any session's log), returns it to the workspace
-   branch, and leaves the ref in place for the retry's new step instance to build on (function
-   0, invariant 6). In particular, a workflow instance resumed by a new orchestrator session
-   after the previous one ended mid-step continues normally: the orphaned step instance's
-   resolution belongs to the old session, the new session re-resolves the step (function 3),
-   and the new step instance's ref is based on the orphaned ref when the workspace branch has
-   not moved since that ref's base.
+   instance's ref, with the working tree on it. The next function-5 call — whichever
+   orchestrator session makes it, never tied to the original session — returns the working
+   tree to the workspace branch as part of its ordinary preparation — the same act it
+   performs before every step instance, driven by the working tree's Git state, not by any
+   session's log — and leaves the ref in place for the retry's new step instance to
+   build on (function 0, invariant 6). In particular, a workflow instance resumed by a new
+   orchestrator session after the previous one ended mid-step continues normally: the
+   orphaned step instance's resolution belongs to the old session, the new session
+   re-resolves the step (function 3), and the new step instance's ref is based on the
+   orphaned ref when the workspace branch has not moved since that ref's base. Within one
+   orchestrator session, concluding an unfinished step instance relies on the step-ended
+   boundary firing on dispatch return — including for a failed or crashed sub-agent — so
+   that this function journals its outcome. Where it does not fire (a host whose hook plane
+   fails open), the step instance stays in flight in that session (function 3, invariant 9,
+   `step-in-flight`), and recovery goes through a new orchestrator session, as above; no
+   other recovery mechanism is specified.
 
 ### 11. end-session
 
@@ -1682,7 +1712,7 @@ coherence, parent linkage resolution, blocking open items), the workspace struct
 the workspace layout — is an **internal store capability** (`scan_raw_paths` +
 `validate_artifact` over the raw universe of the workspace branch's committed state), not a
 function: it journals nothing, never mutates, and reports findings to whoever runs it. Step
-refs are reported as step instances — in flight, failed, or abandoned — never validated as
+refs are reported as step instances — in flight, promoted, failed, or abandoned — never validated as
 workspace state. The embedding application uses it for C6's canonical-branch guarantee — the required CI status check on the workspace
 repository (see C6, guarantee scope) — and may ship it as an advisory pre-commit hook;
 remediation always goes through agents.
@@ -2161,8 +2191,8 @@ exists anywhere, and no layer ever calls *behavior* it skipped over.
     produces `Finding`s; `commit_artifacts` commits a validated staged set onto the step ref
     as one commit (function 9's call-level atomicity)
     and `revert_artifact` discards an invalid one — together function 9's deliberate Git
-    actions; the step-ref operations of functions 0 and 10 — create and check out; rebase,
-    promote, and return to the workspace branch — enter the class model with the
+    actions; the Git operations of functions 5, 0, and 10 — return to the workspace branch;
+    create and check out the step ref; rebase and promote — enter the class model with the
     implementation of this contract), alongside `Artifact`
     and `Finding` (source, rule, message — internal to this store: what `validate_artifact` and
     `revert_artifact` produce, and what function 9 renders into
@@ -2292,14 +2322,16 @@ and checked out by function 0 when it registers the step session — from the pr
 instance's ref tip when the workspace branch has not moved since that step instance's base, else
 from the workspace branch tip — local-only and never synced. Function 10 evaluates the step
 state — workspace state plus the step instance's commits — and on pass **promotes** it: the
-workspace branch fast-forwards to the step ref (after a rebase when a foreign commit moved
-the branch, so history stays linear), is checked out again, and the step ref is deleted. On
-fail the workspace branch is untouched and the step ref remains, for a retry's new step
-instance to build on. Workspace state therefore advances once per passing step instance, to
+workspace branch ref fast-forwards to the step ref in one atomic, compare-and-swap update
+(after a rebase when a foreign commit moved the branch, so history stays linear) — the
+acceptance point, after which no Git act follows. On fail the workspace branch is untouched.
+Either way the step ref is kept, as the audit trail of each step instance (pruning is out of
+scope), and a failed one is the base a retry's new step instance may build on; function 5
+returns the working tree to the workspace branch before the next step instance. Workspace state therefore advances once per passing step instance, to
 exactly the evaluated state, and only ever holds the output of step instances that passed
 function 10. These are the harness's only deliberate Git actions: commit and discard
-(function 9); step-ref creation and checkout (function 0); rebase, promotion, and return to
-the workspace branch (function 10, and function 5 on crash recovery). Step refs change no
+(function 9); return to the workspace branch (function 5); step-ref creation and checkout
+(function 0); rebase and promotion (function 10). Step refs change no
 function's signature or inputs and leave the session model intact: function 3's cursor still
 reads only function-10 outcomes, and 1 step instance = 1 agent = 1 session = 1 artifact instance holds unchanged.
 
@@ -2445,7 +2477,7 @@ logs path and are never committed or synced. The harness excludes the logs path 
 explicitly (it adds it to the workspace repository's `.git/info/exclude` — repository
 metadata, not an action on artifacts), so no checkout —
 in particular no step-ref checkout (function 0) or return to the workspace branch (function
-10) — ever touches a log, and a log never makes the working tree unclean. What syncs between
+5) — ever touches a log, and a log never makes the working tree unclean. What syncs between
 clones is the workspace branch's committed artifact state (C6); the journal — like the step
 refs — stays with the machine that wrote it. Three consequences, accepted as
 explicit non-goals: cross-machine mid-instance handoff is not supported (the instance view —

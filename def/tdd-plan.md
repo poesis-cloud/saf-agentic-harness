@@ -366,13 +366,15 @@ its red tests first:
 - function 0 — step-instance ref creation and checkout at step-session registration (from
   the previous step instance's ref tip on an unchanged base, else from the workspace branch
   tip; no second ref on replay; a failed checkout is `system-error`) — invariant 6;
-- function 5 — the clean-working-tree precondition (`workspace-not-clean`) and the
-  crash-recovery return to the workspace branch;
+- function 5 — the clean-working-tree precondition (`workspace-not-clean`) and, on pass, the
+  return of the working tree to the workspace branch (which also covers crash recovery);
 - function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step
   instance in flight with its own ref checked out → `denied`);
 - function 9 — commit onto the step ref; vacuous validity against the step ref tip;
-- function 10 — rebase, evaluation on the step state, promotion / withholding, return to the
-  workspace branch, crash recovery (invariants 6–7);
+- function 10 — rebase, delivery over the whole step state plus the step session's own
+  commits (invariant 5), evaluation on the step state, promotion as one compare-and-swap
+  fast-forward (the acceptance point; no checkout or ref deletion after it) or withholding,
+  step-instance refs kept (invariants 6–7);
 - `ArtifactStore` — the step-ref Git operations, reads of the step state, the logs path in
   `.git/info/exclude`, and the sweep reporting step refs as step instances; the class diagram
   (`harness-src-classes.puml`, note already updated) gains them and
