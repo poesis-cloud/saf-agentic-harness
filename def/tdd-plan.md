@@ -373,7 +373,8 @@ its red tests first:
 - function 9 — commit onto the step ref; vacuous validity against the step ref tip;
 - function 10 — rebase, delivery over the whole step state plus the worker session's own
   commits (invariant 5), evaluation on the step state, promotion as one compare-and-swap
-  fast-forward (the acceptance point; no checkout or ref deletion after it) or withholding,
+  fast-forward (the acceptance point; no checkout or ref deletion after it; a failed
+  compare-and-swap is `step-rebase-conflict`; no lock) or withholding,
   step-instance refs kept (invariants 6–7);
 - `ArtifactStore` — the step-ref Git operations, reads of the step state, the logs path in
   `.git/info/exclude`, and the sweep reporting step refs as step instances; the class diagram

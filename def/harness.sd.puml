@@ -156,7 +156,7 @@ Host -> Adapter : hook ""PostToolUse"" — dispatch class
 Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
 Harness -> Harness : rebase the step ref onto the workspace branch if it moved\n(conflict: state-error step-rebase-conflict); evaluate\ndelivery (whole step state + own commits) + postconditions\non the step state
 alt step instance passes
-  Harness -> Harness : promote — ONE atomic fast-forward of the workspace\nbranch ref to the step ref (compare-and-swap): the\nacceptance point, no Git act after it; step ref kept
+  Harness -> Harness : promote — ONE atomic fast-forward of the workspace\nbranch ref to the step ref (compare-and-swap): the\nacceptance point, no Git act after it; step ref kept\n(branch moved meanwhile: state-error step-rebase-conflict)
 else step instance fails
   Harness -> Harness : withhold — no Git act: workspace branch untouched,\nstep-instance ref kept for a retry to build on
 end

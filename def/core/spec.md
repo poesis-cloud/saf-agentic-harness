@@ -173,8 +173,10 @@ and implementation parts prescribe its realization.
   workflow instance) when the workspace branch has not moved since that step instance's base, so
   the retry continues the failed work; otherwise from the workspace branch tip. Nothing is
   renamed, reused, or deleted: every step instance's ref is kept, promoted or not, as the
-  audit trail of that step instance (pruning is out of scope). It is local-only, never
-  synced, and never workspace state. The **step state** is workspace state plus the step
+  audit trail of that step instance (pruning is out of scope). Every `refs/harness/*` ref is
+  **local-only**: never pushed or fetched — the harness relies on Git's default refspecs,
+  which carry only branches and tags, never `refs/harness/*` — never checked out by humans,
+  and never part of workspace state or of the canonical branch. The **step state** is workspace state plus the step
   instance's commits on its step ref — what function 10 evaluates.
 - **Promotion** — fast-forwarding the workspace branch, in one atomic ref update, to a step
   ref whose step instance passed function 10 — the only way artifacts enter workspace state.
@@ -336,7 +338,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
 | `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
-| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its worker session (`worker-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), the working tree holds uncommitted changes when a step is dispatched (`workspace-not-clean`), a step ref cannot be rebased onto a moved workspace branch (`step-rebase-conflict`) | Yes, except the C8 refusal (rule 3) and `worker-session-bound` (rule 4) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its worker session (`worker-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), the working tree holds uncommitted changes when a step is dispatched (`workspace-not-clean`), a step ref cannot be rebased onto a moved workspace branch, or the workspace branch moved under the step instance before its promotion's compare-and-swap (`step-rebase-conflict`) | Yes, except the C8 refusal (rule 3) and `worker-session-bound` (rule 4) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
 
@@ -1550,19 +1552,26 @@ performs exactly two Git acts, the rebase and the promotion:
    the workspace branch is untouched.
 2. Evaluates delivery (invariant 5) and the declared postconditions on the step state.
 3. On `pass`, promotes: ONE atomic fast-forward of the workspace branch ref to the step ref
-   tip, conditional on the branch still holding its expected old value (a compare-and-swap
-   ref update, e.g. `git update-ref <branch> <new> <old>`). **This ref update is the
-   acceptance point**: no checkout and no ref deletion follow it — only the invocation's
-   journal entry.
+   tip, conditional on the branch still holding its expected old value — the tip the step
+   ref was based on after step 1 (a compare-and-swap ref update, e.g. `git update-ref
+   <branch> <new> <old>`). **This ref update is the acceptance point**: no checkout and no
+   ref deletion follow it — only the invocation's journal entry. If the compare-and-swap
+   fails because the workspace branch moved between the rebase and the update, the step
+   instance fails with `state-error` (`step-rebase-conflict` — the workspace branch moved
+   under the step instance), journaled: the workspace branch is untouched, the
+   step-instance ref is kept, and since the base has moved, the retry's new step instance
+   starts from the new workspace branch tip (function 0, invariant 6).
 4. On `fail`, withholds: no Git act at all.
 
 A step instance whose ref function 0 could not create or check out (function 0, invariant
 6) has no checked-out step ref: function 8 denied all its writes, so its step state is
-workspace state, its delivery fails, and it is withheld with nothing to keep. A Git failure
-during the rebase or at the promotion update — including the branch having moved since the
-rebase — is the uniform `system-error` (rule 1) with the workspace branch unmoved: the ref
-update is atomic, so acceptance either happened or did not, and no Git act can fail after
-it. The one residual is the journal: if the append fails after promotion, rule 4 applies
+workspace state, its delivery fails, and it is withheld with nothing to keep. There is no
+lock: concurrency on the workspace branch is optimistic, and the promotion's compare-and-swap
+is the only serialization point — a branch that moved under the step instance is caught
+there (step 3), never by locking it. Any other Git failure during the rebase or at the
+promotion update is the uniform `system-error` (rule 1) with the workspace branch unmoved:
+the ref update is atomic, so acceptance either happened or did not, and no Git act can fail
+after it. The one residual is the journal: if the append fails after promotion, rule 4 applies
 (`log-append-failed`, the entry is lost). Function 3's cursor then re-resolves an
 already-promoted step, and the new step instance must deliver again — bounded and visible,
 and an environment failure, not an outcome.
@@ -2336,7 +2345,9 @@ new path). No commit ever holds invalid bytes — transactional by construction.
 **step ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>`), created
 and checked out by function 0 when it registers the worker session — from the previous step
 instance's ref tip when the workspace branch has not moved since that step instance's base, else
-from the workspace branch tip — local-only and never synced. Function 10 evaluates the step
+from the workspace branch tip — local-only like every `refs/harness/*` ref: never pushed or
+fetched (default refspecs do not carry it), never checked out by humans, never part of
+workspace state or the canonical branch. Function 10 evaluates the step
 state — workspace state plus the step instance's commits — and on pass **promotes** it: the
 workspace branch ref fast-forwards to the step ref in one atomic, compare-and-swap update
 (after a rebase when a foreign commit moved the branch, so history stays linear) — the
