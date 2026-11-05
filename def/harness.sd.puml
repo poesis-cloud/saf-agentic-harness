@@ -94,6 +94,7 @@ Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resol
 Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model profile, skills, instructions)
 Host -> Adapter : hook ""PreToolUse"" — dispatch class
 Adapter -> Harness : ""5 check-step-preconditions""(sessionId, parentSessionId: null)
+Harness -> Harness : on pass — prepare the step ref\n""refs/harness/steps/<instance>/<step>"" (new from the\nworkspace branch tip, or the retry's reused ref)\nand check it out (clean working tree required)
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 alt preconditions hold
   Adapter --> Host : permissionDecision: allow
@@ -124,10 +125,10 @@ Host -> Adapter : hook ""PreToolUse"" — write class
 Adapter -> Harness : ""8 check-step-authorization""(sessionId, parentSessionId,\nartifactPath, action)
 Harness --> Adapter : { outcome: allowed | denied,\nauthorization: { actor, artifactPath, action, resource, failureMessage? } }
 alt privilege granted
-  Adapter --> Host : permissionDecision: allow\n(staging baseline clean against HEAD)
+  Adapter --> Host : permissionDecision: allow\n(step in flight; staging baseline clean against the step ref)
   Host -> Host : execute the write — lands in the working tree\n(the staging area, not yet workspace state)
-else no grant
-  Adapter --> Host : permissionDecision: deny (missing privilege)
+else no grant, or no step in flight
+  Adapter --> Host : permissionDecision: deny (missing privilege / no step in flight)
   Host --> Sub : write blocked, report returned
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
@@ -135,10 +136,10 @@ Host -> Adapter : hook ""PostToolUse"" — write class
 Adapter -> Harness : ""9 check-step-artifact""(sessionId, parentSessionId, artifactPaths)
 Harness --> Adapter : { outcome: valid | reverted,\nartifactChecks?: [{ artifactPath, failureMessage, revert: { action, from } }, …] }
 alt write is schema-valid
-  Harness -> Harness : commit the staged write — workspace state\n(HEAD) advances atomically, attributed to the session
+  Harness -> Harness : commit the staged write onto the step ref,\nattributed to the session — workspace state\ndoes not advance (only promotion does)
   Adapter --> Host : { ""continue"": true }
 else invalid write
-  Harness -> Harness : discard the staged write — restore from HEAD /\ndelete new: committed state never held the invalid\nbytes (C6 — transactional by construction)
+  Harness -> Harness : discard the staged write — restore from the step\nref tip / delete new: no commit ever held the invalid\nbytes (C6 — transactional by construction)
   Adapter --> Host : decision: ""block"" + reason\n(additionalContext restates the retry instruction)
   Host --> Sub : failure message returned
   Sub -> Sub : per its step instructions — rewrite per the\nfailure message and retry the write
@@ -152,7 +153,13 @@ Harness --> Adapter : { outcome: ended }\n(never surfaced to the host)
 Adapter -> Adapter : ""SessionTracker"" pops the step session —\nthe dispatching orchestrator session is current again
 Host -> Adapter : hook ""PostToolUse"" — dispatch class
 Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
-Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
+Harness -> Harness : rebase the step ref onto the workspace branch if it moved\n(conflict: state-error step-rebase-conflict); evaluate\ndelivery + postconditions on the step state
+alt step passes
+  Harness -> Harness : promote — fast-forward the workspace branch to the\nstep ref, check the workspace branch out, delete the step ref
+else step fails
+  Harness -> Harness : withhold — workspace branch untouched, step ref kept\nfor the retry, check the workspace branch out
+end
+Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …],\npromotion: { outcome: promoted | withheld, workspaceCommit } }
 alt postconditions hold — step journaled executed
   Adapter --> Host : { ""continue"": true }
   Host --> Orch : dispatch returns — next iteration resolves the next step

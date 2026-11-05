@@ -348,6 +348,35 @@ time of this refresh; `make verify` is authoritative):
 
 Recorded honestly — every item below is real and currently open unless marked resolved.
 
+**Spec ahead of implementation — step transactionality.** The core spec now makes the step
+the unit of acceptance: function 9 commits each validated set onto a local-only **step ref**
+(`refs/harness/steps/<workflowInstanceId>/<stepSlug>`) that function 5 prepares and checks
+out, and function 10 evaluates the **step state** and, on pass, **promotes** it by
+fast-forwarding the workspace branch — so workspace state only ever holds the output of
+steps that passed function 10 (core spec: Terminology, C0, C1, C6, functions 5, 8, 9, 10,
+Outcomes rule 1, Internal validation, Workspace Git plane, Logging). Nothing below is
+implemented yet; the implementation change follows the spec's approval and owes, each with
+its red tests first:
+
+- contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
+  `check-step-postconditions.output.schema.json`; the two new normative codes
+  `workspace-not-clean` and `step-rebase-conflict` in `report.schema.json`'s code list;
+- function 5 — the clean-working-tree precondition and step-ref preparation (first attempt,
+  reuse on an unchanged base, retirement to `refs/harness/attempts/…` otherwise);
+- function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step in
+  flight → `denied`);
+- function 9 — commit onto the step ref; vacuous validity against the step ref tip;
+- function 10 — rebase, evaluation on the step state, promotion / withholding, return to the
+  workspace branch, crash recovery (invariants 6–7);
+- `ArtifactStore` — the step-ref Git operations, reads of the step state, the logs path in
+  `.git/info/exclude`, and the sweep reporting step refs as attempts; the class diagram
+  (`harness-src-classes.puml`, note already updated) gains them and
+  `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered
+  then (the committed PNG is a crop that does not show `artifact_store`);
+- adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
+  "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
+  with the core when the adapters are.
+
 **Resolved since 2026-08-21.** The `Makefile` is no longer stale: `verify` runs the whole
 pytest suite, `unit` / `functional` / `adapter` run one plane each, `test` aliases `verify`, and
 the `check-catalog` / `tests/integration/` references are gone.

@@ -408,17 +408,20 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       }
       note bottom of ArtifactStore
         Owns the artifact side (C6): workspace state is
-        committed state (HEAD), the working tree is the
-        write staging area. ""discover_artifacts"" reads
-        committed state and raises on an invalid artifact;
+        the workspace branch's committed state, the working
+        tree is the write staging area. ""discover_artifacts""
+        reads committed state (workspace or step state) and
+        raises on an invalid artifact;
         ""scan_raw_paths"" enumerates the raw universe for
         sweeps; ""is_staging_clean"" backs function 8's
         invariant 5 (target absent, or tracked and clean
-        against HEAD); ""commit_artifacts"" promotes a
-        validated staged SET into state as ONE commit
+        against the step ref); ""commit_artifacts"" commits a
+        validated staged SET onto the step ref as ONE commit
         (function 9's call-level atomicity) and
-        ""revert_artifact"" discards an invalid one - the
-        harness's only deliberate Git actions. Finding is
+        ""revert_artifact"" discards an invalid one - function
+        9's deliberate Git actions. The step-ref operations of
+        functions 5 and 10 (prepare, rebase, promote) join the
+        class model with their implementation. Finding is
         homed here and stays internal to this store: it is
         what ""validate_artifact"" and ""revert_artifact""
         produce, and function 9 renders it into
