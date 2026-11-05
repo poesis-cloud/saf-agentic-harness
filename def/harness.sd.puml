@@ -107,7 +107,7 @@ Host -> Adapter : hook ""SubagentStart""
 alt agent_type correlates to an unresolved step-resolution entry
   Adapter -> Harness : ""0 start-session""(agent: agent_type, sessionId,\nparentSessionId: the dispatching session)
   Harness -> Harness : correlates to the parent's latest unresolved\nstep-resolution entry for agent_type
-  Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<instance>/<step>/<stepSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) and check it out
+  Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) and check it out
   Harness --> Adapter : { session: { agent, sessionId, parentSessionId } }
   Adapter -> Harness : ""6 resolve-step-instructions""(sessionId, parentSessionId)
   Harness --> Adapter : { instructions: [the step's declared refs] }
