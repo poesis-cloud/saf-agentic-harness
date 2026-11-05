@@ -90,11 +90,11 @@ Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESU
 Host --> Orch : tool result — the model profile
 Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resolution + profile verbatim
 
-== Step dispatch (1 step = 1 agent = 1 session = 1 artifact) ==
+== Step dispatch (1 step instance = 1 agent = 1 session = 1 artifact instance) ==
 Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model profile, skills, instructions)
 Host -> Adapter : hook ""PreToolUse"" — dispatch class
 Adapter -> Harness : ""5 check-step-preconditions""(sessionId, parentSessionId: null)
-Harness -> Harness : on pass — prepare the step ref\n""refs/harness/steps/<instance>/<step>"" (new from the\nworkspace branch tip, or the retry's reused ref)\nand check it out (clean working tree required)
+Harness -> Harness : evaluate the preconditions; require a clean\nworking tree (else state-error workspace-not-clean)
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 alt preconditions hold
   Adapter --> Host : permissionDecision: allow
@@ -107,6 +107,7 @@ Host -> Adapter : hook ""SubagentStart""
 alt agent_type correlates to an unresolved step-resolution entry
   Adapter -> Harness : ""0 start-session""(agent: agent_type, sessionId,\nparentSessionId: the dispatching session)
   Harness -> Harness : correlates to the parent's latest unresolved\nstep-resolution entry for agent_type
+  Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<instance>/<step>/<stepSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) and check it out
   Harness --> Adapter : { session: { agent, sessionId, parentSessionId } }
   Adapter -> Harness : ""6 resolve-step-instructions""(sessionId, parentSessionId)
   Harness --> Adapter : { instructions: [the step's declared refs] }
@@ -125,10 +126,10 @@ Host -> Adapter : hook ""PreToolUse"" — write class
 Adapter -> Harness : ""8 check-step-authorization""(sessionId, parentSessionId,\nartifactPath, action)
 Harness --> Adapter : { outcome: allowed | denied,\nauthorization: { actor, artifactPath, action, resource, failureMessage? } }
 alt privilege granted
-  Adapter --> Host : permissionDecision: allow\n(step in flight; staging baseline clean against the step ref)
+  Adapter --> Host : permissionDecision: allow\n(step instance in flight; staging baseline clean against its step ref)
   Host -> Host : execute the write — lands in the working tree\n(the staging area, not yet workspace state)
-else no grant, or no step in flight
-  Adapter --> Host : permissionDecision: deny (missing privilege / no step in flight)
+else no grant, or no step instance in flight
+  Adapter --> Host : permissionDecision: deny (missing privilege / no step instance in flight)
   Host --> Sub : write blocked, report returned
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
@@ -157,7 +158,7 @@ Harness -> Harness : rebase the step ref onto the workspace branch if it moved\n
 alt step passes
   Harness -> Harness : promote — fast-forward the workspace branch to the\nstep ref, check the workspace branch out, delete the step ref
 else step fails
-  Harness -> Harness : withhold — workspace branch untouched, step ref kept\nfor the retry, check the workspace branch out
+  Harness -> Harness : withhold — workspace branch untouched, step-instance\nref left in place, check the workspace branch out
 end
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …],\npromotion: { outcome: promoted | withheld, workspaceCommit } }
 alt postconditions hold — step journaled executed

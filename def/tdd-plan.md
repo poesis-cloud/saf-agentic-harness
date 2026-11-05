@@ -348,12 +348,14 @@ time of this refresh; `make verify` is authoritative):
 
 Recorded honestly — every item below is real and currently open unless marked resolved.
 
-**Spec ahead of implementation — step transactionality.** The core spec now makes the step
-the unit of acceptance: function 9 commits each validated set onto a local-only **step ref**
-(`refs/harness/steps/<workflowInstanceId>/<stepSlug>`) that function 5 prepares and checks
-out, and function 10 evaluates the **step state** and, on pass, **promotes** it by
-fast-forwarding the workspace branch — so workspace state only ever holds the output of
-steps that passed function 10 (core spec: Terminology, C0, C1, C6, functions 5, 8, 9, 10,
+**Spec ahead of implementation — step transactionality.** The core spec now makes the
+**step instance** (one execution of a step, identified by its step session id) the unit of
+acceptance: function 9 commits each validated set onto the step instance's local-only **step
+ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>`) that function 0
+creates and checks out, and function 10 evaluates the **step state** and, on pass,
+**promotes** it by fast-forwarding the workspace branch — so workspace state only ever holds
+the output of step instances that passed function 10 (core spec: Terminology, C0, C1, C6,
+functions 0, 5, 8, 9, 10,
 Outcomes rule 1, Internal validation, Workspace Git plane, Logging). Nothing below is
 implemented yet; the implementation change follows the spec's approval and owes, each with
 its red tests first:
@@ -361,16 +363,18 @@ its red tests first:
 - contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
   `check-step-postconditions.output.schema.json`; the two new normative codes
   `workspace-not-clean` and `step-rebase-conflict` in `report.schema.json`'s code list;
-- function 5 — the clean-working-tree precondition and step-ref preparation (first attempt,
-  reuse on an unchanged base, retirement to
-  `refs/harness/attempts/<workflowInstanceId>/<stepSlug>/<stepSessionId>` otherwise);
-- function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step in
-  flight → `denied`);
+- function 0 — step-instance ref creation and checkout at step-session registration (from
+  the previous step instance's ref tip on an unchanged base, else from the workspace branch
+  tip; no second ref on replay; a failed checkout is `system-error`) — invariant 6;
+- function 5 — the clean-working-tree precondition (`workspace-not-clean`) and the
+  crash-recovery return to the workspace branch;
+- function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step
+  instance in flight with its own ref checked out → `denied`);
 - function 9 — commit onto the step ref; vacuous validity against the step ref tip;
 - function 10 — rebase, evaluation on the step state, promotion / withholding, return to the
   workspace branch, crash recovery (invariants 6–7);
 - `ArtifactStore` — the step-ref Git operations, reads of the step state, the logs path in
-  `.git/info/exclude`, and the sweep reporting step refs as attempts; the class diagram
+  `.git/info/exclude`, and the sweep reporting step refs as step instances; the class diagram
   (`harness-src-classes.puml`, note already updated) gains them and
   `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered
   then (the committed PNG is a crop that does not show `artifact_store`);

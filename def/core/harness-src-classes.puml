@@ -420,7 +420,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         (function 9's call-level atomicity) and
         ""revert_artifact"" discards an invalid one - function
         9's deliberate Git actions. The step-ref operations of
-        functions 5 and 10 (prepare, rebase, promote) join the
+        functions 0 and 10 (create, rebase, promote) join the
         class model with their implementation. Finding is
         homed here and stays internal to this store: it is
         what ""validate_artifact"" and ""revert_artifact""
