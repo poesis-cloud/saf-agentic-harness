@@ -131,6 +131,11 @@ needed, also in autopilot.
   `%LOCALAPPDATA%\saf-agentic-harness\github-copilot-cli`, else
   `$XDG_STATE_HOME/saf-agentic-harness/github-copilot-cli`. A corrupt record is an error:
   `preToolUse` denies.
+- **Unregistered sessions** have a record whose `start-session` answered an error or no
+  report. Only an explicit `not-applicable` means ungoverned (core rule 2), so these fail
+  closed: every write, dispatch and harness request is denied with the recorded failure, I9
+  still guards the shell, H5/H6 do not run, and closure deletes the record without
+  `end-session` (no harness session exists). A turn retries at its next prompt firing.
 - **Ungoverned sessions** are those with no record: title summarizers, any session in a folder
   without the orchestrators, and any non-orchestrator agent. Every tool call passes and no
   harness function runs. The one exception is a harness command, which is denied with a
@@ -163,10 +168,14 @@ own permission flow still applies to what the harness lets through.
   no workflow context. When there is no record but `parentAgentId` names a session that has
   one, the agent was opened by a governed session's dispatch (core: `parentSessionId` is "the
   session whose action opened it"), so it is never a root turn: H0 passes with a diagnostic
-  and the agent stays ungoverned (H1 could not open its step).
+  and the agent stays ungoverned (H1 answered `not-applicable` for it, or never fired; an
+  H1 error leaves an unregistered step record instead, so H0 never reaches this case).
 - **Effect:** on the first firing with no record, run `start-session --agent <slug>
   --session-id <sessionId>-t<timestamp>`. On `started`, write the record. On
-  `not-applicable` (not an orchestrator per the framework), write nothing and pass.
+  `not-applicable` (not an orchestrator per the framework), write nothing and pass. On any
+  other answer (an error report, or no report) write an UNREGISTERED record carrying the
+  failure: the session is not ungoverned, its writes and dispatches are denied (see
+  *Unregistered sessions*), and the next prompt firing retries the registration.
 - **Context:** at `userPromptTransformed`, while `contextInjected` is false, resolve the
   workflow instructions and skills, inline the instruction bodies and add skill load
   directives. Return `modifiedTransformedPrompt` = hint + context + the runtime's transformed
@@ -181,7 +190,10 @@ own permission flow still applies to what the harness lets through.
   Otherwise pass, which leaves the subagent ungoverned: see *Limited boundaries*.
 - **Effect:** `start-session --agent <agentType> --session-id <agentId> --parent-session-id
   <dispatcher session>`. On `started`, record it with `origin: step` and return
-  `additionalContext` = hint + step context.
+  `additionalContext` = hint + step context. On `not-applicable` (a foreign or non-framework
+  dispatch), record nothing and pass. On any other answer, `step-session-bound` included,
+  or when the dispatcher's own record is unregistered, record the step UNREGISTERED
+  (`origin: step`) and pass.
 - **Context size:** the runtime caps only `postToolUse`'s `additionalContext` at 10 KB; H0's
   `modifiedTransformedPrompt` and H1's `additionalContext` are bounded by the 10 MiB
   hook-output limit. Instruction bodies are inlined when the output fits that limit, else
@@ -385,7 +397,7 @@ committed.
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a step session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
-| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). | C6 commit-set remediation. |
+| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 commit-set remediation. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
 | `apply_patch` | Offered instead of `create`/`edit` to GPT-5.x models only (CLI 1.0.105); `toolArgs` is the raw patch string. | Bound as a patch tool: every header target is authorized; an unparseable patch → deny. |

@@ -26,7 +26,12 @@ class TrackerError(RuntimeError):
 
 @dataclass(frozen=True)
 class SessionRecord:
-    """The harness session a host session is registered as."""
+    """The harness session a host session is registered as.
+
+    `registration_failure` set means `start-session` answered an ERROR (or no report) for
+    this host session: it is NOT registered, yet it is not ungoverned either — only an
+    explicit `not-applicable` is. The adapter denies its writes and dispatches (fail closed).
+    """
 
     session_id: str
     agent: str
@@ -34,9 +39,14 @@ class SessionRecord:
     parent_session_id: str | None = None
     parent_host_id: str | None = None
     context_injected: bool = False
+    registration_failure: str | None = None
 
     def with_context_injected(self) -> "SessionRecord":
         return replace(self, context_injected=True)
+
+    @property
+    def registered(self) -> bool:
+        return self.registration_failure is None
 
 
 class SessionTracker:

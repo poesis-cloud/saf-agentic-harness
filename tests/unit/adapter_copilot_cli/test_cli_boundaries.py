@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cli_rig import (
     CWD,
     HOST,
@@ -464,18 +466,91 @@ def test_session_end_closes_every_session_left_open(rig: Rig) -> None:
     assert {i["sessionId"] for i in rig.runner.inquiries("end-session")} == {SUBAGENT, TURN_SESSION}
 
 
-def test_a_harness_error_report_never_opens_a_session(rig: Rig) -> None:
+@pytest.mark.parametrize(
+    "answer",
+    [
+        build_error_report("start-session"),
+        build_error_report("start-session", code="session-instance-bound", message="already bound"),
+        RuntimeError("harness unavailable"),
+    ],
+    ids=["error-report", "session-instance-bound", "no-report"],
+)
+def test_a_failed_turn_registration_fails_closed(rig: Rig, answer) -> None:
+    """Only an explicit `not-applicable` leaves a session ungoverned. A failed
+    `start-session` opens no harness session, but the host session's writes, dispatches and
+    harness requests are denied instead of bypassing authorization."""
+    rig.runner.script["start-session"] = answer
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    record = rig.tracker.read(HOST)
+    assert record is not None and not record.registered
+    for call in (
+        ("create", {"path": ARTIFACT, "file_text": "x"}),
+        ("task", {"agent_type": STEP_ACTOR, "prompt": "p"}),
+        ("powershell", {"command": "python C:\\Users\\cleme\\saf-agentic-harness\\harness.py resolve-step-model"}),
+    ):
+        reason = _denied(rig.fire("preToolUse", pre_tool_use(call)))
+        assert "not registered with the harness" in reason and "fail closed" in reason
+    assert rig.fire("preToolUse", pre_tool_use(("view", {"path": ARTIFACT}))) is None
+    called = set(rig.runner.functions()) - {"start-session"}
+    assert called == set()
+
+
+def test_a_not_applicable_turn_stays_ungoverned(rig: Rig) -> None:
+    rig.runner.script["start-session"] = build_report("start-session", "not-applicable")
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    assert rig.tracker.read(HOST) is None
+    assert rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}))) is None
+
+
+def test_a_failed_turn_registration_is_retried_at_the_next_prompt(rig: Rig) -> None:
+    started = rig.runner.script["start-session"]
+    rig.runner.script["start-session"] = build_error_report("start-session")
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
+    assert not rig.tracker.read(HOST).registered
+    rig.runner.script["start-session"] = started
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 2}, ORCHESTRATOR)
+    record = rig.tracker.read(HOST)
+    assert record.registered and record.session_id == f"{HOST}-t2"
+    assert rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}))) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        build_error_report("start-session", code="step-session-bound", message="bound"),
+        RuntimeError("harness unavailable"),
+    ],
+    ids=["step-session-bound", "no-report"],
+)
+def test_a_failed_step_registration_fails_closed(rig: Rig, answer) -> None:
+    rig.open_turn()
+    rig.runner.script["start-session"] = answer
+    assert rig.open_step() is None
+    record = rig.tracker.read(SUBAGENT)
+    assert record is not None and not record.registered
+    reason = _denied(rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}), host=SUBAGENT)))
+    assert "not registered with the harness" in reason
+    assert rig.runner.inquiries("check-step-authorization") == []
+    rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}, host=SUBAGENT))
+    assert rig.runner.inquiries("check-step-artifact") == []
+    rig.fire("subagentStop", {"sessionId": HOST, "agentId": SUBAGENT, "agentType": STEP_ACTOR})
+    assert rig.tracker.read(SUBAGENT) is None
+    assert SUBAGENT not in {i["sessionId"] for i in rig.runner.inquiries("end-session")}
+
+
+def test_a_not_applicable_step_stays_ungoverned(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["start-session"] = build_report("start-session", "not-applicable")
+    assert rig.open_step() is None
+    assert rig.tracker.read(SUBAGENT) is None
+
+
+def test_a_failed_turn_closes_without_ending_a_harness_session(rig: Rig) -> None:
     rig.runner.script["start-session"] = build_error_report("start-session")
     rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    rig.fire("sessionEnd", {"sessionId": HOST, "reason": "complete"})
     assert rig.tracker.read(HOST) is None
-
-
-def test_a_bound_session_rebind_report_never_opens_a_session(rig: Rig) -> None:
-    rig.runner.script["start-session"] = build_error_report(
-        "start-session", code="session-instance-bound", message="already bound"
-    )
-    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
-    assert rig.tracker.read(HOST) is None
+    assert rig.runner.inquiries("end-session") == []
 
 
 def test_h0_binds_a_turn_once_across_both_prompt_events(rig: Rig) -> None:

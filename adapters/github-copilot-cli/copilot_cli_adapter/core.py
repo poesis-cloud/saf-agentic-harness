@@ -25,7 +25,7 @@ import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePath
 from typing import Any, Callable, Mapping, Sequence
 
@@ -206,8 +206,9 @@ class Adapter:
                     "governed session but holds no step session; it stays ungoverned"
                 )
                 return None
+        if record is None or not record.registered:
             record = self._register_turn(hook, host_id)
-            if record is None:
+            if record is None or not record.registered:
                 return None
         if hook.event != USER_PROMPT_TRANSFORMED or record.context_injected:
             return None
@@ -234,7 +235,8 @@ class Adapter:
             "start-session",
             {"agent": hook.scoping_agent, "sessionId": session_id, "parentSessionId": None},
         )
-        if report is None or read_status(report) != _STARTED:
+        if report is not None and read_status(report) == _NOT_APPLICABLE:
+            self._tracker.delete(host_id)
             return None
         parent = hook.raw_parent_host_session_id
         record = SessionRecord(
@@ -242,6 +244,7 @@ class Adapter:
             agent=str(hook.scoping_agent),
             origin=TURN_ORIGIN,
             parent_host_id=sanitize_identifier(parent) if parent else None,
+            registration_failure=self._registration_failure(report),
         )
         self._tracker.write(host_id, record)
         return record
@@ -260,6 +263,22 @@ class Adapter:
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
+        record = SessionRecord(
+            session_id=step_host,
+            agent=str(actor),
+            origin=STEP_ORIGIN,
+            parent_session_id=parent.session_id,
+            parent_host_id=parent_host,
+        )
+        if not parent.registered:
+            self._tracker.write(
+                step_host,
+                replace(
+                    record,
+                    registration_failure="its dispatcher's session is not registered",
+                ),
+            )
+            return None
         report = self._run_safely(
             "start-session",
             {
@@ -268,15 +287,12 @@ class Adapter:
                 "parentSessionId": parent.session_id,
             },
         )
-        if report is None or read_status(report) != _STARTED:
+        if report is not None and read_status(report) == _NOT_APPLICABLE:
             return None
-        record = SessionRecord(
-            session_id=step_host,
-            agent=str(actor),
-            origin=STEP_ORIGIN,
-            parent_session_id=parent.session_id,
-            parent_host_id=parent_host,
-        )
+        failure = self._registration_failure(report)
+        if failure is not None:
+            self._tracker.write(step_host, replace(record, registration_failure=failure))
+            return None
         context, delivered = self._resolve_context(
             record,
             inline=True,
@@ -372,6 +388,8 @@ class Adapter:
     def _gate_tool_call(
         self, hook: HookInput, record: SessionRecord, call: ToolCall, creations: list[str]
     ) -> tuple[str | None, HarnessRequest | None]:
+        if not record.registered:
+            return self._gate_unregistered_call(hook, record, call), None
         if self._binding.is_dispatch_tool(call.name):
             return self._gate_dispatch(record, call), None
         if self._binding.resolve_write_action(call.name, call.args) is not None:
@@ -381,6 +399,26 @@ class Adapter:
         ):
             return self._gate_shell(hook, record, call)
         return None, None
+
+    def _gate_unregistered_call(
+        self, hook: HookInput, record: SessionRecord, call: ToolCall
+    ) -> str | None:
+        """A session whose `start-session` failed is not ungoverned: its writes, dispatches
+        and harness requests are denied (fail closed); I9 still guards its shell."""
+        reason = (
+            f"this session is not registered with the harness ({record.registration_failure}): "
+            "its writes and dispatches are denied until a registration succeeds (fail closed)"
+        )
+        if self._binding.is_dispatch_tool(call.name) or (
+            self._binding.resolve_write_action(call.name, call.args) is not None
+        ):
+            return reason
+        if self._binding.is_mediated_command_tool(call.name) or self._binding.is_guarded_shell_tool(
+            call.name
+        ):
+            rejected, request = self._gate_shell(hook, record, call)
+            return f"{HARNESS_REJECTED}: {reason}" if request is not None else rejected
+        return None
 
     def _gate_dispatch(self, record: SessionRecord, call: ToolCall) -> str | None:
         """H2 — the step's preconditions gate its dispatch; async dispatch is refused."""
@@ -629,7 +667,7 @@ class Adapter:
     def _settle_tool_call(self, hook: HookInput) -> Decision:
         host_id = hook.host_id
         record = self._tracker.read(host_id) if host_id else None
-        if record is None:
+        if record is None or not record.registered:
             return None
         try:
             (call,) = hook.read_tool_calls()
@@ -745,7 +783,8 @@ class Adapter:
         record = self._tracker.read(host_id)
         if record is None:
             return
-        self._run_safely("end-session", {"sessionId": record.session_id})
+        if record.registered:
+            self._run_safely("end-session", {"sessionId": record.session_id})
         self._tracker.delete(host_id)
 
     def _report_error(self, hook: HookInput) -> Decision:
@@ -796,6 +835,15 @@ class Adapter:
             "runtime accepts for this event; it is not marked injected"
         )
         return (context if truncate else ""), False
+
+    @staticmethod
+    def _registration_failure(report: Mapping[str, Any] | None) -> str | None:
+        """None when `start-session` answered `started`, else why the session is unregistered."""
+        if report is None:
+            return "start-session unavailable"
+        if read_status(report) == _STARTED:
+            return None
+        return renderer.describe_report(report)
 
     def _run_safely(self, function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any] | None:
         """Run a harness function; a failure is a diagnostic, never a raw leak to the model."""
