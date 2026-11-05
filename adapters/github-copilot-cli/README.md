@@ -173,7 +173,9 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
 - **Folder trust.** In an untrusted folder, repository hooks never run, so the boundaries they
   register never fire. Harness commands are then denied with a diagnosis. Plugin hooks are
   not affected.
-- **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget.
+- **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget, and the
+  adapter stops every harness call 30 s before it: a stalled call is a denial, not a
+  timeout.
 - **Shell writes are not mediated.** The adapter denies shell commands that name the
   workspace or `logs/`, but a determined command can evade a textual check. The core's
   commit-set check is the backstop. Agents must write through `create`/`edit` (or

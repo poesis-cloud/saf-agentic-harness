@@ -22,8 +22,11 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, Sequence, TextIO
+
+import yaml
 
 ADAPTER_DIR = Path(__file__).resolve().parent
 if str(ADAPTER_DIR) not in sys.path:
@@ -45,12 +48,35 @@ from copilot_cli_adapter.tracker import SessionTracker  # noqa: E402
 
 HARNESS_ENTRYPOINT = ADAPTER_DIR.parents[1] / "harness.py"
 EXIT_FAIL_CLOSED = 2
+# Harness calls must end this far before the registered `timeoutSec` (the larger of both).
+DEADLINE_MARGIN_SECONDS = 5.0
+DEADLINE_MARGIN_RATIO = 0.25
+
+
+def hook_deadline(event: str, scoped: bool, started: float) -> float:
+    """The instant every harness call of this firing must finish by: well inside the
+    `timeoutSec` the event is registered with, since the runtime fails a timed-out
+    `preToolUse` OPEN. The registration is the installer's own source of truth."""
+    registrations = [("hooks.yaml", "hooks"), ("agent-hooks.yaml", "agentHooks")]
+    if scoped:
+        registrations.reverse()
+    for source, key in registrations:
+        registered = yaml.safe_load((ADAPTER_DIR / source).read_text(encoding="utf-8"))
+        entry = ((registered or {}).get(key) or {}).get(event)
+        if isinstance(entry, Mapping):
+            timeout = entry.get("timeoutSec")
+            if not isinstance(timeout, (int, float)) or timeout <= 0:
+                raise ValueError(f"{source} gives '{event}' no positive timeoutSec")
+            margin = max(DEADLINE_MARGIN_SECONDS, timeout * DEADLINE_MARGIN_RATIO)
+            return started + timeout - margin
+    raise ValueError(f"no hook registration names the event '{event}'")
 
 
 def build_adapter(
     framework_dir: str | None,
     workspace_dir: str | None = None,
     layout_overrides: Mapping[str, str] | None = None,
+    deadline: float | None = None,
 ) -> tuple[Adapter, Any]:
     """Build the adapter and its binding from this directory and the framework layout."""
     layout = resolve_layout(
@@ -67,6 +93,7 @@ def build_adapter(
         runner=SubprocessCommandRunner(
             harness_entrypoint=HARNESS_ENTRYPOINT,
             layout_environment=layout.environment,
+            deadline=deadline,
         ),
         workspace_dir=str(layout.resolve("FRAMEWORK_WORKSPACE_DIR")),
         invocation=HarnessInvocation(
@@ -86,17 +113,21 @@ def run_hook(
     stdout: TextIO,
     stderr: TextIO,
     build: Callable[
-        [str | None, str | None, Mapping[str, str]], tuple[Adapter, Any]
+        [str | None, str | None, Mapping[str, str], float], tuple[Adapter, Any]
     ] = build_adapter,
 ) -> int:
+    started = time.monotonic()
     arguments = _parse_arguments(argv)
     try:
         overrides = _read_layout_overrides(arguments.layout)
+        deadline = hook_deadline(arguments.event, arguments.agent is not None, started)
         raw = stdin.read()
         payload = json.loads(raw.decode("utf-8-sig")) if raw.strip() else {}
         if not isinstance(payload, Mapping):
             raise ValueError("the hook payload is not a JSON object")
-        adapter, binding = build(arguments.framework_dir, arguments.workspace_dir, overrides)
+        adapter, binding = build(
+            arguments.framework_dir, arguments.workspace_dir, overrides, deadline
+        )
         decision = adapter.handle(
             HookInput(
                 event=arguments.event,

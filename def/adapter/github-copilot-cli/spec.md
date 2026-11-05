@@ -309,7 +309,8 @@ own permission flow still applies to what the harness lets through.
   where the plugin's hooks fire until it is repaired. That is visible and fail-closed, never
   silent.
 - **A readable but malformed tool-call batch** in a governed session is denied with a reason.
-- **Harness failures** (no report, non-zero exit, stderr) become fixed text such as
+- **Harness failures** (no report, non-zero exit, stderr, a call stopped at the hook
+  deadline) become fixed text such as
   "check-step-authorization unavailable" and deny the write. The raw text goes to stderr only.
   Error reports (`inquiry-error`, `state-error`, `system-error`) deny, and the core's own
   `code — message` is relayed, as in the VS Code adapter.
@@ -370,7 +371,7 @@ committed.
 
 | Boundary / guarantee | Limitation in this runtime | Fallback |
 | --- | --- | --- |
-| Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Harness calls are local and fast. H5 still validates and reverts after the fact. |
+| Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Every harness call of a firing is bounded by a deadline inside the event's registered `timeoutSec` (by 25 %, at least 5 s): a call that would start or run past it is stopped and is a harness failure, so the boundary DENIES while the host still honors the answer. Only a stall before the adapter runs (interpreter start) can still reach the host timeout. H5 still validates and reverts after the fact. |
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a step session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |

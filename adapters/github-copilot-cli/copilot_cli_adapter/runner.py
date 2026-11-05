@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -36,10 +37,13 @@ class CommandRunner(Protocol):
         """Run one function command with its inquiry and answer its report."""
 
 
-ProcessRunner = Callable[[Sequence[str], Mapping[str, str]], "tuple[int, str, str]"]
+ProcessRunner = Callable[[Sequence[str], Mapping[str, str], "float | None"], "tuple[int, str, str]"]
 
 
-def run_subprocess(argv: Sequence[str], environment: Mapping[str, str]) -> tuple[int, str, str]:
+def run_subprocess(
+    argv: Sequence[str], environment: Mapping[str, str], timeout: float | None = None
+) -> tuple[int, str, str]:
+    """Run one command; past `timeout` seconds it is killed (`subprocess.TimeoutExpired`)."""
     completed = subprocess.run(
         list(argv),
         capture_output=True,
@@ -48,12 +52,19 @@ def run_subprocess(argv: Sequence[str], environment: Mapping[str, str]) -> tuple
         errors="replace",
         env=dict(environment),
         check=False,
+        timeout=timeout,
     )
     return completed.returncode, completed.stdout, completed.stderr
 
 
 class SubprocessCommandRunner:
-    """Invoke `harness.py <function>` as its own process, one command per function."""
+    """Invoke `harness.py <function>` as its own process, one command per function.
+
+    `deadline` (a `clock` instant) bounds the WHOLE hook firing: the runtime treats a timed
+    out `preToolUse` as an allow, so every command gets only the time left before it, and a
+    command that would start or run past it raises `HarnessCommandError` — which a gating
+    boundary renders as a denial while the host can still honor it.
+    """
 
     def __init__(
         self,
@@ -61,11 +72,15 @@ class SubprocessCommandRunner:
         layout_environment: Mapping[str, str],
         run_process: ProcessRunner | None = None,
         python_executable: str | None = None,
+        deadline: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._harness_entrypoint = harness_entrypoint
         self._layout_environment = dict(layout_environment)
         self._run_process = run_process or run_subprocess
         self._python_executable = python_executable or sys.executable
+        self._deadline = deadline
+        self._clock = clock
 
     def run_function(self, function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any]:
         argv = [
@@ -80,7 +95,20 @@ class SubprocessCommandRunner:
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
         }
-        exit_code, stdout, stderr = self._run_process(argv, environment)
+        timeout = None
+        if self._deadline is not None:
+            timeout = self._deadline - self._clock()
+            if timeout <= 0:
+                raise HarnessCommandError(
+                    f"harness command '{function}' was not run: the hook deadline has passed"
+                )
+        try:
+            exit_code, stdout, stderr = self._run_process(argv, environment, timeout)
+        except subprocess.TimeoutExpired as failure:
+            raise HarnessCommandError(
+                f"harness command '{function}' did not answer before the hook deadline "
+                f"({timeout:.1f}s left) and was stopped"
+            ) from failure
         if exit_code != 0:
             raise HarnessCommandError(
                 f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}",
