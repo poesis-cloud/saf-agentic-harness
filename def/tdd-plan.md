@@ -349,9 +349,9 @@ time of this refresh; `make verify` is authoritative):
 Recorded honestly — every item below is real and currently open unless marked resolved.
 
 **Spec ahead of implementation — step transactionality.** The core spec now makes the
-**step instance** (one execution of a step, identified by its step session id) the unit of
+**step instance** (one execution of a step, identified by its worker session id) the unit of
 acceptance: function 9 commits each validated set onto the step instance's local-only **step
-ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>`) that function 0
+ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>`) that function 0
 creates and checks out, and function 10 evaluates the **step state** and, on pass,
 **promotes** it by fast-forwarding the workspace branch — so workspace state only ever holds
 the output of step instances that passed function 10 (core spec: Terminology, C0, C1, C6,
@@ -363,7 +363,7 @@ its red tests first:
 - contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
   `check-step-postconditions.output.schema.json`; the two new normative codes
   `workspace-not-clean` and `step-rebase-conflict` in `report.schema.json`'s code list;
-- function 0 — step-instance ref creation and checkout at step-session registration (from
+- function 0 — step-instance ref creation and checkout at worker-session registration (from
   the previous step instance's ref tip on an unchanged base, else from the workspace branch
   tip; no second ref on replay; a failed checkout is `system-error`) — invariant 6;
 - function 5 — the clean-working-tree precondition (`workspace-not-clean`) and, on pass, the
@@ -371,7 +371,7 @@ its red tests first:
 - function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step
   instance in flight with its own ref checked out → `denied`);
 - function 9 — commit onto the step ref; vacuous validity against the step ref tip;
-- function 10 — rebase, delivery over the whole step state plus the step session's own
+- function 10 — rebase, delivery over the whole step state plus the worker session's own
   commits (invariant 5), evaluation on the step state, promotion as one compare-and-swap
   fast-forward (the acceptance point; no checkout or ref deletion after it) or withholding,
   step-instance refs kept (invariants 6–7);
@@ -380,6 +380,12 @@ its red tests first:
   (`harness-src-classes.puml`, note already updated) gains them and
   `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered
   then (the committed PNG is a crop that does not show `artifact_store`);
+- the **worker session** rename — the spec now pairs "orchestrator session" with "worker
+  session" (formerly "step session"): the normative code `step-session-bound` becomes
+  `worker-session-bound` (`report.schema.json`, `src/`, tests), the tools-configuration key
+  `hostStepSessionKeys` becomes `hostWorkerSessionKeys` (`tools.conf.schema.json`, both
+  adapters), and the identifiers `find_step_session_ids` / `host_step_session_keys` become
+  `find_worker_session_ids` / `host_worker_session_keys`, as the class diagrams already show;
 - adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
   "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
   with the core when the adapters are.

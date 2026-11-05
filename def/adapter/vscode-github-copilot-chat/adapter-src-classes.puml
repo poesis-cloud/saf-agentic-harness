@@ -48,7 +48,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       +path_keys : tuple[str, ...]
       +nested_path_keys : tuple[str, ...]
       +host_session_keys : tuple[str, ...]
-      +host_step_session_keys : tuple[str, ...]
+      +host_worker_session_keys : tuple[str, ...]
       +host_step_actor_keys : tuple[str, ...]
       +dispatch_agent_keys : tuple[str, ...]
       +dispatch_model_keys : tuple[str, ...]
@@ -128,7 +128,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       (verified: a subagent's own ""session_id"" is the SAME
       shared id as its dispatching session's, never its own
       ""agent_id"" - see I13): H0 resets it fresh per turn,
-      H1 PUSHes the new step session as current, H7 POPs it
+      H1 PUSHes the new worker session as current, H7 POPs it
       back to the dispatching session on SubagentStop and
       CLEARs the whole stack on Stop (a later firing under
       a non-framework agent then resolves to None - C7
@@ -145,7 +145,7 @@ package "CD - Adapter classes (vscode-github-copilot-chat)" <<Frame>> {
       participles avoid the step/session clash
       (1 step = 1 session): STEP_STARTING is the dispatch
       about to open the step - it can DENY; STEP_STARTED is
-      the step session having opened - it can only INJECT;
+      the worker session having opened - it can only INJECT;
       STEP_ENDED is the dispatch return - THE evaluation
       point. SESSION_STARTED is a non-step (orchestrator)
       session starting. SESSION_ENDED (H7) invokes function

@@ -74,7 +74,7 @@ and implementation parts prescribe its realization.
   included — are produced by dispatched agents (or the user) and then checked by the harness,
   which never authors artifact content: its only deliberate Git actions are committing a
   validated staged write onto the step ref and discarding an invalid one (restore / delete)
-  at the write boundary (function 9), creating and checking out the step ref when the step
+  at the write boundary (function 9), creating and checking out the step ref when the worker
   session registers (function 0), rebasing and promoting it when the step ends (function
   10), and returning the working tree to the workspace branch before the next step instance
   (function 5) — none of which authors new content. Artifacts attach
@@ -91,29 +91,33 @@ and implementation parts prescribe its realization.
   its id across the session logs (see [Logging](#logging)). Logs are persisted workspace state
   (C0) — a condition may read log evidence and assert it as state (C5) — but they are not
   artifacts: agents never write logs, and no step produces one.
-- **Session** — the harness's unit of execution identity and log ownership: a bounded span of
-  work, opened at the session-started boundary and registered by function 0 (`start-session`)
-  under a `sessionId` that names it for the life of its log — and, best-effort, closed by
-  function 11 (`end-session`) with a final entry when the surrounding mechanism can observe
-  that end (C8). A session is performed by exactly one framework
-  **agent** — the orchestrator (driving a workflow) or a dispatched subagent (acting a step) —
-  fixed for the session's entire lifetime: the harness registers agent sessions, nothing else.
-  An **orchestrator session is one turn**: it opens with the user's message to the
-  orchestrator and ends with the workflow's return to the user. The orchestrator agent and the
-  host conversation persist across turns; each turn is a new harness session.
-  A session serves **at most one workflow instance**: an orchestrator session drives at most
-  one (one workflow end = one return to the user, which ends the session; engagement and
-  selection sessions before assent drive none), and a step session IS its step instance
-  (1 step instance = 1 agent = 1 session = 1 artifact instance). The converse does not hold — a half-finished workflow instance
-  legitimately continues under a LATER orchestrator session (mid-instance returns; function
-  3's latest-open-instance deduction and the single-driver invariant carry the handoff) — so
-  an instance's view spans sessions, never a session spanning instances: no session's log
-  ever carries entries of two workflow instances.
-  A session's `sessionId` is always minted or observed by the mechanism
-  surrounding its opening, never self-reported by the acting agent, so that every session's
-  identity is independently verifiable at the moment it opens.
+- **Session** — the harness's unit of attribution, execution identity, and log ownership: a
+  host-observed span of one framework **agent**'s work, whose identity — its `sessionId` —
+  comes from the host, observed or minted by the mechanism surrounding its opening and never
+  self-reported by the model, so that every session's identity is independently verifiable
+  at the moment it opens; and which owns its own log. It is opened at the session-started
+  boundary and registered by function 0 (`start-session`) under that `sessionId` for the
+  life of its log, and, best-effort, closed by function 11 (`end-session`) with a final
+  entry when the surrounding mechanism can observe that end (C8). Its agent is fixed for its
+  entire lifetime: the harness registers agent sessions, nothing else. There are two kinds,
+  paired:
+  - an **orchestrator session**, performed by the orchestrator agent, drives **at most one**
+    workflow instance (a session that ends before the user's assent drives none);
+  - a **worker session**, performed by a dispatched subagent, executes **exactly one** step
+    instance, and IS that step instance (1 step instance = 1 agent = 1 session = 1 artifact
+    instance).
+
+  How a host's signals map to sessions — what opens and ends an orchestrator session, what
+  opens a worker session — is each adapter's to state, never the core's. The "at most one
+  workflow instance per orchestrator session" rule is what lets the harness deduce the
+  workflow instance from the session alone, without any agent-provided id (function 3,
+  invariants 8–9). The converse does not hold: a half-finished workflow instance is
+  continued — never replaced — by a later orchestrator session (function 3's latest-open
+  deduction and the single-driver invariant carry the handoff), so a workflow instance's view
+  spans sessions, and no session spans workflow instances: no session's log ever carries
+  entries of two workflow instances.
 - **parentSessionId** — links a session to the session whose action opened it, forming a
-  parent chain of arbitrary depth: an orchestrator session opens a step session at dispatch, or
+  parent chain of arbitrary depth: an orchestrator session opens a worker session at dispatch, or
   a session opens a nested session. A session without a `parentSessionId` is a root — the
   first session of its lineage.
 - **Orchestrator** — the orchestrator agent a workflow declares to drive its instances. Its
@@ -138,14 +142,15 @@ and implementation parts prescribe its realization.
   steps have journaled delivered. A workflow delivers MANY artifacts — in workspace state,
   one per step: its passing step instance's, the only one promoted — so no single artifact is
   attached to the workflow instance; artifacts attach to steps. It has its own minted id
-  because it can outlive its sessions: one workflow instance ↔ one or more orchestrator turn
-  sessions, in sequence. A half-finished workflow instance is **continued** by the next turn
-  (function 3, invariant 8: latest open wins), never replaced; a new workflow instance of the
-  same workflow opens only once the previous one has no next step and the user reiterates the
-  workflow (function 3, invariant 7). One turn session drives at most one workflow instance
-  (function 3, invariant 9), so over a conversation the orchestrator drives workflow
-  instances sequentially, at most one per turn.
-- **Step** — a configured unit of work, executed as one agent turn per step instance.
+  because it can outlive its sessions: one workflow instance ↔ one or more orchestrator
+  sessions, in sequence. A half-finished workflow instance is **continued** by the next
+  orchestrator session (function 3, invariant 8: latest open wins), never replaced; a new
+  workflow instance of the same workflow opens only once the previous one has no next step and
+  the user reiterates the workflow (function 3, invariant 7). One orchestrator session drives
+  at most one workflow instance (function 3, invariant 9) — the rule that lets the harness
+  deduce the workflow instance without agent-provided ids — so the orchestrator drives
+  workflow instances sequentially, at most one per orchestrator session.
+- **Step** — a configured unit of work, executed by one worker session per step instance.
   **1 step instance = 1 agent = 1 session = 1 artifact instance**: the session lifecycle IS
   the step instance's lifecycle, and each step instance delivers exactly one artifact instance of the
   artifact kind its step's `artifact` declares. A step may have several step instances in one
@@ -153,16 +158,16 @@ and implementation parts prescribe its realization.
   workspace state each step delivers exactly one artifact instance, the passing one's. Step
   transactions (step refs and promotion, below) are what make this hold.
 - **Step instance** — one execution of a step within a workflow instance; a retry is a new
-  step instance (a re-resolution, which admits a new step session). It is bound 1:1 to its
-  step session (function 0, invariant 5), so its identity IS its step session id: no second
+  step instance (a re-resolution, which admits a new worker session). It is bound 1:1 to its
+  worker session (function 0, invariant 5), so its identity IS its worker session id: no second
   id is minted. The step instance is the harness's unit of verification (one session, one
   artifact, postconditions evaluated once) and therefore its unit of acceptance: its output
   enters workspace state only by promotion, once function 10 passes it.
 - **Step ref** — the Git ref
-  `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>` carrying one step
+  `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>` carrying one step
   instance's validated commits, keyed by the step instance itself — every leaf is a session
   id, so no two step refs ever conflict in Git's ref namespace. Function 0 creates it when it
-  registers the step session correlated to its resolution — the step instance exists only
+  registers the worker session correlated to its resolution — the step instance exists only
   from then on — and checks it out in the working tree for the step instance's duration. It
   is created from the previous step instance's ref tip (a retry of the same step in the same
   workflow instance) when the workspace branch has not moved since that step instance's base, so
@@ -177,26 +182,26 @@ and implementation parts prescribe its realization.
 ### Definitions and executions
 
 **Workflow** and **Step** are configuration — definitions. **Workflow instance** and **Step
-instance** are executions of them. **Sessions** are the bounded agent spans that carry
-executions — an orchestrator session is one turn of the orchestrator (from the user's
-message to the workflow's return), a step session is one dispatched sub-agent run; they are
-the unit of attribution and of logging (every entry and every commit names its
-`sessionId`). Side by side, the cardinalities:
+instance** are executions of them. **Sessions** are the host-observed spans of one agent's
+work that carry executions — an **orchestrator session** drives at most one workflow
+instance, a **worker session** executes exactly one step instance (how host signals map to
+sessions is each adapter's to state); they are the unit of attribution and of logging
+(every entry and every commit names its `sessionId`). Side by side, the cardinalities:
 
-- a **workflow instance** spans several sessions: one or more orchestrator turn sessions, one
-  after another — the next turn continues a half-finished workflow instance, never replaces
-  it — plus one step session per step instance; so it needs its own minted id;
+- a **workflow instance** spans several sessions: one or more orchestrator sessions, one
+  after another — the next continues a half-finished workflow instance, never replaces it —
+  plus one worker session per step instance; so it needs its own minted id;
 - a **step instance** has exactly one session, and a retry is a new step instance — so its
   identity is that session's id, and nothing is minted.
 
 | Definition (configuration) | Execution | Carried by | Cardinality |
 | --- | --- | --- | --- |
-| Workflow — `workflowSlug` | Workflow instance — `workflowInstanceId`, minted by function 3 | Its orchestrator turn sessions, one after another, plus one step session per step instance | 1 workflow instance ↔ 1..N orchestrator turn sessions, in sequence (the next turn continues it — function 3, invariant 8); 1 turn session → at most 1 workflow instance (function 3, invariant 9) |
-| Step — `stepSlug`, unique within its workflow | Step instance — its step session's `sessionId`, nothing minted | Its one step session | 1 step instance ↔ 1 step session (function 0, invariant 5); 1 step → 0..N step instances per workflow instance (retries) |
+| Workflow — `workflowSlug` | Workflow instance — `workflowInstanceId`, minted by function 3 | Its orchestrator sessions, one after another, plus one worker session per step instance | 1 workflow instance ↔ 1..N orchestrator sessions, in sequence (the next one continues it — function 3, invariant 8); 1 orchestrator session → at most 1 workflow instance (function 3, invariant 9) |
+| Step — `stepSlug`, unique within its workflow | Step instance — its worker session's `sessionId`, nothing minted | Its one worker session | 1 step instance ↔ 1 worker session (function 0, invariant 5); 1 step → 0..N step instances per workflow instance (retries) |
 
-The identity chain runs: `workflowInstanceId` → `stepSlug` → step instance (= the step
+The identity chain runs: `workflowInstanceId` → `stepSlug` → step instance (= the worker
 session's `sessionId`) → its commits (that `sessionId` in each commit message, function 9)
-→ its step ref `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>`.
+→ its step ref `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>`.
 
 ---
 
@@ -280,8 +285,8 @@ them. Shared contracts live beside them:
 | 3 | [`resolve-step`](#3-resolve-step) | What is the next eligible step of this workflow instance, with its full step resolution — or is there no next step to resolve? | mediated agent invocation — on assent, and after each step's outcome journals |
 | 4 | [`resolve-step-model`](#4-resolve-step-model) | Which model profile serves this step's dispatch? | mediated agent invocation — between resolution and dispatch |
 | 5 | [`check-step-preconditions`](#5-check-step-preconditions) | May this step start? | step-starting |
-| 6 | [`resolve-step-instructions`](#6-resolve-step-instructions) | Which behavioral guidance does this step's session load? | step-started |
-| 7 | [`resolve-step-skills`](#7-resolve-step-skills) | Which skills does this step's session load? | step-started |
+| 6 | [`resolve-step-instructions`](#6-resolve-step-instructions) | Which behavioral guidance does this step's worker session load? | step-started |
+| 7 | [`resolve-step-skills`](#7-resolve-step-skills) | Which skills does this step's worker session load? | step-started |
 | 8 | [`check-step-authorization`](#8-check-step-authorization) | Is this write a granted privilege of the acting agent? | write-starting |
 | 9 | [`check-step-artifact`](#9-check-step-artifact) | Is the step's written artifact schema-valid? | write-ended |
 | 10 | [`check-step-postconditions`](#10-check-step-postconditions) | Did this step deliver? | step-ended |
@@ -292,9 +297,9 @@ points — or the non-hook invocation surface: host event names never appear in 
 functional contract (C4); how host events normalize to boundaries is entirely outside this
 specification's concern, per [Boundary Normalization](#boundary-normalization).
 
-Function 0 is **session-scoped**: triggered at every session start — orchestrator and step
+Function 0 is **session-scoped**: triggered at every session start — orchestrator and worker
 sessions alike — strictly before any other function of that session; it opens the
-session's identity and creates its log, and for a step session it creates and checks out the
+session's identity and creates its log, and for a worker session it creates and checks out the
 step instance's step ref. Functions 1–2 **resolve the
 orchestrator's workflow context** at its session start — selection and return-handling
 instructions, procedure skills — which get injected at session open. Functions 3–4 are
@@ -306,7 +311,7 @@ context at its session start (injected there too), 8–9 guard
 every write as it lands, committing it onto the step ref, 10 evaluates delivery against the
 step state the step left and, on pass, promotes it into workspace state. Function 11 is
 **session-scoped at the opposite end**: best-effort, triggered whenever the surrounding
-mechanism can observe a session ending — orchestrator and step sessions alike — appending the
+mechanism can observe a session ending — orchestrator and worker sessions alike — appending the
 session's closing log entry (C8); a session whose end is never observed simply never gets one,
 which is not an error state.
 
@@ -331,7 +336,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
 | `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
-| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its step session (`step-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), the working tree holds uncommitted changes when a step is dispatched (`workspace-not-clean`), a step ref cannot be rebased onto a moved workspace branch (`step-rebase-conflict`) | Yes, except the C8 refusal (rule 3) and `step-session-bound` (rule 4) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its worker session (`worker-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), the working tree holds uncommitted changes when a step is dispatched (`workspace-not-clean`), a step ref cannot be rebased onto a moved workspace branch (`step-rebase-conflict`) | Yes, except the C8 refusal (rule 3) and `worker-session-bound` (rule 4) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
 
@@ -343,7 +348,7 @@ refusal (rule 3 — functions 0–10; function 11 is exempt, C8), and `system-er
 the codes named in this specification
 (`invalid-inquiry`, `session-ended`, `session-unregistered`, `session-conflict`,
 `session-kind-mismatch`, `not-facilitator`,
-`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `step-session-bound`,
+`unknown-workflow`, `step-in-flight`, `session-instance-bound`, `worker-session-bound`,
 `step-correlation-missing`,
 `condition-evaluation-failed`, `artifact-schema-unresolved`, `workspace-not-clean`,
 `step-rebase-conflict`, `log-unreadable`,
@@ -353,7 +358,7 @@ normative test surface; `error.message` and every `failureMessage` are **advisor
 tests assert their presence and key facts, never exact wording.
 
 **2. The `not-applicable` outcome.** Functions 0, 4, 5, and 10 answer `not-applicable` when
-persisted state names **no target** for the call: function 0 for a step session with no
+persisted state names **no target** for the call: function 0 for a worker session with no
 correlated unresolved step resolution (a foreign or non-framework dispatch) and for a root
 session whose `agent` names no framework agent; functions 4, 5, and 10 when the invoking
 session has no in-flight step — which also absorbs a duplicate step-ended delivery: after the
@@ -364,7 +369,7 @@ payload. Hook planes render it as pass-through (C7).
 
 **3. The C8 refusal shape.** A session-bound call against a session whose log carries an
 ending entry returns `state-error` with code `session-ended` — and is **not journaled**: no
-entry ever follows the ending entry (function 11, invariant 1). Apart from `step-session-bound`,
+entry ever follows the ending entry (function 11, invariant 1). Apart from `worker-session-bound`,
 which has no log of its own to journal to (rule 4), this is the only `state-error` that does
 not journal.
 
@@ -372,8 +377,8 @@ not journal.
 attributed session's log — with these exceptions, all forced by the absence of an open
 target log: the C8 refusal (rule 3) and `not-applicable` (rule 2) are **returned but never
 journaled**; `session-unregistered` returns its report (the context is constructible — the
-id is a valid slug) but has no log to journal to; so does function 0's `step-session-bound`
-refusal — the refused step session is never registered, so no log of its own exists; and a
+id is a valid slug) but has no log to journal to; so does function 0's `worker-session-bound`
+refusal — the refused worker session is never registered, so no log of its own exists; and a
 **contract-validation failure** (`invalid-inquiry`) produces **no report at all** — a
 contract-valid report cannot be built when the inquiry's own `sessionId` is missing or
 malformed, so the failure surfaces at the
@@ -460,12 +465,12 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
   session (parent present), the correlation IS the check: function 3 only ever resolves
   configured, ACL-validated workflow actors, so a non-framework `agent` — or any foreign
   dispatch — simply finds no correlation to complete.
-- (E) For a **step** session, its correlated resolution has registered no step session yet
-  — 1 step instance = 1 session (invariant 5) — violation: `state-error` (`step-session-bound`),
+- (E) For a **step** session, its correlated resolution has registered no worker session yet
+  — 1 step instance = 1 session (invariant 5) — violation: `state-error` (`worker-session-bound`),
   returned but not journaled: the refused session is never registered, so it has no log
   (rule 4).
 - Trigger — the session-started boundary for hook-opened sessions, before
-  functions 1–2 (orchestrator session) or 6–7 (step session) run at the
+  functions 1–2 (orchestrator session) or 6–7 (worker session) run at the
   same boundary, where applicable.
 
 **Postconditions**
@@ -475,7 +480,7 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
 - The start is the session-scope seed: every subsequent entry of this session carries
   the started `sessionId` (and `parentSessionId` where present) in its envelope.
 - For a **step** session, its step instance exists and its step ref
-  `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>` is created and checked
+  `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>` is created and checked
   out (invariant 6). Creating and checking out a ref writes no artifact content: it only
   materializes already-committed content.
 
@@ -499,16 +504,16 @@ Contract schemas — [contracts/api/start-session.input.schema.json](../../contr
    refusal (`state-error`, `session-ended`) — a dead identity never revives. A
    re-registration naming a **different** `agent` for an already-registered `sessionId` is
    `state-error` (`session-conflict`), journaled: identity never silently mutates.
-5. 1 step instance = 1 session. A step resolution admits exactly one step session — the
+5. 1 step instance = 1 session. A step resolution admits exactly one worker session — the
    registration naming the resolution's orchestrator session as `parentSessionId` and the
    resolved step's actor as `agent`, at or after the resolution's `timestamp` (the cross-log
    ordering key, see [Logging](#logging)). A start for a different `sessionId` that
-   correlates to a resolution which already registered its step session is `state-error`
-   (`step-session-bound`). Recovery is function 10's alone: it concludes the step at
+   correlates to a resolution which already registered its worker session is `state-error`
+   (`worker-session-bound`). Recovery is function 10's alone: it concludes the step at
    dispatch return, and the orchestrator's re-resolution (function 3) writes a new
-   resolution, which admits a new step session. This single registration is the step's
+   resolution, which admits a new worker session. This single registration is the step's
    session that function 10 reads delivery from (function 10, invariant 5).
-6. A step session's registration creates its **step instance**'s step ref and checks it out:
+6. A worker session's registration creates its **step instance**'s step ref and checks it out:
    from the ref tip of the step's previous step instance in the same workflow instance when
    the workspace branch has not moved since that step instance's base — the retry continues the
    failed work — otherwise from the workspace branch tip. Nothing is renamed, reused, or
@@ -580,7 +585,7 @@ Contract schemas — [contracts/api/resolve-workflow-instructions.input.schema.j
 
 - (E) A session opened with no unresolved `resolve-step` entry correlating to it (typically: its
   registration carries no `parentSessionId`) — an orchestrator session
-  (a step session loads functions 6–7 instead) — violation: `state-error`
+  (a worker session loads functions 6–7 instead) — violation: `state-error`
   (`session-kind-mismatch`), journaled.
 - (E) The session is registered (a start entry exists) — violation: `inquiry-error`
   (`session-unregistered`), unjournalable (rule 4).
@@ -813,8 +818,9 @@ Contract schemas — [contracts/api/resolve-step.input.schema.json](../../contra
    error. Agents never pass or mint instance ids — the id surfaces read-only in the
    report's `context`.
 9. **One workflow instance and one in-flight step per orchestrator session**: an orchestrator
-   session drives at most one workflow instance over its whole lifetime (one workflow end =
-   one return to the user, which ends the session — see the Session definition), and between
+   session drives at most one workflow instance over its whole lifetime (see the Session
+   definition: this is what lets the harness deduce the workflow instance without
+   agent-provided ids), and between
    a step's resolution
    and its journaled outcome it resolves no other step — a resolve-step call arriving while a
    step is in flight is refused (`state-error`, `step-in-flight`, journaled), never silently
@@ -935,7 +941,7 @@ May this step start? The gate the orchestrator consults between resolution and d
 Evaluated strictly against persisted workspace state
 (C1) and the instance view of the logs — never against anything an agent merely remembers.
 It also prepares the working tree: it requires it clean and, on a pass, returns it to the
-workspace branch, so the step session's **step ref** — created by function 0 once the
+workspace branch, so the worker session's **step ref** — created by function 0 once the
 session exists — is always created over a clean working tree on the workspace branch.
 
 **Interface**
@@ -1001,7 +1007,7 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
   an earlier step instance's ref — function 10 leaves it there, and a crashed step instance
   of whichever orchestrator session too (function 10, invariant 7) — is not a violation.
 - Trigger — the step-starting boundary (THE enforcement point: a failing precondition denies
-  the dispatch), in the dispatching (orchestrator) session: the step
+  the dispatch), in the dispatching (orchestrator) session: the worker
   session does not exist yet at this boundary. There is no agent-facing probe: the mediated
   surface serves functions 3–4 only — the orchestrator learns of a failing precondition from
   the denied dispatch, equivalent feedback one hook later.
@@ -1017,7 +1023,7 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
   the workspace branch. On `fail` or any error outcome, the working tree is not moved.
 - No artifact is touched — the invocation's own log entry is the only write: checking never
   mutates artifacts, and the checkout only materializes already-committed content. The step
-  ref itself is created later, by function 0, once the step session — and with it the step
+  ref itself is created later, by function 0, once the worker session — and with it the step
   instance — exists.
 
 **Enforcement scope.** "THE enforcement point" holds while the boundary fires — a host whose
@@ -1058,7 +1064,7 @@ Residual cleanup is C6's detect-and-remediate plane, exactly as function 8's enf
 
 ### 6. resolve-step-instructions
 
-Which behavioral guidance does this step's session load? Deterministic resolution of the
+Which behavioral guidance does this step's worker session load? Deterministic resolution of the
 step's authored context at the step-started boundary — injected into the session at open:
 1 step instance = 1 agent = 1 session = 1 artifact instance — the
 step's authored constraints
@@ -1118,7 +1124,7 @@ Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json]
 
 - The session context contains exactly its step's declared refs — nothing more, nothing chosen
   by the agent.
-- The invocation appends its own entry to the step session's log (what was resolved, for
+- The invocation appends its own entry to the worker session's log (what was resolved, for
   which step).
 
 **Invariants**
@@ -1135,7 +1141,7 @@ Contract schemas — [contracts/api/resolve-step-instructions.input.schema.json]
 
 ### 7. resolve-step-skills
 
-Which skills does this step's session load? The same correlation and determinism as function
+Which skills does this step's worker session load? The same correlation and determinism as function
 6, for skills — a session's capabilities are step-scoped by construction.
 
 **Interface**
@@ -1171,14 +1177,14 @@ Contract schemas — [contracts/api/resolve-step-skills.input.schema.json](../..
 
 **Preconditions**
 
-- A session opened with an unresolved `resolve-step` entry correlating to it — a step
+- A session opened with an unresolved `resolve-step` entry correlating to it — a worker
   session. Function 6's preconditions and violation outcomes apply identically.
 - Trigger — the step-started boundary (hook plane).
 
 **Postconditions**
 
 - The session loads exactly its step's declared skills.
-- The invocation appends its own entry to the step session's log, alongside function 6's.
+- The invocation appends its own entry to the worker session's log, alongside function 6's.
 
 **Invariants**
 
@@ -1278,7 +1284,7 @@ never in a commit (no function 9 ran, so nothing committed them) and never in wo
 (only promotion advances it, function 10), and the dirtied path then fails this function's
 own staging-baseline check (invariant 5) for every later mediated write — the escape cannot
 compound through the harness — while the dirty working tree blocks the next step's
-dispatch (function 5, `workspace-not-clean`). A step session whose own step-instance ref is
+dispatch (function 5, `workspace-not-clean`). A worker session whose own step-instance ref is
 not checked out (function 0 could not create or check it out, or a fail-open host never ran
 function 0) has every write denied (invariant 7): every artifact write happens inside a
 governed step instance. Residual cleanup is C6's detect-and-remediate plane.
@@ -1305,9 +1311,9 @@ governed step instance. Residual cleanup is C6's detect-and-remediate plane.
 6. A write targeting the workspace logs path is denied always, for every actor: logs are
    harness-authored, single-writer (C0) — no agent privilege can grant authorship of the
    journal, and no role can declare one (the ACL vocabulary has no resource for it).
-7. A write is admitted only from a step session whose step instance is in flight and whose
+7. A write is admitted only from a worker session whose step instance is in flight and whose
    own step-instance ref is checked out. Any other write — from an orchestrator (root)
-   session, from a step session whose ref function 0 could not create or check out, while
+   session, from a worker session whose ref function 0 could not create or check out, while
    another step instance's ref is checked out, or after its step instance's function-10
    outcome — is denied, an ordinary `denied` outcome whose `failureMessage` names "no step in
    flight": every artifact write happens inside a governed step instance, onto its own ref.
@@ -1438,9 +1444,9 @@ instances that passed here.
   hook plane from the returning dispatch and session ids — never supplied by an agent.
   This correlation **normatively relies on function 3, invariant 9** (one in-flight step per
   orchestrator session): the invoking session's single in-flight step IS the step being
-  evaluated, so a host event payload need not echo the step session's own id — hosts whose
-  dispatch-return events carry no step identity are fully supported. The step's session is
-  the single step session function 0 registered under the in-flight resolution (function 0,
+  evaluated, so a host event payload need not echo the worker session's own id — hosts whose
+  dispatch-return events carry no step identity are fully supported. The step's worker session is
+  the single worker session function 0 registered under the in-flight resolution (function 0,
   invariant 5). Delivery (invariant 5) is read from two sources: the diff between that
   session's step-instance ref and its base — the workspace branch tip, after any rebase —
   and that session's log — the `committedPaths` of its function-9 `valid` entries (function
@@ -1451,7 +1457,7 @@ instances that passed here.
   `artifact` kind, the delivered artifact instance's `artifactPath` (or `null`), the delivery
   `outcome` (`pass` / `fail`), and on failure a `failureMessage` naming the step, the kind,
   and why — the step state changes zero artifact instances of the kind, or more than one, or
-  the step session's own commits do not change the one it changes. A failed delivery fails
+  the worker session's own commits do not change the one it changes. A failed delivery fails
   the aggregate. The report also carries its own `promotion` (invariant 6), journaled in the
   same entry: `{outcome: promoted | withheld, workspaceCommit}` — whether the step ref was
   promoted, and
@@ -1516,9 +1522,9 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
   is being evaluated — an in-flight step exists — violation: `not-applicable` (rule 2). This
   also absorbs a duplicate step-ended delivery: after the first outcome journals, the step is
   no longer in flight, so re-delivery finds no target — enforcing invariant 2 structurally.
-- Trigger — the step-ended boundary (THE evaluation point: the step's session has ended, the
+- Trigger — the step-ended boundary (THE evaluation point: the step's worker session has ended, the
   state it left is final). The invocation runs in the dispatching (orchestrator) session — the
-  same session that owns the step's precondition check: at step-ended the step session has
+  same session that owns the step's precondition check: at step-ended the worker session has
   already closed.
 
 **Postconditions**
@@ -1533,7 +1539,7 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
   6); pruning step-instance refs is out of scope. The working tree is left as it is: function
   5 returns it to the workspace branch before the next step instance.
 
-**Order of operations.** On the in-flight step instance — the step session function 0
+**Order of operations.** On the in-flight step instance — the worker session function 0
 registered under the in-flight resolution, and that session's own step ref — the function
 performs exactly two Git acts, the rebase and the promotion:
 
@@ -1569,7 +1575,7 @@ and an environment failure, not an outcome.
    expression failing at runtime is `state-error` (`condition-evaluation-failed`), journaled,
    exactly as function 5, invariant 2; like any error outcome, it withholds.
 2. Postconditions are evaluated ONCE per step pass, at the step-ended boundary — the step's
-   session has ended, the state it left is final; the step's own session end adds no second
+   session has ended, the state it left is final; the step's own worker session end adds no second
    evaluation of the same state.
 3. The step's outcome logs from this function: its postconditions hold, or they do not.
    This journaled outcome is exactly what function 3's cursor reads — a step whose latest
@@ -1581,7 +1587,7 @@ and an environment failure, not an outcome.
    (a) the diff between the step-instance ref and its base — the workspace branch tip,
    after any rebase — changes **exactly one** artifact instance of the step's declared
    artifact kind, creating it or updating it (the workflow schema's "produces or updates");
-   and (b) the step session's own commits, through function 9, include a change to that same
+   and (b) the worker session's own commits, through function 9, include a change to that same
    artifact instance. (a) keeps a retry built on a previous step instance's ref (function 0,
    invariant 6) from promoting more than one artifact instance of the kind; (b) keeps "no
    valid step instance without its artifact": a retry that agrees with the earlier work
@@ -1594,7 +1600,7 @@ and an environment failure, not an outcome.
    that was evaluated; a failed, abandoned, or crashed step instance never advances it.
    Workspace state therefore only ever holds the output of step instances that passed this
    function (C6).
-7. Crash recovery: a step session ending without a function-10 outcome leaves its step
+7. Crash recovery: a worker session ending without a function-10 outcome leaves its step
    instance's ref, with the working tree on it. The next function-5 call — whichever
    orchestrator session makes it, never tied to the original session — returns the working
    tree to the workspace branch as part of its ordinary preparation — the same act it
@@ -1946,11 +1952,11 @@ step, so step pre- and postconditions apply before and after it — while write 
 | Boundary | Structural evidence | Functions |
 | --- | --- | --- |
 | session-started | Session-open event with no correlated unresolved `step-resolution` entry | 0 (opening — always first) + 1, 2 |
-| step-starting | Dispatch about to open a step session | 5 (preconditions + clean working tree — THE enforcement point) |
+| step-starting | Dispatch about to open a worker session | 5 (preconditions + clean working tree — THE enforcement point) |
 | step-started | Session-open event correlated to an unresolved `step-resolution` entry | 0 (opening — always first; creates and checks out the step instance's step ref) + 6, 7 |
 | write-starting | Write tool about to mutate an artifact path | 8 (authorization + staging baseline + step instance in flight — can deny; a target under the workspace logs path is denied always — function 8, invariant 6) |
 | write-ended | Write tool has landed a staged write on an artifact path | 9 (schema validity — the commit gate, onto the step ref) |
-| step-ended | Dispatch returned after the step session ended | 10 (postconditions — THE evaluation point; on pass, promotes the step ref) |
+| step-ended | Dispatch returned after the worker session ended | 10 (postconditions — THE evaluation point; on pass, promotes the step ref) |
 | session-ended | Session-end event, whenever the surrounding mechanism can observe it | 11 (closing — best-effort, C8) |
 
 This keeps the harness env-agnostic: normalizing host-specific event names and tool payloads,
@@ -1959,11 +1965,11 @@ The correlation classifier in the table ("with/without a correlated unresolved
 `step-resolution` entry") is the **fallback**, for hosts whose event vocabulary cannot
 distinguish the two session-open kinds: a host with structurally distinct events (a dedicated
 subagent-start event, an agent-scoped prompt event) classifies by those events directly, and
-the correlation is then needed only to resolve *which step* a step session serves — validated
+the correlation is then needed only to resolve *which step* a worker session serves — validated
 inside function 0 itself — never to classify the boundary. Likewise a host that hands the
-step session its actor directly needs no actor derivation.
+worker session its actor directly needs no actor derivation.
 The step-starting and step-ended boundaries occur in the dispatching (orchestrator) session —
-their entries journal to its log; the step session's own log carries its registration (0), its
+their entries journal to its log; the worker session's own log carries its registration (0), its
 context resolutions (6–7), and its write-boundary entries (8–9).
 Observational host events that do not enter one of these boundaries are outside this
 specification's concern, and they are not written to the harness journal.
@@ -1980,7 +1986,7 @@ step-started boundary is therefore **mandatory**, not an optimization: the funct
 
 The boundary names are lifecycle participles precisely to dissolve the step/session clash the
 1 step instance = 1 session invariant creates: **step-starting** (the dispatch about to open the step —
-it can deny) and **step-started** (the step session having opened — it can only inject) coincide
+it can deny) and **step-started** (the worker session having opened — it can only inject) coincide
 in time but differ in capability. No merged "step-start"
 boundary could carry both capabilities — no host guarantees a session hook can veto its own
 session.
@@ -2327,8 +2333,8 @@ and the session logs correlate — or **discards** (restore from the step ref ti
 new path). No commit ever holds invalid bytes — transactional by construction.
 
 **3. The step instance is the unit of acceptance.** Each step instance works on its own
-**step ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<stepSessionId>`), created
-and checked out by function 0 when it registers the step session — from the previous step
+**step ref** (`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>`), created
+and checked out by function 0 when it registers the worker session — from the previous step
 instance's ref tip when the workspace branch has not moved since that step instance's base, else
 from the workspace branch tip — local-only and never synced. Function 10 evaluates the step
 state — workspace state plus the step instance's commits — and on pass **promotes** it: the

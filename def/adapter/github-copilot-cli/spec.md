@@ -81,7 +81,7 @@ replayed from a live capture in the process tests).
    **Plugin agents are namespaced** `<plugin-name>:<agent>`: in `task` `agent_type` (a bare
    name is refused as "Unknown agent_type"), in `agentType`/`agentName`, and in `--agent`.
    Only `agentDisplayName` is bare. The binding's `hostAgentNamespaceSeparator: ":"` makes H1
-   open the step session for the framework agent (the part after the last `:`), never for
+   open the worker session for the framework agent (the part after the last `:`), never for
    the namespaced id. Repository agents (`.github/agents/`) carry no namespace.
 7. **Background sessions (app only).** The app spawns short title-summarizer sessions in the
    same folder. They fire only the global hooks (`sessionStart`, `userPromptSubmitted`,
@@ -97,7 +97,7 @@ replayed from a live capture in the process tests).
 | Runtime event (registration) | Boundary | Harness function(s) | Decision on stdout |
 | --- | --- | --- | --- |
 | `sessionStart` (global) | — (announce) | none | `additionalContext`: framework root, workspace root, the exact harness command lines. Stateless. |
-| `userPromptSubmitted` (**agent-scoped**, orchestrators) | **H0** session-started | `start-session` (turn); skipped in a step session and for an agent a governed session dispatched | none (the runtime ignores this event's output) |
+| `userPromptSubmitted` (**agent-scoped**, orchestrators) | **H0** session-started | `start-session` (turn); skipped in a worker session and for an agent a governed session dispatched | none (the runtime ignores this event's output) |
 | `userPromptTransformed` (**agent-scoped**, orchestrators) | **H0** context injection | `start-session` if still needed; `resolve-workflow-instructions`, `resolve-workflow-skills` | `modifiedTransformedPrompt` = hint + context + original |
 | `subagentStart` (global) | **H1** step-started | `start-session` (step, parent = dispatcher: `parentAgentId`, else `sessionId`), `resolve-step-instructions`, `resolve-step-skills` | `additionalContext` = hint + step context |
 | `preToolUse` · `task` (global) | **H2** step-starting | `check-step-preconditions` | deny on fail; deny `mode: background` |
@@ -107,7 +107,7 @@ replayed from a live capture in the process tests).
 | `postToolUse` · write tool | **H5** write-ended | `check-step-artifact` | `modifiedResult` + `additionalContext` on revert |
 | `postToolUse` / `postToolUseFailure` · `task` | **H6** step-ended | `check-step-postconditions` (dispatcher's session) | `additionalContext` on fail |
 | `postToolUse` · any (first one only, if H0 context never landed) | H0 fallback | `resolve-*-instructions/skills` | `additionalContext` with load directives |
-| `subagentStop` (global) | **H7** step session ended | `end-session` (step) | none |
+| `subagentStop` (global) | **H7** worker session ended | `end-session` (step) | none |
 | `agentStop` (global) | **H7** turn session ended | `end-session` (the stopping agent's own session) | none |
 | `sessionEnd` (global) | **H7** closure | `end-session` for the session and every descendant still open | none |
 | `errorOccurred` (global) | diagnostic | none | none (stderr only) |
@@ -121,10 +121,18 @@ needed, also in autopilot.
 
 ## Session identity
 
+**Mapping to the core's sessions.** The core defines its two session kinds host-agnostically —
+an **orchestrator session** drives at most one workflow instance, a **worker session**
+executes exactly one step instance — and leaves the mapping from host signals to each
+adapter. On this host: an orchestrator session (the turn session below) opens at each user
+prompt to a framework orchestrator (H0) and lasts until that orchestrator returns to the
+user; a worker session opens at each subagent dispatch (H1) and lasts until the subagent
+returns to the orchestrator.
+
 - **Turn session (H0):** `<sessionId>-t<timestamp>`. It is created only by an orchestrator's
   scoped hook, which supplies `--agent <slug>`; nothing in a payload names the selected agent.
   The record is keyed by `sessionId`.
-- **Step session (H1):** the subagent's `agentId`, which is exactly the `sessionId` every event
+- **Worker session (H1):** the subagent's `agentId`, which is exactly the `sessionId` every event
   inside the subagent carries. Attribution at the tool boundary is therefore native: no
   `parentToolCallId` correlation is needed.
 - **Records** live outside every repository, under `SAF_HARNESS_STATE_DIR`, else
@@ -163,7 +171,7 @@ own permission flow still applies to what the harness lets through.
 ### H0 — userPromptSubmitted / userPromptTransformed (agent-scoped)
 
 - **Pre:** `--agent` is present (scoped hook) and `sessionId` is non-empty. Otherwise pass.
-- **Step sessions are H1's.** An orchestrator agent acting a step still fires its scoped hook.
+- **Worker sessions are H1's.** An orchestrator agent acting a step still fires its scoped hook.
   When the record for `sessionId` is a step (`origin: step`), H0 passes: no `start-session`,
   no workflow context. When there is no record but `parentAgentId` names a session that has
   one, the agent was opened by a governed session's dispatch (core: `parentSessionId` is "the
@@ -191,7 +199,7 @@ own permission flow still applies to what the harness lets through.
 - **Effect:** `start-session --agent <agentType> --session-id <agentId> --parent-session-id
   <dispatcher session>`. On `started`, record it with `origin: step` and return
   `additionalContext` = hint + step context. On `not-applicable` (a foreign or non-framework
-  dispatch), record nothing and pass. On any other answer, `step-session-bound` included,
+  dispatch), record nothing and pass. On any other answer, `worker-session-bound` included,
   or when the dispatcher's own record is unregistered, record the step UNREGISTERED
   (`origin: step`) and pass.
 - **Context size:** the runtime caps only `postToolUse`'s `additionalContext` at 10 KB; H0's
@@ -252,9 +260,9 @@ own permission flow still applies to what the harness lets through.
    Anything else → deny, reason `SAFe agentic harness REJECTED: …` with the accepted line,
    and no harness function runs. An accepted request is RUN BY THE HOOK: the agent's flags
    become the inquiry (`--workflow-slug x` → `workflowSlug: x`), `sessionId` is the session
-   the record for the payload's `sessionId` names (the turn session, or the step session in
+   the record for the payload's `sessionId` names (the turn session, or the worker session in
    a subagent), `parentSessionId` is the parent that record tracks (`null` for a turn
-   session, the orchestrator session that H1 observed opening a step session), and the
+   session, the orchestrator session that H1 observed opening a worker session), and the
    function runs through the same command runner, interpreter and
    `FRAMEWORK_*` environment as every other boundary. The hook then answers
    `permissionDecision: deny` with the reason
@@ -305,7 +313,7 @@ own permission flow still applies to what the harness lets through.
 ### H7 — agentStop / subagentStop / sessionEnd
 
 - `agentStop` ends the stopping agent's own session (`sessionId`): a turn, or a step.
-- `subagentStop` ends the step session named by `agentId`. This is idempotent with the
+- `subagentStop` ends the worker session named by `agentId`. This is idempotent with the
   subagent's own `agentStop`.
 - `sessionEnd` ends the session and every recorded descendant.
 - All three always pass. A failed `end-session` is a diagnostic only, and the C6 commit-set
@@ -398,7 +406,7 @@ committed.
 | Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Every harness call of a firing is bounded by a deadline inside the event's registered `timeoutSec` (by 25 %, at least 5 s): a call that would start or run past it is stopped, its whole process tree killed (git children included: a process group on POSIX, `taskkill /T` on Windows) so no commit or revert outlives it, and is a harness failure, so the boundary DENIES while the host still honors the answer. Only a stall before the adapter runs (interpreter start) can still reach the host timeout. H5 still validates and reverts after the fact. |
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
-| H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a step session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
+| H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a worker session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
 | H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 commit-set remediation. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |

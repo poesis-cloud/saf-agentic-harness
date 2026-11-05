@@ -184,9 +184,9 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         ""start_session"" holds the session plane's one
         ACL lookup: a ROOT session's agent is checked
         against the declared actors (is_framework_agent);
-        a STEP session's gate is its correlation, which
-        admits one step session per resolution
-        (""step-session-bound"" - 1 step = 1 session).
+        a WORKER session's gate is its correlation, which
+        admits one worker session per resolution
+        (""worker-session-bound"" - 1 step = 1 session).
       end note
     }
 
@@ -438,7 +438,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +mint_workflow_instance_id(workflow_slug: str) : str
         +find_latest_open_instance(workflow_slug: str) : str | None
         +load_session_log(session_id: str) : Log
-        +find_step_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
+        +find_worker_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
         +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
         +append_log_entry(session_id: str, entry: LogEntry) : None
       }
