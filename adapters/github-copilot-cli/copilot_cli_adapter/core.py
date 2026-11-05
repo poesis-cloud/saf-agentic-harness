@@ -551,9 +551,12 @@ class Adapter:
 
     def _names_guarded_path(self, candidate: str, cwd: str | None, pathspec: bool) -> bool:
         references = [(candidate, cwd, pathspec)]
-        if candidate.startswith("-") and "=" in candidate:
-            references.append((candidate.split("=", 1)[1], cwd, False))
-        revision = _GIT_REVISION_PATH.match(candidate)
+        is_option = candidate.startswith("-")
+        if is_option and "=" in candidate:
+            # `--output="x"`: the token trim left the value's opening quote on.
+            references.append((candidate.split("=", 1)[1].strip(_TOKEN_TRIM), cwd, False))
+        # An option is never a `<rev>:<path>` object name (`--format=%h:%s`).
+        revision = None if is_option else _GIT_REVISION_PATH.match(candidate)
         if revision is not None:
             path = revision.group("path")
             root = (

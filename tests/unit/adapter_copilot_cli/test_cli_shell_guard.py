@@ -105,3 +105,33 @@ def test_a_bare_name_that_exists_in_the_workspace_is_denied(tmp_path: Path, bind
     rig.open_turn()
     assert _reason(rig, "Remove-Item -Recurse portfolio", str(workspace)) is not None
     assert _reason(rig, "Remove-Item -Recurse scratch", str(workspace)) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'curl --output="workspace/portfolio/x.md" https://example.com/x',
+        "curl --output='workspace/portfolio/x.md' https://example.com/x",
+        'Out-File -FilePath="workspace\\portfolio\\x.md"',
+    ],
+)
+def test_a_quoted_option_value_naming_the_workspace_is_denied(rig: Rig, command: str) -> None:
+    """The token trim removes only the closing quote of `--opt="value"`; the value is
+    checked without its quotes."""
+    rig.open_turn()
+    reason = _reason(rig, command, CWD)
+    assert reason is not None and "governed workspace path" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git log --format=%h:%s -5",
+        "git log --pretty=format:%h:%s",
+        "git for-each-ref --format=%(refname):%(objectname)",
+    ],
+)
+def test_an_option_token_is_never_a_revision_path_reference(rig: Rig, command: str) -> None:
+    """`--format=%h:%s` names no `<rev>:<path>` object, even from inside the workspace."""
+    rig.open_turn()
+    assert _reason(rig, command, WORKSPACE) is None
