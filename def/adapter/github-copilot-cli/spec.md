@@ -191,6 +191,10 @@ own permission flow still applies to what the harness lets through.
    - `create`/`edit` → `path`.
    - `str_replace_editor` → `path`, with the action refined by `command`; `view` is read-only.
    - `apply_patch` → the `*** Add/Update/Delete File:` and `*** Move to:` headers.
+     Lines split on `\n` only and header paths are taken verbatim, as the host writes
+     them; an empty path, one with surrounding whitespace (a CR included), or a
+     header-like line not in the canonical `*** <Kind> File: ` form makes the patch
+     unextractable.
 
    No target, a non-object argument, or an unparseable patch → **deny (fail closed)**.
    Otherwise run `check-step-authorization` for every target path, relativized to the

@@ -18,9 +18,16 @@ from __future__ import annotations
 import re
 
 _BEGIN = "*** Begin Patch"
-_FILE_HEADER = re.compile(r"^\*\*\* (Add|Update|Delete) File:\s*(.+?)\s*$")
-_MOVE_HEADER = re.compile(r"^\*\*\* Move to:\s*(.+?)\s*$")
-_ACTIONS = {"Add": "create", "Update": "update", "Delete": "delete"}
+# The host's own header prefixes, trailing space included: it takes the rest of the line
+# verbatim (no trim) as the path it writes.
+_FILE_HEADERS = (
+    ("*** Add File: ", "create"),
+    ("*** Update File: ", "update"),
+    ("*** Delete File: ", "delete"),
+)
+_MOVE_HEADER = "*** Move to: "
+# Anything that reads as a header without being one in the canonical form above.
+_HEADER_LIKE = re.compile(r"^\s*\*\*\*\s*(?:(?:Add|Update|Delete)\s*File|Move\s*to)\s*:", re.I)
 
 
 class PatchParseError(ValueError):
@@ -28,24 +35,44 @@ class PatchParseError(ValueError):
 
 
 def parse_patch_targets(patch_text: str) -> tuple[tuple[str, str], ...]:
-    """Answer every `(path, action)` a patch writes, in header order."""
+    """Answer every `(path, action)` a patch writes, in header order.
+
+    Lines are split on `\n` only and header paths are taken verbatim, as the host does. A
+    path that is empty or has surrounding whitespace (a CR included) would be authorized
+    under another name than the one the host writes, and a header-like line not in the
+    canonical form is ambiguous: either makes the whole patch unextractable.
+    """
     if not isinstance(patch_text, str) or _BEGIN not in patch_text:
         raise PatchParseError("patch text carries no '*** Begin Patch' envelope")
     targets: list[tuple[str, str]] = []
-    for line in patch_text.splitlines():
-        header = _FILE_HEADER.match(line.strip())
-        if header is not None:
-            targets.append((header.group(2), _ACTIONS[header.group(1)]))
-            continue
-        move = _MOVE_HEADER.match(line.strip())
-        if move is not None:
+    for line in patch_text.split("\n"):
+        if line.startswith(_MOVE_HEADER):
+            destination = _verbatim_path(line[len(_MOVE_HEADER) :], line)
             if not targets or targets[-1][1] != "update":
                 raise PatchParseError("'*** Move to:' does not follow an Update File header")
             source, _ = targets.pop()
-            targets.extend(((source, "delete"), (move.group(1), "create")))
+            targets.extend(((source, "delete"), (destination, "create")))
+            continue
+        header = next(
+            ((prefix, action) for prefix, action in _FILE_HEADERS if line.startswith(prefix)),
+            None,
+        )
+        if header is not None:
+            prefix, action = header
+            targets.append((_verbatim_path(line[len(prefix) :], line), action))
+        elif _HEADER_LIKE.match(line):
+            raise PatchParseError(f"patch header {line!r} is not in the canonical form")
     if not targets:
         raise PatchParseError("patch text names no Add/Update/Delete File header")
     return tuple(targets)
+
+
+def _verbatim_path(raw: str, line: str) -> str:
+    if raw == "" or raw != raw.strip():
+        raise PatchParseError(
+            f"patch header {line!r} names an empty path or one with surrounding whitespace"
+        )
+    return raw
 
 
 __all__ = ["PatchParseError", "parse_patch_targets"]

@@ -200,6 +200,16 @@ def test_h3_fails_closed_on_unextractable_targets(rig: Rig) -> None:
     assert rig.runner.inquiries("check-step-authorization") == []
 
 
+def test_h3_denies_a_patch_whose_header_path_is_not_verbatim(rig: Rig) -> None:
+    """`portfolio/a.md ` (trailing space) is a different file from the one a trimmed path
+    would authorize: the patch is unextractable and denied, no harness call runs."""
+    rig.open_turn()
+    patch = f"*** Begin Patch\n*** Add File: {WORKSPACE}\\portfolio\\a.md \n+x\n*** End Patch\n"
+    reason = _denied(rig.fire("preToolUse", pre_tool_use(("apply_patch", {"input": patch}))))
+    assert "fail closed" in reason
+    assert rig.runner.inquiries("check-step-authorization") == []
+
+
 def test_h3_authorizes_every_apply_patch_target(rig: Rig) -> None:
     rig.open_turn()
     patch = (
