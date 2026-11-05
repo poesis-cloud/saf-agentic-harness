@@ -23,6 +23,12 @@ _WRITE_RETRY_DIRECTIVE = (
     "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its "
     "schema and retry."
 )
+_WRITE_UNVALIDATED = "WRITE NOT VALIDATED by the SAFe agentic harness: "
+_WRITE_ERROR_DIRECTIVE = (
+    "The harness answered an error instead of validating this write, so it was neither "
+    "committed nor necessarily restored: its bytes may still be in the working tree. Fix "
+    "what the error names, then redo the write so it is validated."
+)
 _STEP_RETRY_DIRECTIVE = (
     "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed "
     "step; do not surface step details to the user."
@@ -62,6 +68,18 @@ def write_rejected(report: Mapping[str, Any]) -> dict[str, Any]:
             "textResultForLlm": f"{_WRITE_REJECTED}{description}",
         },
         "additionalContext": _truncate(f"{description}\n\n{_WRITE_RETRY_DIRECTIVE}"),
+    }
+
+
+def write_unvalidated(report: Mapping[str, Any]) -> dict[str, Any]:
+    """H5 — an error outcome: the write was not validated; never claim it was restored."""
+    description = describe_report(report)
+    return {
+        "modifiedResult": {
+            "resultType": "success",
+            "textResultForLlm": f"{_WRITE_UNVALIDATED}{description}",
+        },
+        "additionalContext": _truncate(f"{description}\n\n{_WRITE_ERROR_DIRECTIVE}"),
     }
 
 
@@ -202,4 +220,5 @@ __all__ = [
     "step_failed",
     "transformed_prompt",
     "write_rejected",
+    "write_unvalidated",
 ]

@@ -70,6 +70,7 @@ _STARTED = "started"
 _RESOLVED = "resolved"
 _NOT_APPLICABLE = "not-applicable"
 _VALID = "valid"
+_REVERTED = "reverted"
 _ALLOWED = "allowed"
 _ALLOWING = frozenset({"pass", _ALLOWED})
 _PASSING_STEP = frozenset({"pass", _NOT_APPLICABLE})
@@ -647,9 +648,12 @@ class Adapter:
                 "check-step-artifact unavailable: the write could not be validated. "
                 "Retry once the harness answers."
             )
-        if read_status(report) == _VALID:
+        status = read_status(report)
+        if status == _VALID:
             return None
-        return renderer.write_rejected(report)
+        if status == _REVERTED:
+            return renderer.write_rejected(report)
+        return renderer.write_unvalidated(report)
 
     def _settle_step(self, record: SessionRecord) -> Decision:
         """H6 — evaluate the returned step in the DISPATCHING session."""

@@ -305,6 +305,25 @@ def test_h5_replaces_the_result_of_a_rejected_write(rig: Rig) -> None:
     assert "frontmatter.status is required" in decision["additionalContext"]
 
 
+def test_h5_never_claims_a_restore_for_an_error_outcome(rig: Rig) -> None:
+    """`log-unreadable` (or any error) is returned before artifact processing: the file may
+    still be modified, so the result names the error and claims no rollback."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.runner.script["check-step-artifact"] = build_error_report(
+        "check-step-artifact",
+        "system-error",
+        "log-unreadable",
+        "The session log cannot be read.",
+    )
+    decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
+    text = decision["modifiedResult"]["textResultForLlm"]
+    assert "WRITE NOT VALIDATED" in text and "log-unreadable" in text
+    assert "WRITE REJECTED" not in text
+    assert "restored from HEAD" not in decision["additionalContext"]
+    assert "log-unreadable" in decision["additionalContext"]
+
+
 def test_a_failed_write_is_not_validated(rig: Rig) -> None:
     rig.open_turn()
     rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
