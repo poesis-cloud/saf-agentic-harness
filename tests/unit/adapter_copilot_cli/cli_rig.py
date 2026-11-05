@@ -225,7 +225,7 @@ def rig(tmp_path: Path, binding: ToolBinding) -> Rig:
         workspace_dir=WORKSPACE,
         invocation=make_invocation(),
         diagnostic=diagnostics.append,
-        make_folders=folders.append,
+        make_folders=lambda root, parts: folders.append("/".join((root, *parts))),
     )
     return Rig(adapter, runner, tracker, binding, diagnostics, folders)
 

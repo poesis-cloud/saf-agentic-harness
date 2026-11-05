@@ -145,8 +145,8 @@ def test_only_the_create_tool_gets_folders(tmp_path, binding, call) -> None:
 def test_a_folder_failure_is_a_diagnostic_and_the_create_is_still_allowed(
     tmp_path, binding
 ) -> None:
-    def refuse(path: str) -> None:
-        raise PermissionError(f"denied: {path}")
+    def refuse(root: str, parts) -> None:
+        raise PermissionError(f"denied: {parts}")
 
     rig, workspace = _rig(tmp_path, binding, make_folders=refuse)
     target = workspace / "portfolio" / "x" / "y.md"
@@ -162,3 +162,67 @@ def test_a_foreign_flavor_path_is_never_created_on_this_host(rig: Rig) -> None:
     write = {"path": WORKSPACE + r"\portfolio\x\y.md", "file_text": "x"}
     assert rig.fire("preToolUse", pre_tool_use(("create", write))) is None
     assert rig.folders == []
+
+
+def _link(link: Path, target: Path) -> None:
+    """A directory symlink, else (Windows without the privilege) a junction."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            raise
+        import _winapi  # type: ignore[import-not-found]
+
+        _winapi.CreateJunction(str(target), str(link))
+
+
+@pytest.mark.parametrize("linked", ["portfolio", "portfolio/products"])
+def test_a_linked_ancestor_never_carries_folder_creation_outside_the_workspace(
+    tmp_path, binding, linked
+) -> None:
+    """The lexical check passes `workspace/portfolio/...`, but a symlink or junction there
+    points outside: the folders must not be created through it."""
+    rig, workspace = _rig(tmp_path, binding)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = workspace / linked
+    link.parent.mkdir(parents=True, exist_ok=True)
+    _link(link, outside)
+    target = workspace / "portfolio" / "products" / "acme" / "vision.md"
+    assert rig.fire("preToolUse", _pre(workspace, _create(target))) is None
+    assert list(outside.iterdir()) == []
+    assert any("could not create the folder" in line for line in rig.diagnostics)
+
+
+def test_a_linked_workspace_root_is_followed_to_its_real_path(tmp_path, binding) -> None:
+    """The workspace itself may be a link the operator chose: creation happens in its real
+    folder, never anywhere else."""
+    real = tmp_path / "real-workspace"
+    real.mkdir()
+    rig, workspace = _rig(tmp_path, binding)
+    workspace.rmdir()
+    _link(workspace, real)
+    target = workspace / "portfolio" / "x" / "y.md"
+    assert rig.fire("preToolUse", _pre(workspace, _create(target))) is None
+    assert (real / "portfolio" / "x").is_dir()
+
+
+@pytest.mark.parametrize("dir_fd", [True, False], ids=["descriptor-walk", "checked-paths"])
+def test_make_contained_folders_refuses_a_link_component(tmp_path, monkeypatch, dir_fd) -> None:
+    from copilot_cli_adapter import folders
+
+    if not dir_fd:
+        monkeypatch.setattr(folders, "_supports_dir_fd", lambda: False)
+    elif not folders._supports_dir_fd():
+        pytest.skip("no dir_fd support on this host")
+    workspace, outside = tmp_path / "workspace", tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    folders.make_contained_folders(str(workspace), ("a", "b"))
+    assert (workspace / "a" / "b").is_dir()
+    _link(workspace / "a" / "link", outside)
+    with pytest.raises(OSError):
+        folders.make_contained_folders(str(workspace), ("a", "link", "c"))
+    assert list(outside.iterdir()) == []
+    with pytest.raises(OSError):
+        folders.make_contained_folders(str(workspace), ("a", "..", "c"))

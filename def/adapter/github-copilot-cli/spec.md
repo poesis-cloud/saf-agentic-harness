@@ -202,7 +202,10 @@ own permission flow still applies to what the harness lets through.
    I9 denies. When the WHOLE firing is allowed, the hook creates the missing parent folders
    of each `create`/`str_replace_editor create` target the harness answered `allowed`,
    resolved against `cwd`, only inside the workspace and only for a path of the local OS
-   flavor. It writes folders only: no content, no commit (git does not track empty folders),
+   flavor. Containment is enforced on the real filesystem, not only lexically: creation
+   starts at the workspace's real path and goes one folder at a time, and any component that
+   is a symlink, a junction or not a folder refuses it (a link could carry `mkdir` outside the
+   workspace). It writes folders only: no content, no commit (git does not track empty folders),
    and the write itself still goes through the tool, H5 and the core. Patch targets are
    skipped (`*** Add File:` creates its own). A folder that cannot be created is a hook
    diagnostic; the tool then fails as it would have.

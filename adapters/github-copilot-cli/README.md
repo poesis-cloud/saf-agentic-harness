@@ -178,7 +178,8 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
   `apply_patch`, which GPT-5.x models get instead).
 - **Missing folders.** The runtime's `create` refuses a missing parent folder. The hook
   creates the missing folders of a `create` the harness allowed inside the workspace (folders
-  only, no commit), so agents need no shell `mkdir`.
+  only, no commit), so agents need no shell `mkdir`. It never creates a folder through a
+  symlink or junction under the workspace.
 - **Batching (app).** A harness command must be the only tool call in its batch. The CLI fires
   `preToolUse` once per call.
 - **Plugin agent names.** Agents and dispatches must use the runtime's

@@ -31,8 +31,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
+from .folders import make_contained_folders
 from .invocation import HarnessInvocation, unquote
-from .paths import host_basename, is_within, relativize, resolve_host_path
+from .paths import host_basename, is_within, relativize, resolve_host_path, workspace_parts
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
 from .runner import CommandRunner, HarnessCommandError
@@ -118,10 +119,6 @@ def _stderr(message: str) -> None:
     print(message, file=sys.stderr)
 
 
-def _make_folders(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-
 class Adapter:
     """Orchestrate one host firing across the harness command API."""
 
@@ -134,7 +131,7 @@ class Adapter:
         workspace_dir: str,
         invocation: HarnessInvocation,
         diagnostic: Diagnostic = _stderr,
-        make_folders: Callable[[str], None] = _make_folders,
+        make_folders: Callable[[str, Sequence[str]], None] = make_contained_folders,
     ) -> None:
         self._binding = binding
         self._tracker = tracker
@@ -310,15 +307,21 @@ class Adapter:
         """H3 host adaptation — the runtime's `create` refuses a missing parent folder, and
         no other tool offered to every model creates one. Once the WHOLE firing is allowed,
         create the missing folders of each harness-allowed `create` target inside the
-        workspace: folders only, no content, no commit (git does not track empty folders)."""
+        workspace: folders only, no content, no commit (git does not track empty folders).
+
+        Containment is checked lexically here and enforced again on the REAL filesystem by
+        `make_folders`, which refuses any symlink or junction under the workspace."""
         for raw in paths:
             if not is_within(raw, hook.cwd, self._workspace_dir):
                 continue
             resolved = resolve_host_path(raw, hook.cwd, self._workspace_dir)
             if type(resolved) is not type(PurePath()):
                 continue
+            parts = workspace_parts(resolved.parent, self._workspace_dir)
+            if parts is None:
+                continue
             try:
-                self._make_folders(str(resolved.parent))
+                self._make_folders(self._workspace_dir, parts)
             except OSError as failure:
                 self._diagnostic(
                     f"[{ADAPTER_ID}] could not create the folder of '{raw}': {failure}"
