@@ -68,10 +68,15 @@ and implementation parts prescribe its realization.
   **promotion**.
 - **Step ref** — the Git ref `refs/harness/steps/<workflowInstanceId>/<stepSlug>` carrying one
   step's validated commits: created from the workspace branch tip when the step starts
-  (function 5) and checked out in the working tree for the step's duration. It is local-only,
-  never synced, and never workspace state; a retired attempt's ref is kept, for inspection
-  only, under `refs/harness/attempts/` (function 5). The **step state** is workspace state
-  plus the step's commits on its step ref — what function 10 evaluates.
+  (function 5) and checked out in the working tree for the step's duration. It is keyed by
+  `stepSlug` because that identifies the step's one execution within its instance: the slug
+  is unique within the workflow, a step is accepted at most once per instance (once it
+  passes, function 3's cursor never resolves it again — its retries are attempts on the same
+  execution, sharing its ref), and reworking delivered output is a new instance. It is
+  local-only, never synced, and never workspace state; a retired attempt's ref is kept, for
+  inspection only, under `refs/harness/attempts/`, keyed by the attempt's step session
+  (function 5). The **step state** is workspace state plus the step's commits on its step
+  ref — what function 10 evaluates.
 - **Promotion** — fast-forwarding the workspace branch to a step ref whose step passed
   function 10 — the only way artifacts enter workspace state.
 - **Artifact** — the framework's content: every business, governance, or orchestration
@@ -943,9 +948,15 @@ Contract schemas — [contracts/api/check-step-preconditions.input.schema.json](
   - on a retry whose previous attempt's step ref is still based on the current workspace
     branch tip, that ref, reused — the retry continues from the failed attempt's commits;
   - otherwise, the previous attempt's ref is kept for inspection as
-    `refs/harness/attempts/<workflowInstanceId>/<stepSlug>/attempt-<n>` (`<n>` counting that
-    step's retired refs from 1 — a sibling namespace, since Git cannot hold a ref and refs
-    beneath it at once) and a fresh step ref is created from the tip.
+    `refs/harness/attempts/<workflowInstanceId>/<stepSlug>/<stepSessionId>` and a fresh step
+    ref is created from the tip. `<stepSessionId>` is the attempt's real identity — its step
+    session (1 step = 1 session, bound by function 0, invariant 5), read from the ref tip
+    commit's `sessionId` — so the retired ref correlates directly with that session's log and
+    its commits' `sessionId` attribution, with no invented counter; when several sessions
+    contributed to one retained ref (a reused retry), it is the session of the attempt that
+    last committed to it. A ref carrying no commit holds no attempt's work and is deleted
+    rather than retired. (`refs/harness/attempts/` is a sibling namespace because Git cannot
+    hold a ref and refs beneath it at once.)
 
   On `fail`, or on any error outcome, nothing is prepared.
 - No artifact is touched — preparing a step ref writes no artifact content (checking it out

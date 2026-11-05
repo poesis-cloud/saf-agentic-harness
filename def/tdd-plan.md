@@ -362,7 +362,8 @@ its red tests first:
   `check-step-postconditions.output.schema.json`; the two new normative codes
   `workspace-not-clean` and `step-rebase-conflict` in `report.schema.json`'s code list;
 - function 5 — the clean-working-tree precondition and step-ref preparation (first attempt,
-  reuse on an unchanged base, retirement to `refs/harness/attempts/…` otherwise);
+  reuse on an unchanged base, retirement to
+  `refs/harness/attempts/<workflowInstanceId>/<stepSlug>/<stepSessionId>` otherwise);
 - function 8 — invariant 5 against the checked-out step ref, and invariant 7 (no step in
   flight → `denied`);
 - function 9 — commit onto the step ref; vacuous validity against the step ref tip;
