@@ -1370,6 +1370,120 @@ class TestAdapter:
         assert tracker.resolve_parent(HOST_SESSION) is None
 
 
+class TestFailedRegistration:
+    """Core rule 2: only `not-applicable` leaves a session ungoverned. A failed
+    `start-session` (an error report, `step-session-bound` included, or no report) must not
+    let the session's writes and dispatches bypass authorization: they are denied."""
+
+    @staticmethod
+    def _gated_calls(adapter: Adapter) -> list[Any]:
+        return [
+            adapter.handle_hook_event(
+                _event(_pre_tool_payload("create_file", {"filePath": "portfolio/a.md"}))
+            ),
+            adapter.handle_hook_event(
+                _event(_pre_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+            ),
+            adapter.handle_hook_event(
+                _event(
+                    _pre_tool_payload(
+                        "run_in_terminal",
+                        {"command": "python3 /h/harness.py resolve-step --workflow-slug w"},
+                    )
+                )
+            ),
+        ]
+
+    @pytest.mark.parametrize(
+        "runner",
+        [
+            FakeCommandRunner(
+                reports=queue_reports(
+                    start_session=[
+                        build_error_report(
+                            "start-session",
+                            code="session-instance-bound",
+                            message="already bound",
+                        )
+                    ]
+                )
+            ),
+            FakeCommandRunner(failure=RuntimeError("harness command crashed")),
+        ],
+        ids=["error-report", "no-report"],
+    )
+    def test_a_failed_turn_registration_denies_writes_and_dispatches(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout, runner
+    ) -> None:
+        adapter = make_adapter(runner)
+        decision = adapter.handle_hook_event(
+            _event(_prompt_payload(), agent="value-management-officer")
+        )
+        assert "systemMessage" in assert_valid_stdout(decision.stdout)
+        runner.failure = None
+        runner.calls.clear()
+        for decision in self._gated_calls(adapter):
+            rendered = assert_valid_stdout(decision.stdout)
+            output = rendered["hookSpecificOutput"]
+            assert output["permissionDecision"] == "deny"
+            assert "not registered with the harness" in output["permissionDecisionReason"]
+        assert runner.calls == []
+        adapter.handle_hook_event(
+            _event({"timestamp": TIMESTAMP, "hook_event_name": "Stop", "session_id": HOST_SESSION})
+        )
+        assert runner.calls == []
+        assert tracker.resolve_current(HOST_SESSION) is None
+
+    def test_a_refused_step_session_denies_the_steps_writes_until_it_stops(
+        self, make_adapter, tracker: SessionTracker, assert_valid_stdout
+    ) -> None:
+        runner = FakeCommandRunner(
+            reports=queue_reports(
+                start_session=[
+                    build_error_report(
+                        "start-session", code="step-session-bound", message="already bound"
+                    )
+                ]
+            )
+        )
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload()))
+        denied = adapter.handle_hook_event(
+            _event(_pre_tool_payload("create_file", {"filePath": "portfolio/a.md"}))
+        )
+        output = assert_valid_stdout(denied.stdout)["hookSpecificOutput"]
+        assert output["permissionDecision"] == "deny"
+        assert runner.find_calls("check-step-authorization") == []
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+        assert runner.find_calls("end-session") == []
+        assert tracker.resolve_current(HOST_SESSION) == TURN_SESSION
+        adapter.handle_hook_event(
+            _event(_pre_tool_payload("create_file", {"filePath": "portfolio/a.md"}))
+        )
+        assert len(runner.find_calls("check-step-authorization")) == 1
+
+    def test_a_not_applicable_step_still_passes_through(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        runner = FakeCommandRunner(
+            reports=queue_reports(start_session=[build_report("start-session", "not-applicable")])
+        )
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload("some-foreign-agent")))
+        assert tracker.resolve_current(HOST_SESSION) == TURN_SESSION
+
+
 class TestHookEntryPoint:
     """Adapter spec — Invocation plumbing, seam 2/3: `dispatch.sh` execs this entry."""
 

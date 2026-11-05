@@ -7,6 +7,17 @@ from pathlib import Path
 from typing import Any, MutableMapping
 
 
+# A stack entry for a session whose `start-session` FAILED (an error report or no report):
+# it is not registered, yet not ungoverned either — only `not-applicable` is. Never a valid
+# session slug, so it can never be mistaken for one.
+UNREGISTERED_PREFIX = "!unregistered:"
+
+
+def is_unregistered(session_id: str | None) -> bool:
+    """Tell whether a resolved stack entry marks a failed registration."""
+    return bool(session_id) and str(session_id).startswith(UNREGISTERED_PREFIX)
+
+
 class SessionTracker:
     """Keep a STACK of agent sessions per raw host session id.
 
@@ -25,6 +36,14 @@ class SessionTracker:
     def reset_current(self, raw_host_id: str, session_id: str) -> None:
         """Discard whatever a prior turn left and open a fresh stack on this session."""
         self._write_stacks({**self._read_stacks(), raw_host_id: [session_id]})
+
+    def reset_unregistered(self, raw_host_id: str, session_id: str) -> None:
+        """Open this turn as UNREGISTERED: its `start-session` failed (fail closed)."""
+        self.reset_current(raw_host_id, f"{UNREGISTERED_PREFIX}{session_id}")
+
+    def push_unregistered(self, raw_host_id: str, session_id: str) -> None:
+        """Push a step whose `start-session` failed, so its firings are denied, not passed."""
+        self.push_current(raw_host_id, f"{UNREGISTERED_PREFIX}{session_id}")
 
     def push_current(self, raw_host_id: str, session_id: str) -> None:
         """Push a newly opened step session as the current one."""
@@ -75,4 +94,4 @@ class SessionTracker:
         )
 
 
-__all__ = ["SessionTracker"]
+__all__ = ["UNREGISTERED_PREFIX", "SessionTracker", "is_unregistered"]
