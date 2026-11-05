@@ -57,3 +57,30 @@ class TestJsonDataParsing:
     def test_rejects_unsafe_yaml_tags(self) -> None:
         with pytest.raises(yaml.constructor.ConstructorError):
             YamlLoader().parse_json_data("!!python/object/apply:os.system ['echo unsafe']\n")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "tags: !!set {a: null}\n",
+            "blob: !!binary aGVsbG8=\n",
+            "items:\n  - ok\n  - !!set {b: null}\n",
+            "ratio: .nan\n",
+            "limit: .inf\n",
+            "? !!binary aGVsbG8=\n: x\n",
+        ],
+        ids=["set", "binary", "nested-set", "nan", "inf", "binary-key"],
+    )
+    def test_rejects_yaml_only_values_as_a_parse_failure(self, text: str) -> None:
+        """Artifact data is the JSON data model its schemas validate: a YAML-only value is
+        refused at load (a ValueError, the artifact store's parse failure)."""
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError) as raised:
+            YamlLoader().parse_json_data(text)
+        assert isinstance(raised.value, ValueError)
+
+    def test_markdown_frontmatter_rejects_yaml_only_values(self) -> None:
+        from utils import MarkdownLoader
+
+        with pytest.raises(ValueError):
+            MarkdownLoader().parse_markdown("---\ntags: !!set {a: null}\n---\n\n# Body\n")

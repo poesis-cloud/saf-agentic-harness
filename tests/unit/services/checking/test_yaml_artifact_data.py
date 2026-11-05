@@ -101,3 +101,27 @@ def test_a_markdown_artifacts_frontmatter_dates_reach_cel_as_strings(
     assert _evaluate(
         store, "artifacts['epic']", "selected.size() == 1 && selected[0].date == '2026-11-04'"
     ) == "pass"
+
+
+@pytest.mark.parametrize(
+    ("ref", "content"),
+    [
+        (MANIFEST_REF, "slug: acme\ndate: '2026-11-04'\ntags: !!set {a: null}\n"),
+        (EPIC_REF, "---\nslug: probe\ndate: '2026-11-04'\ntags: !!set {a: null}\n---\n\n# P\n"),
+    ],
+    ids=["yaml", "markdown-frontmatter"],
+)
+def test_a_yaml_only_value_is_a_parse_failure_not_valid_data(
+    workspace: Path, store: ArtifactStore, ref: str, content: str
+) -> None:
+    """A `!!set` passed JSON Schema (an unconstrained extra property) and then failed CEL
+    conversion. It is not JSON data, so validation refuses it as a parse finding and the
+    write is reverted."""
+    path = workspace / ref
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+    findings = store.validate_artifact(Path(ref))
+
+    assert [finding.rule for finding in findings] == ["parse"]
+    assert "not JSON data" in findings[0].message
