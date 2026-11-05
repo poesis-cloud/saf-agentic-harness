@@ -124,3 +124,31 @@ def test_the_real_subprocess_runner_honors_its_timeout() -> None:
             [sys.executable, "-c", "import time; time.sleep(30)"], dict(os.environ), 0.3
         )
 
+
+
+_TREE_SCRIPT = """
+import subprocess, sys, time
+marker = sys.argv[1]
+child = (
+    "import time, pathlib; time.sleep(2.5); "
+    f"pathlib.Path({marker!r}).write_text('child survived')"
+)
+subprocess.Popen([sys.executable, "-c", child])
+time.sleep(30)
+"""
+
+
+def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
+    """The harness starts git children (commit, revert): on expiry they must die with it,
+    or they go on changing the workspace after the adapter reported failure."""
+    from copilot_cli_adapter.runner import run_subprocess
+
+    script = tmp_path / "tree.py"
+    script.write_text(_TREE_SCRIPT, encoding="utf-8")
+    marker = tmp_path / "survived.txt"
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess([sys.executable, str(script), str(marker)], dict(os.environ), 1.0)
+    assert time.monotonic() - started < 10
+    time.sleep(3.5)
+    assert not marker.exists()

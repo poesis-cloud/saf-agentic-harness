@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -43,18 +44,68 @@ ProcessRunner = Callable[[Sequence[str], Mapping[str, str], "float | None"], "tu
 def run_subprocess(
     argv: Sequence[str], environment: Mapping[str, str], timeout: float | None = None
 ) -> tuple[int, str, str]:
-    """Run one command; past `timeout` seconds it is killed (`subprocess.TimeoutExpired`)."""
-    completed = subprocess.run(
+    """Run one command; past `timeout` seconds its WHOLE process tree is killed and waited
+    for (`subprocess.TimeoutExpired`).
+
+    The harness starts git children (commit, revert); killing only the harness would let a
+    commit or revert go on changing the workspace after the adapter reported a failure,
+    with no harness left to journal it. So the command runs in its own process group
+    (POSIX) or console process group (Windows), and expiry kills the group / the tree.
+    """
+    options: dict[str, Any] = {}
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    process = subprocess.Popen(
         list(argv),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
         env=dict(environment),
-        check=False,
-        timeout=timeout,
+        **options,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except BaseException:
+        _kill_tree(process)
+        raise
+    return process.returncode, stdout, stderr
+
+
+# Bounded: a reaped-late zombie must not eat the hook's remaining budget.
+_TREE_GRACE_SECONDS = 2.0
+
+
+def _kill_tree(process: subprocess.Popen[str]) -> None:
+    """Kill the command and every descendant, then wait until they are gone."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+        process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.communicate(timeout=_TREE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+    if os.name != "nt":
+        deadline = time.monotonic() + _TREE_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(process.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.05)
 
 
 class SubprocessCommandRunner:
