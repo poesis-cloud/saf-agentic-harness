@@ -151,6 +151,31 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   one. Once the harness has allowed a `create` and the whole firing is allowed, the hook
   creates the missing parent folders inside the workspace: folders only, no content, no
   commit. Actors no longer need a shell `mkdir`, which I9 denies.
+- **Fail closed on a failed registration (both adapters):** a `start-session` that answers
+  an error (`step-session-bound` included) or no report no longer leaves the session
+  ungoverned. Only `not-applicable` does. The session is recorded unregistered, and its
+  writes, dispatches and harness requests are denied until a registration succeeds.
+- **`github-copilot-cli`, review hardening:**
+  - H3 folder creation starts at the workspace's real path and refuses any symlink or
+    junction under it, so it can never land outside the workspace.
+  - `apply_patch` header paths are taken verbatim; an empty or whitespace-padded path makes
+    the patch unextractable (denied), as in the VS Code adapter.
+  - I9 checks a quoted option value (`--output="workspace/…"`) without its quotes, and no
+    longer reads an option such as `--format=%h:%s` as a `<rev>:<path>` object.
+  - The H4 recognizer accepts the hinted line when a path holds an apostrophe, in the exact
+    PowerShell or POSIX quoting the hint renders.
+  - H5 claims a restore only for a `reverted` write; an error report is relayed as
+    "write not validated".
+  - Every harness call of a firing is bounded by a deadline inside the hook's registered
+    timeout, so a stalled call is a denial, not a fail-open timeout.
+  - Context injection follows the documented limits (10 KB for `postToolUse`, 10 MiB of
+    hook output for `subagentStart` and H0), falls back to load directives past them, and
+    marks the context injected only when all of it was delivered.
+  - Scoped H0 commands carry the same resolved `FRAMEWORK_*_DIR` layout as the global hooks
+    (`--layout`), and `install.py` commits its outputs all or nothing.
+- **Artifact YAML is JSON data:** YAML-only values (`!!set`, `!!binary`, `.nan`, `.inf`) are a
+  `parse` finding, so the write is reverted instead of passing schema validation and failing
+  later in CEL.
 
 ### Known alpha limitations
 
