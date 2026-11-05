@@ -79,7 +79,11 @@ def powershell_quote(value: str) -> str:
 
 
 def adapter_args(
-    event: str, framework_dir: str, agent: str | None = None, workspace_dir: str | None = None
+    event: str,
+    framework_dir: str,
+    agent: str | None = None,
+    workspace_dir: str | None = None,
+    layout: Mapping[str, str] | None = None,
 ) -> list[str]:
     args = [str(ADAPTER_ENTRY), "hook", "--event", event]
     if agent:
@@ -87,6 +91,9 @@ def adapter_args(
     args.extend(("--framework-dir", framework_dir))
     if workspace_dir:
         args.extend(("--workspace-dir", workspace_dir))
+    for variable in LAYOUT_VARIABLES:
+        if layout and layout.get(variable):
+            args.extend(("--layout", f"{variable}={layout[variable]}"))
     return args
 
 
@@ -235,12 +242,19 @@ def scoped_hooks(
     python: str,
     framework_dir: Path,
     workspace_dir: Path | None = None,
+    layout: Mapping[str, str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Agent-scoped entries carry no `env`: the layout travels as adapter arguments."""
+    """Agent-scoped entries carry no `env`: the layout travels as adapter arguments.
+
+    `layout` is the SAME resolved layout the global hooks carry in their `env` (environment
+    overrides included), so H0 opens the session where every later boundary looks for it.
+    """
     hooks: dict[str, list[dict[str, Any]]] = {}
     workspace = str(workspace_dir) if workspace_dir is not None else None
     for event, spec in events.items():
-        args = adapter_args(event, str(framework_dir), agent=slug, workspace_dir=workspace)
+        args = adapter_args(
+            event, str(framework_dir), agent=slug, workspace_dir=workspace, layout=layout
+        )
         hooks[event] = [
             {
                 "type": "command",
@@ -402,7 +416,7 @@ def plan(arguments: argparse.Namespace, environment: Mapping[str, str]) -> dict[
                     f"orchestrator '{slug}' has no agent file at {source} — its "
                     "session-opening boundary (H0) would never fire"
                 )
-            hooks = scoped_hooks(agent_events, slug, python, framework_dir, workspace_dir)
+            hooks = scoped_hooks(agent_events, slug, python, framework_dir, workspace_dir, layout)
             outputs[agents_dest / f"{slug}{AGENT_SUFFIX}"] = render_agent(
                 source.read_text(encoding="utf-8"), hooks, str(source)
             )

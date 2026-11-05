@@ -75,7 +75,8 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   `hooks` file path, the installer writes there instead; an inline `hooks` object is refused.
   Every entry is `exec: <venv python>`, `args: [adapter.py, hook, --event, …,
   --framework-dir, <fw>]`, with `cwd: <fw>` and an `env` holding `FRAMEWORK_DIR` plus every
-  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env` and `--workspace-dir`, plus
+  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env`, the installer's environment and
+  `--workspace-dir`, plus
   `SAF_HARNESS_PYTHON` (the recorded interpreter). **No user-level variables (`setx`) are
   needed:** hooks get their layout from `env`, and agents get absolute paths from the
   injected hint (see below).
@@ -86,7 +87,8 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   (`<bundle>/agents/<slug>.agent.md`). The orchestrators are the agents that
   `workflows/**/*.workflow.conf.yaml` names as `orchestrator:`. The block holds the scoped
   `userPromptSubmitted`/`userPromptTransformed` hooks that open the harness session (H0).
-  Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
+  A scoped hook cannot carry `env`, so its command passes the same resolved layout as
+  `--layout FRAMEWORK_<X>_DIR=<value>` arguments. Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
 
 **`--framework-dir` is the framework CHECKOUT, not the rendered bundle.** It is where `.env`,
 `workflows/`, `instructions/` and `skills/` live. The bundle is only the package the host

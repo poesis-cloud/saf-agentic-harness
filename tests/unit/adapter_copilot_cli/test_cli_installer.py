@@ -195,3 +195,35 @@ def test_a_malformed_framework_env_is_refused(framework, bundle, capsys) -> None
     assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle)) != 0
     assert "line 2 is malformed" in capsys.readouterr().err
     assert not (bundle / "hooks.json").exists()
+
+
+def test_scoped_h0_commands_carry_the_same_resolved_layout_as_the_global_hooks(
+    framework, bundle, tmp_path
+) -> None:
+    """An install-time FRAMEWORK_*_DIR override from the environment reached the global hooks'
+    `env` but not the scoped H0 command (which has no `env`), so H0 opened the session log in
+    the default workspace while every other boundary looked in the overridden one."""
+    import shlex
+
+    from copilot_cli_adapter.layout import resolve_layout
+
+    elsewhere = tmp_path / "other-workspace"
+    elsewhere.mkdir()
+    environment = {"FRAMEWORK_WORKSPACE_DIR": str(elsewhere), "FRAMEWORK_SKILLS_DIR": "skills"}
+    assert _install(
+        "--framework-dir", str(framework), "--bundle-dir", str(bundle), environment=environment
+    ) == 0
+    (global_entry,) = json.loads((bundle / "hooks.json").read_text())["hooks"]["preToolUse"]
+    global_layout = resolve_layout(None, environment=global_entry["env"])
+    text = (bundle / "agents" / "scrum-master.agent.md").read_text(encoding="utf-8")
+    (scoped,) = yaml.safe_load(text.split("---\n")[1])["hooks"]["userPromptSubmitted"]
+    argv = shlex.split(scoped["command"])
+    assert f"FRAMEWORK_WORKSPACE_DIR={elsewhere}" in argv
+    overrides = dict(
+        argv[index + 1].split("=", 1) for index, token in enumerate(argv) if token == "--layout"
+    )
+    scoped_layout = resolve_layout(
+        argv[argv.index("--framework-dir") + 1], environment={}, overrides=overrides
+    )
+    assert scoped_layout == global_layout
+    assert f"'FRAMEWORK_WORKSPACE_DIR={elsewhere}'" in scoped["windows"]

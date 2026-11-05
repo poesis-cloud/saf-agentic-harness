@@ -2,6 +2,7 @@
 """The `github-copilot-cli` hook entry: host event JSON on stdin, decision JSON on stdout.
 
     <python> adapter.py hook --event <camelCaseEvent> [--agent <slug>] [--framework-dir <dir>]
+        [--workspace-dir <dir>] [--layout FRAMEWORK_<X>_DIR=<path>]...
 
 The installer renders every hook entry to run THIS file with an explicit interpreter, so
 no shell (and no bash on Windows) sits between the runtime and the adapter.
@@ -33,6 +34,7 @@ from copilot_cli_adapter.binding import load_tool_binding  # noqa: E402
 from copilot_cli_adapter.core import ADAPTER_ID, EVENTS, Adapter  # noqa: E402
 from copilot_cli_adapter.invocation import HarnessInvocation  # noqa: E402
 from copilot_cli_adapter.layout import (  # noqa: E402
+    LAYOUT_VARIABLES,
     resolve_layout,
     resolve_state_dir,
 )
@@ -46,10 +48,14 @@ EXIT_FAIL_CLOSED = 2
 
 
 def build_adapter(
-    framework_dir: str | None, workspace_dir: str | None = None
+    framework_dir: str | None,
+    workspace_dir: str | None = None,
+    layout_overrides: Mapping[str, str] | None = None,
 ) -> tuple[Adapter, Any]:
     """Build the adapter and its binding from this directory and the framework layout."""
-    layout = resolve_layout(framework_dir, workspace_dir=workspace_dir)
+    layout = resolve_layout(
+        framework_dir, workspace_dir=workspace_dir, overrides=layout_overrides
+    )
     binding = load_tool_binding(ADAPTER_DIR, framework_dir=layout.framework_dir)
     adapter = Adapter(
         binding=binding,
@@ -79,15 +85,18 @@ def run_hook(
     stdin: BinaryIO,
     stdout: TextIO,
     stderr: TextIO,
-    build: Callable[[str | None, str | None], tuple[Adapter, Any]] = build_adapter,
+    build: Callable[
+        [str | None, str | None, Mapping[str, str]], tuple[Adapter, Any]
+    ] = build_adapter,
 ) -> int:
     arguments = _parse_arguments(argv)
     try:
+        overrides = _read_layout_overrides(arguments.layout)
         raw = stdin.read()
         payload = json.loads(raw.decode("utf-8-sig")) if raw.strip() else {}
         if not isinstance(payload, Mapping):
             raise ValueError("the hook payload is not a JSON object")
-        adapter, binding = build(arguments.framework_dir, arguments.workspace_dir)
+        adapter, binding = build(arguments.framework_dir, arguments.workspace_dir, overrides)
         decision = adapter.handle(
             HookInput(
                 event=arguments.event,
@@ -118,7 +127,19 @@ def _parse_arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--agent", default=None)
     parser.add_argument("--framework-dir", default=None)
     parser.add_argument("--workspace-dir", default=None)
+    parser.add_argument("--layout", action="append", default=[], metavar="FRAMEWORK_X_DIR=PATH")
     return parser.parse_args(list(argv))
+
+
+def _read_layout_overrides(pairs: Sequence[str]) -> dict[str, str]:
+    """`--layout VAR=VALUE` pairs: the install-time layout a scoped hook (no `env`) carries."""
+    overrides: dict[str, str] = {}
+    for pair in pairs:
+        variable, separator, value = pair.partition("=")
+        if not separator or variable not in LAYOUT_VARIABLES or not value:
+            raise ValueError(f"--layout {pair!r} is not FRAMEWORK_<X>_DIR=<path>")
+        overrides[variable] = value
+    return overrides
 
 
 def _force_utf8_stdio() -> None:

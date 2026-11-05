@@ -354,6 +354,10 @@ committed.
 - **Scoped block:** inserted inside the frontmatter, between the managed markers
   `# >>> safe-harness copilot-cli H0 … >>>` and `# <<< safe-harness copilot-cli H0 <<<`.
   It has `command` (POSIX-quoted) and `windows` (`& '<python>' …`) with `--agent <slug>`.
+  Scoped hooks cannot carry `env`, so every resolved `FRAMEWORK_*_DIR` (the same values the
+  global entries' `env` holds, environment overrides included) is passed as
+  `--layout FRAMEWORK_<X>_DIR=<value>`; the adapter refuses (exit 2) any other `--layout`
+  variable. H0 therefore opens the session in the layout every other boundary uses.
   Re-running replaces the block. An unmanaged `hooks:` key is refused.
 - **Orchestrators** are every `orchestrator:` named by `<fw>/workflows/**/*.workflow.conf.yaml`.
   A missing agent file refuses the install.

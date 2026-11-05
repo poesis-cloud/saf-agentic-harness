@@ -73,8 +73,10 @@ def resolve_layout(
     framework_dir: str | None,
     environment: Mapping[str, str] | None = None,
     workspace_dir: str | None = None,
+    overrides: Mapping[str, str] | None = None,
 ) -> FrameworkLayout:
-    """Resolve the layout: `--framework-dir`/`--workspace-dir` > environment > `.env`.
+    """Resolve the layout: `--framework-dir`/`--workspace-dir` > `--layout` overrides >
+    environment > `.env`.
 
     The workspace (the governed portfolio tree) may live outside the framework checkout;
     an absolute `workspace_dir` is handed to the harness as `FRAMEWORK_WORKSPACE_DIR`.
@@ -89,10 +91,11 @@ def resolve_layout(
     if not root.is_dir():
         raise LayoutError(f"the framework root does not exist: {root}")
     declared = read_env_file(root / _ENV_FILENAME)
+    overrides = overrides or {}
     values = {
         variable: value
         for variable in LAYOUT_VARIABLES
-        if (value := environment.get(variable, declared.get(variable)))
+        if (value := overrides.get(variable, environment.get(variable, declared.get(variable))))
     }
     if workspace_dir:
         values["FRAMEWORK_WORKSPACE_DIR"] = str(Path(workspace_dir).expanduser())
