@@ -98,6 +98,9 @@ and implementation parts prescribe its realization.
   that end (C8). A session is performed by exactly one framework
   **agent** — the orchestrator (driving a workflow) or a dispatched subagent (acting a step) —
   fixed for the session's entire lifetime: the harness registers agent sessions, nothing else.
+  An **orchestrator session is one turn**: it opens with the user's message to the
+  orchestrator and ends with the workflow's return to the user. The orchestrator agent and the
+  host conversation persist across turns; each turn is a new harness session.
   A session serves **at most one workflow instance**: an orchestrator session drives at most
   one (one workflow end = one return to the user, which ends the session; engagement and
   selection sessions before assent drive none), and a step session IS its step instance
@@ -135,9 +138,13 @@ and implementation parts prescribe its realization.
   steps have journaled delivered. A workflow delivers MANY artifacts — in workspace state,
   one per step: its passing step instance's, the only one promoted — so no single artifact is
   attached to the workflow instance; artifacts attach to steps. It has its own minted id
-  because it can outlive its sessions: 1 workflow instance ↔ 1..N orchestrator sessions in
-  sequence (a half-finished workflow instance resumes under a later session), while 1
-  orchestrator session drives at most 1 workflow instance (function 3, invariant 9).
+  because it can outlive its sessions: one workflow instance ↔ one or more orchestrator turn
+  sessions, in sequence. A half-finished workflow instance is **continued** by the next turn
+  (function 3, invariant 8: latest open wins), never replaced; a new workflow instance of the
+  same workflow opens only once the previous one has no next step and the user reiterates the
+  workflow (function 3, invariant 7). One turn session drives at most one workflow instance
+  (function 3, invariant 9), so over a conversation the orchestrator drives workflow
+  instances sequentially, at most one per turn.
 - **Step** — a configured unit of work, executed as one agent turn per step instance.
   **1 step instance = 1 agent = 1 session = 1 artifact instance**: the session lifecycle IS
   the step instance's lifecycle, and each step instance delivers exactly one artifact instance of the
@@ -170,18 +177,21 @@ and implementation parts prescribe its realization.
 ### Definitions and executions
 
 **Workflow** and **Step** are configuration — definitions. **Workflow instance** and **Step
-instance** are executions of them. **Sessions** are the agent conversations that carry
-executions; they are the unit of attribution and of logging (every entry and every commit
-names its `sessionId`). Side by side, the cardinalities:
+instance** are executions of them. **Sessions** are the bounded agent spans that carry
+executions — an orchestrator session is one turn of the orchestrator (from the user's
+message to the workflow's return), a step session is one dispatched sub-agent run; they are
+the unit of attribution and of logging (every entry and every commit names its
+`sessionId`). Side by side, the cardinalities:
 
-- a **workflow instance** spans several sessions: its orchestrator sessions, one after
-  another, plus one step session per step instance — so it needs its own minted id;
+- a **workflow instance** spans several sessions: one or more orchestrator turn sessions, one
+  after another — the next turn continues a half-finished workflow instance, never replaces
+  it — plus one step session per step instance; so it needs its own minted id;
 - a **step instance** has exactly one session, and a retry is a new step instance — so its
   identity is that session's id, and nothing is minted.
 
 | Definition (configuration) | Execution | Carried by | Cardinality |
 | --- | --- | --- | --- |
-| Workflow — `workflowSlug` | Workflow instance — `workflowInstanceId`, minted by function 3 | Its orchestrator sessions, one after another, plus one step session per step instance | 1 workflow instance ↔ 1..N orchestrator sessions (resume); 1 orchestrator session → at most 1 workflow instance (function 3, invariant 9) |
+| Workflow — `workflowSlug` | Workflow instance — `workflowInstanceId`, minted by function 3 | Its orchestrator turn sessions, one after another, plus one step session per step instance | 1 workflow instance ↔ 1..N orchestrator turn sessions, in sequence (the next turn continues it — function 3, invariant 8); 1 turn session → at most 1 workflow instance (function 3, invariant 9) |
 | Step — `stepSlug`, unique within its workflow | Step instance — its step session's `sessionId`, nothing minted | Its one step session | 1 step instance ↔ 1 step session (function 0, invariant 5); 1 step → 0..N step instances per workflow instance (retries) |
 
 The identity chain runs: `workflowInstanceId` → `stepSlug` → step instance (= the step
