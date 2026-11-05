@@ -108,8 +108,9 @@ def test_a_markdown_artifacts_frontmatter_dates_reach_cel_as_strings(
     [
         (MANIFEST_REF, "slug: acme\ndate: '2026-11-04'\ntags: !!set {a: null}\n"),
         (EPIC_REF, "---\nslug: probe\ndate: '2026-11-04'\ntags: !!set {a: null}\n---\n\n# P\n"),
+        (MANIFEST_REF, "slug: acme\ndate: '2026-11-04'\nloop: &a [*a]\n"),
     ],
-    ids=["yaml", "markdown-frontmatter"],
+    ids=["yaml", "markdown-frontmatter", "recursive-alias"],
 )
 def test_a_yaml_only_value_is_a_parse_failure_not_valid_data(
     workspace: Path, store: ArtifactStore, ref: str, content: str

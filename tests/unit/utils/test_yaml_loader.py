@@ -84,3 +84,26 @@ class TestJsonDataParsing:
 
         with pytest.raises(ValueError):
             MarkdownLoader().parse_markdown("---\ntags: !!set {a: null}\n---\n\n# Body\n")
+
+    @pytest.mark.parametrize(
+        "text",
+        ["a: &a [*a]\n", "a: &a {b: *a}\n", "&root\nchild: [1, {up: *root}]\n"],
+        ids=["list-cycle", "mapping-cycle", "indirect-cycle"],
+    )
+    def test_rejects_a_recursive_alias_as_a_parse_failure(self, text: str) -> None:
+        """A cycle has no JSON form; it must be a NonJsonDataError (the store's parse
+        finding and revert), never an escaping RecursionError."""
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError, match="recursive"):
+            YamlLoader().parse_json_data(text)
+
+    def test_accepts_a_shared_non_recursive_alias(self) -> None:
+        data = YamlLoader().parse_json_data("base: &b {x: 1}\none: *b\ntwo: *b\n")
+        assert dict(data["one"]) == dict(data["two"]) == {"x": 1}
+
+    def test_rejects_too_deep_nesting_as_a_parse_failure(self) -> None:
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError):
+            YamlLoader().parse_json_data("[" * 5000 + "]" * 5000)

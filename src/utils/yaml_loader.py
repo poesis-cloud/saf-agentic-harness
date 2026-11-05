@@ -45,23 +45,35 @@ def load_json_data(content: str) -> Any:
     Schema validation and condition evaluation as data neither describes. Scalar mapping keys
     are read as their string form, as JSON object keys are strings.
     """
-    data = yaml.load(content, Loader=JsonDataSafeLoader)  # noqa: S506 - a SafeLoader
-    _require_json_data(data, "$")
+    try:
+        data = yaml.load(content, Loader=JsonDataSafeLoader)  # noqa: S506 - a SafeLoader
+        _require_json_data(data, "$", set())
+    except RecursionError as failure:
+        raise NonJsonDataError("$: the YAML nests too deeply to be JSON data") from failure
     return data
 
 
-def _require_json_data(value: Any, where: str) -> None:
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if not isinstance(key, _JSON_SCALARS) or _is_non_finite(key):
-                raise NonJsonDataError(
-                    f"{where}: mapping key of YAML type {type(key).__name__} is not JSON data"
-                )
-            _require_json_data(item, f"{where}.{key}")
-        return
-    if isinstance(value, list):
-        for index, item in enumerate(value):
-            _require_json_data(item, f"{where}[{index}]")
+def _require_json_data(value: Any, where: str, path: set[int]) -> None:
+    """Refuse non-JSON values; `path` holds the containers being walked, so a recursive
+    alias (`a: &a [*a]`) — a cycle JSON cannot express — is refused, not recursed forever."""
+    if isinstance(value, (dict, list)):
+        if id(value) in path:
+            raise NonJsonDataError(f"{where}: a recursive YAML alias is not JSON data")
+        path.add(id(value))
+        try:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if not isinstance(key, _JSON_SCALARS) or _is_non_finite(key):
+                        raise NonJsonDataError(
+                            f"{where}: mapping key of YAML type {type(key).__name__} "
+                            "is not JSON data"
+                        )
+                    _require_json_data(item, f"{where}.{key}", path)
+            else:
+                for index, item in enumerate(value):
+                    _require_json_data(item, f"{where}[{index}]", path)
+        finally:
+            path.discard(id(value))
         return
     if not isinstance(value, _JSON_SCALARS):
         raise NonJsonDataError(f"{where}: YAML type {type(value).__name__} is not JSON data")
