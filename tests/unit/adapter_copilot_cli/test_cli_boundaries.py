@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cli_rig import (
     CWD,
     HOST,
@@ -112,6 +114,68 @@ def test_h1_starts_the_step_under_the_dispatcher_and_injects_its_context(rig: Ri
     assert record.parent_session_id == TURN_SESSION and record.parent_host_id == HOST
 
 
+def test_h1_inlines_a_step_context_larger_than_the_post_tool_use_cap(rig: Rig, tmp_path) -> None:
+    """The 10 KB cap is `postToolUse`'s (hooks reference); a `subagentStart` context is
+    bounded only by the 10 MiB hook-output limit. So H1 delivers the whole context, untruncated,
+    and only then marks the step's context injected."""
+    from copilot_cli_adapter.renderer import ADDITIONAL_CONTEXT_LIMIT
+
+    body = "Handle reports carefully. " * (2 * ADDITIONAL_CONTEXT_LIMIT // 26)
+    (tmp_path / "instructions" / "reports-handling.instructions.md").write_text(
+        body + "END-OF-INSTRUCTION\n", encoding="utf-8"
+    )
+    rig.open_turn()
+    context = rig.open_step()["additionalContext"]
+    assert len(context.encode("utf-8")) > ADDITIONAL_CONTEXT_LIMIT
+    assert "END-OF-INSTRUCTION" in context and "truncated" not in context
+    assert rig.tracker.read(SUBAGENT).context_injected
+
+
+def test_h1_falls_back_to_load_directives_past_the_hook_output_limit(
+    rig: Rig, tmp_path, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    (tmp_path / "instructions" / "reports-handling.instructions.md").write_text(
+        "x" * 4000 + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(renderer, "HOOK_OUTPUT_LIMIT", 3500)
+    rig.open_turn()
+    context = rig.open_step()["additionalContext"]
+    assert "Read `" in context and "reports-handling.instructions.md" in context
+    assert "x" * 100 not in context
+    assert rig.tracker.read(SUBAGENT).context_injected
+
+
+def test_h1_marks_nothing_injected_when_even_directives_cannot_fit(
+    rig: Rig, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    monkeypatch.setattr(renderer, "HOOK_OUTPUT_LIMIT", 200)
+    rig.open_turn()
+    assert rig.open_step() is None
+    assert rig.tracker.read(SUBAGENT) is not None
+    assert not rig.tracker.read(SUBAGENT).context_injected
+    assert any("exceeds what the runtime accepts" in line for line in rig.diagnostics)
+
+
+def test_the_late_context_is_marked_injected_only_when_delivered_whole(
+    rig: Rig, monkeypatch
+) -> None:
+    from copilot_cli_adapter import renderer
+
+    rig.open_turn()
+    monkeypatch.setattr(renderer, "ADDITIONAL_CONTEXT_LIMIT", 300)
+    decision = rig.fire("postToolUse", post_tool_use("view", {"path": "C:\\a"}))
+    assert "truncated" in decision["additionalContext"]
+    assert not rig.tracker.read(HOST).context_injected
+    monkeypatch.setattr(renderer, "ADDITIONAL_CONTEXT_LIMIT", 10_000)
+    decision = rig.fire("postToolUse", post_tool_use("view", {"path": "C:\\a"}))
+    assert "truncated" not in decision["additionalContext"]
+    assert rig.tracker.read(HOST).context_injected
+
+
 def test_h1_under_an_ungoverned_parent_is_ignored(rig: Rig) -> None:
     assert rig.open_step() is None
     assert rig.runner.calls == []
@@ -197,6 +261,16 @@ def test_h3_fails_closed_on_unextractable_targets(rig: Rig) -> None:
         assert "fail closed" in _denied(rig.fire("preToolUse", pre_tool_use(call)))
     single = {"sessionId": HOST, "toolName": "create", "toolArgs": "{not json"}
     assert _denied(rig.fire("preToolUse", single))
+    assert rig.runner.inquiries("check-step-authorization") == []
+
+
+def test_h3_denies_a_patch_whose_header_path_is_not_verbatim(rig: Rig) -> None:
+    """`portfolio/a.md ` (trailing space) is a different file from the one a trimmed path
+    would authorize: the patch is unextractable and denied, no harness call runs."""
+    rig.open_turn()
+    patch = f"*** Begin Patch\n*** Add File: {WORKSPACE}\\portfolio\\a.md \n+x\n*** End Patch\n"
+    reason = _denied(rig.fire("preToolUse", pre_tool_use(("apply_patch", {"input": patch}))))
+    assert "fail closed" in reason
     assert rig.runner.inquiries("check-step-authorization") == []
 
 
@@ -295,6 +369,45 @@ def test_h5_replaces_the_result_of_a_rejected_write(rig: Rig) -> None:
     assert "frontmatter.status is required" in decision["additionalContext"]
 
 
+def test_h5_never_claims_a_restore_for_an_error_outcome(rig: Rig) -> None:
+    """`log-unreadable` (or any error) is returned before artifact processing: the file may
+    still be modified, so the result names the error and claims no rollback."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.runner.script["check-step-artifact"] = build_error_report(
+        "check-step-artifact",
+        "system-error",
+        "log-unreadable",
+        "The session log cannot be read.",
+    )
+    decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
+    text = decision["modifiedResult"]["textResultForLlm"]
+    assert "WRITE OUTCOME UNKNOWN" in text and "log-unreadable" in text
+    assert "WRITE REJECTED" not in text
+    assert "restored from HEAD" not in decision["additionalContext"]
+    assert "log-unreadable" in decision["additionalContext"]
+
+
+def test_h5_leaves_the_commit_state_open_for_an_error_after_the_commit(rig: Rig) -> None:
+    """`log-append-failed` arrives after the harness committed: the result must claim
+    neither a commit nor a restore, and direct the actor to inspect before retrying."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.runner.script["check-step-artifact"] = build_error_report(
+        "check-step-artifact",
+        "system-error",
+        "log-append-failed",
+        "The session log could not be appended.",
+    )
+    decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
+    context = decision["additionalContext"]
+    assert "UNKNOWN" in context and "may already be committed" in context
+    assert "Inspect the artifact" in context
+    for claim in ("neither committed", "was not committed", "restored from HEAD", "discarded)"):
+        assert claim not in context
+    assert "OUTCOME UNKNOWN" in decision["modifiedResult"]["textResultForLlm"]
+
+
 def test_a_failed_write_is_not_validated(rig: Rig) -> None:
     rig.open_turn()
     rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
@@ -373,18 +486,91 @@ def test_session_end_closes_every_session_left_open(rig: Rig) -> None:
     assert {i["sessionId"] for i in rig.runner.inquiries("end-session")} == {SUBAGENT, TURN_SESSION}
 
 
-def test_a_harness_error_report_never_opens_a_session(rig: Rig) -> None:
+@pytest.mark.parametrize(
+    "answer",
+    [
+        build_error_report("start-session"),
+        build_error_report("start-session", code="session-instance-bound", message="already bound"),
+        RuntimeError("harness unavailable"),
+    ],
+    ids=["error-report", "session-instance-bound", "no-report"],
+)
+def test_a_failed_turn_registration_fails_closed(rig: Rig, answer) -> None:
+    """Only an explicit `not-applicable` leaves a session ungoverned. A failed
+    `start-session` opens no harness session, but the host session's writes, dispatches and
+    harness requests are denied instead of bypassing authorization."""
+    rig.runner.script["start-session"] = answer
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    record = rig.tracker.read(HOST)
+    assert record is not None and not record.registered
+    for call in (
+        ("create", {"path": ARTIFACT, "file_text": "x"}),
+        ("task", {"agent_type": STEP_ACTOR, "prompt": "p"}),
+        ("powershell", {"command": "python C:\\Users\\cleme\\saf-agentic-harness\\harness.py resolve-step-model"}),
+    ):
+        reason = _denied(rig.fire("preToolUse", pre_tool_use(call)))
+        assert "not registered with the harness" in reason and "fail closed" in reason
+    assert rig.fire("preToolUse", pre_tool_use(("view", {"path": ARTIFACT}))) is None
+    called = set(rig.runner.functions()) - {"start-session"}
+    assert called == set()
+
+
+def test_a_not_applicable_turn_stays_ungoverned(rig: Rig) -> None:
+    rig.runner.script["start-session"] = build_report("start-session", "not-applicable")
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    assert rig.tracker.read(HOST) is None
+    assert rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}))) is None
+
+
+def test_a_failed_turn_registration_is_retried_at_the_next_prompt(rig: Rig) -> None:
+    started = rig.runner.script["start-session"]
+    rig.runner.script["start-session"] = build_error_report("start-session")
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
+    assert not rig.tracker.read(HOST).registered
+    rig.runner.script["start-session"] = started
+    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 2}, ORCHESTRATOR)
+    record = rig.tracker.read(HOST)
+    assert record.registered and record.session_id == f"{HOST}-t2"
+    assert rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}))) is None
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        build_error_report("start-session", code="step-session-bound", message="bound"),
+        RuntimeError("harness unavailable"),
+    ],
+    ids=["step-session-bound", "no-report"],
+)
+def test_a_failed_step_registration_fails_closed(rig: Rig, answer) -> None:
+    rig.open_turn()
+    rig.runner.script["start-session"] = answer
+    assert rig.open_step() is None
+    record = rig.tracker.read(SUBAGENT)
+    assert record is not None and not record.registered
+    reason = _denied(rig.fire("preToolUse", pre_tool_use(("create", {"path": ARTIFACT}), host=SUBAGENT)))
+    assert "not registered with the harness" in reason
+    assert rig.runner.inquiries("check-step-authorization") == []
+    rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}, host=SUBAGENT))
+    assert rig.runner.inquiries("check-step-artifact") == []
+    rig.fire("subagentStop", {"sessionId": HOST, "agentId": SUBAGENT, "agentType": STEP_ACTOR})
+    assert rig.tracker.read(SUBAGENT) is None
+    assert SUBAGENT not in {i["sessionId"] for i in rig.runner.inquiries("end-session")}
+
+
+def test_a_not_applicable_step_stays_ungoverned(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["start-session"] = build_report("start-session", "not-applicable")
+    assert rig.open_step() is None
+    assert rig.tracker.read(SUBAGENT) is None
+
+
+def test_a_failed_turn_closes_without_ending_a_harness_session(rig: Rig) -> None:
     rig.runner.script["start-session"] = build_error_report("start-session")
     rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
+    rig.fire("sessionEnd", {"sessionId": HOST, "reason": "complete"})
     assert rig.tracker.read(HOST) is None
-
-
-def test_a_bound_session_rebind_report_never_opens_a_session(rig: Rig) -> None:
-    rig.runner.script["start-session"] = build_error_report(
-        "start-session", code="session-instance-bound", message="already bound"
-    )
-    rig.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go"}, ORCHESTRATOR)
-    assert rig.tracker.read(HOST) is None
+    assert rig.runner.inquiries("end-session") == []
 
 
 def test_h0_binds_a_turn_once_across_both_prompt_events(rig: Rig) -> None:

@@ -195,3 +195,127 @@ def test_a_malformed_framework_env_is_refused(framework, bundle, capsys) -> None
     assert _install("--framework-dir", str(framework), "--bundle-dir", str(bundle)) != 0
     assert "line 2 is malformed" in capsys.readouterr().err
     assert not (bundle / "hooks.json").exists()
+
+
+def test_scoped_h0_commands_carry_the_same_resolved_layout_as_the_global_hooks(
+    framework, bundle, tmp_path
+) -> None:
+    """An install-time FRAMEWORK_*_DIR override from the environment reached the global hooks'
+    `env` but not the scoped H0 command (which has no `env`), so H0 opened the session log in
+    the default workspace while every other boundary looked in the overridden one."""
+    import shlex
+
+    from copilot_cli_adapter.layout import resolve_layout
+
+    elsewhere = tmp_path / "other-workspace"
+    elsewhere.mkdir()
+    environment = {"FRAMEWORK_WORKSPACE_DIR": str(elsewhere), "FRAMEWORK_SKILLS_DIR": "skills"}
+    assert _install(
+        "--framework-dir", str(framework), "--bundle-dir", str(bundle), environment=environment
+    ) == 0
+    (global_entry,) = json.loads((bundle / "hooks.json").read_text())["hooks"]["preToolUse"]
+    global_layout = resolve_layout(None, environment=global_entry["env"])
+    text = (bundle / "agents" / "scrum-master.agent.md").read_text(encoding="utf-8")
+    (scoped,) = yaml.safe_load(text.split("---\n")[1])["hooks"]["userPromptSubmitted"]
+    argv = shlex.split(scoped["command"])
+    assert f"FRAMEWORK_WORKSPACE_DIR={elsewhere}" in argv
+    overrides = dict(
+        argv[index + 1].split("=", 1) for index, token in enumerate(argv) if token == "--layout"
+    )
+    scoped_layout = resolve_layout(
+        argv[argv.index("--framework-dir") + 1], environment={}, overrides=overrides
+    )
+    assert scoped_layout == global_layout
+    assert f"'FRAMEWORK_WORKSPACE_DIR={elsewhere}'" in scoped["windows"]
+
+
+def test_a_failed_write_restores_the_previous_registration(framework, bundle, capsys) -> None:
+    """The installer used to overwrite destinations one by one: a failure on a later agent
+    left the global hooks and earlier agents changed. Now the previous files come back."""
+    argv = ("--framework-dir", str(framework), "--bundle-dir", str(bundle))
+    assert _install(*argv) == 0
+    before = {path: path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+    arguments = INSTALL._parse_arguments([*argv, "--hook-style", "shell"])
+    outputs = INSTALL.plan(arguments, {})
+    assert len(outputs) == 3
+    calls = []
+
+    def flaky_replace(source: str, destination: str) -> None:
+        calls.append(destination)
+        if len(calls) == 3:
+            raise PermissionError("locked by the host")
+        INSTALL.os.replace(source, destination)
+
+    with pytest.raises(INSTALL.InstallError, match="previous registration was restored"):
+        INSTALL.write_all_or_nothing(outputs, replace=flaky_replace)
+    after = {path: path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+    assert after == before
+
+
+def test_a_failed_first_install_leaves_no_file_or_folder_behind(framework, tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for slug in ORCHESTRATORS:
+        (framework / "agents" / f"{slug}.agent.md").write_text(
+            AGENT.format(slug=slug), encoding="utf-8"
+        )
+    arguments = INSTALL._parse_arguments(
+        ["--framework-dir", str(framework), "--target-repo", str(repo)]
+    )
+    outputs = INSTALL.plan(arguments, {})
+
+    def failing_replace(source: str, destination: str) -> None:
+        if destination.endswith(".agent.md"):
+            raise OSError("disk full")
+        INSTALL.os.replace(source, destination)
+
+    with pytest.raises(INSTALL.InstallError):
+        INSTALL.write_all_or_nothing(outputs, replace=failing_replace)
+    assert list(repo.iterdir()) == []
+
+
+def test_a_write_error_is_a_refusal_not_a_crash(framework, bundle, capsys) -> None:
+    """A destination that cannot be written is reported by the installer's own handler."""
+    (bundle / "hooks.json").mkdir()
+    code = _install("--framework-dir", str(framework), "--bundle-dir", str(bundle))
+    assert code == 1
+    assert "install.py: refused:" in capsys.readouterr().err
+    for slug in ORCHESTRATORS:
+        text = (bundle / "agents" / f"{slug}.agent.md").read_text(encoding="utf-8")
+        assert INSTALL.BLOCK_OPEN not in text
+
+
+def test_a_failed_folder_creation_removes_the_folders_it_already_made(tmp_path, monkeypatch) -> None:
+    """`a` and `a/b` are created, `a/b/c` fails: the helper raises before returning them,
+    so it must remove them itself or a refused first install leaves them behind."""
+    target = tmp_path / "a" / "b" / "c"
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *arguments, **options):
+        if self == target:
+            raise PermissionError("denied")
+        return real_mkdir(self, *arguments, **options)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    with pytest.raises(OSError):
+        INSTALL._make_parents(target)
+    assert not (tmp_path / "a").exists()
+
+
+def test_a_refused_first_install_leaves_no_new_ancestor_folder(framework, tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for slug in ORCHESTRATORS:
+        (framework / "agents" / f"{slug}.agent.md").write_text(
+            AGENT.format(slug=slug), encoding="utf-8"
+        )
+    real_mkdir = Path.mkdir
+
+    def failing_mkdir(self, *arguments, **options):
+        if self.name == "hooks":
+            raise PermissionError("denied")
+        return real_mkdir(self, *arguments, **options)
+
+    monkeypatch.setattr(Path, "mkdir", failing_mkdir)
+    assert _install("--framework-dir", str(framework), "--target-repo", str(repo)) == 1
+    assert list(repo.iterdir()) == []

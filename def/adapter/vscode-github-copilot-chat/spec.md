@@ -526,6 +526,18 @@ binding for a foreign or unregistered session. H4 additionally **denies** rather
 through (see H4, below): its tool call IS a harness request, so passing it through would let
 the terminal run a harness function with no attributable session at all.
 
+**Failed registration (fail closed).** Only an explicit `not-applicable` from function 0
+leaves a session ungoverned (core failure-mode rule 2). Any other answer from `start-session`
+— an error report, `step-session-bound` included, or no report at all — opens no harness
+session, yet must not let the session's tool calls bypass the boundaries. So H0 resets the
+stack to an **unregistered** entry (`!unregistered:<sessionId>`, never a valid slug), and H1
+pushes one for the step (also when its dispatcher's own entry is unregistered); both answer
+`systemMessage` naming the failure. While an unregistered entry is current, H2 and H3
+**deny** (no harness function runs), H4 **rejects** the harness request, H5/H6 pass through
+(nothing they gate could have landed), and H7 closes nothing — `SubagentStop` pops the
+step's entry, `Stop` clears the stack — since no harness session exists. The next H0 retries
+the registration.
+
 ## Session correlation scenarios
 
 Every case a hook firing's resolved `sessionId` can land in, and why it is correct — or, in
@@ -646,8 +658,10 @@ native instructions/skills machinery is NOT engaged):
    loading; inlining would bloat every request).
 
 On a harness error: exit 0 with a `systemMessage` naming the failure — never exit 2 (this
-boundary must not veto the user's message; an uninstructed orchestrator is observable in the
-journal and cannot pass any later boundary).
+boundary must not veto the user's message). When the error is the registration's own
+(`start-session` answered anything but `started`/`not-applicable`, or no report), the turn is
+recorded unregistered, so it cannot pass any later boundary (see *Failed registration* under
+[Session identity binding](#session-identity-binding)).
 
 **Preconditions**
 
@@ -787,6 +801,11 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
   output, optionally a stderr diagnostic. An uninstructed framework subagent is bounded: its
   step never journals executed (function 10 finds no in-flight step either), so the workflow
   makes no progress and re-resolution recovers.
+- Any OTHER answer — `step-session-bound` (a second session for an already-bound step
+  resolution), another error report, or no report — pushes an unregistered entry for the
+  step and answers `systemMessage`: its writes and dispatches are denied until its
+  `SubagentStop` pops it (see *Failed registration* under
+  [Session identity binding](#session-identity-binding)).
 
 **Postconditions**
 
@@ -1067,7 +1086,11 @@ model-authored command is stamped or rewritten.
    that; the harness core itself refuses it via C8 — see Invariant 4.)
 5. Invoke the function through the command API with the request's flags (kebab-case →
    camelCase inquiry fields, e.g. `--workflow-slug` → `workflowSlug`) plus
-   `sessionId: <the resolved current session>`.
+   `sessionId: <the resolved current session>` and
+   `parentSessionId: SessionTracker.resolve_parent(sanitized(session_id))`, the session
+   whose dispatch opened it (`null` for a turn session). The core's mediated attribution rule
+   takes both ids from host-observed state, so a step session's request is journaled under
+   its parent.
 6. Answer with a **deny** whose `permissionDecisionReason` is
    `SAFe agentic harness RESULT (<function>): <directive>` followed by a blank line and the
    report as compact JSON, plus `additionalContext` telling the agent the denial *is* the

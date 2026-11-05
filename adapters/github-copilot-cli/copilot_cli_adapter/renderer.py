@@ -23,12 +23,24 @@ _WRITE_RETRY_DIRECTIVE = (
     "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its "
     "schema and retry."
 )
+_WRITE_UNVALIDATED = "WRITE OUTCOME UNKNOWN — the SAFe agentic harness answered an error: "
+# An error can follow the commit (`log-append-failed`: the harness commits, then journals),
+# so neither the commit nor a restore can be claimed or denied.
+_WRITE_ERROR_DIRECTIVE = (
+    "The harness answered an error for this write, so its state is UNKNOWN: it may already "
+    "be committed, may have been restored, or may still be uncommitted in the working tree. "
+    "Do not assume it was saved or discarded. Inspect the artifact (view it) before retrying, "
+    "fix what the error names, then redo the write only if it does not hold what you intended."
+)
 _STEP_RETRY_DIRECTIVE = (
     "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed "
     "step; do not surface step details to the user."
 )
-# postToolUse `additionalContext` is capped by the runtime at 10 KB.
+# postToolUse `additionalContext` is capped by the runtime at 10 KB (hooks reference).
 ADDITIONAL_CONTEXT_LIMIT = 10_000
+# Any hook's stdout is bounded at 10 MiB; it is the only bound on `subagentStart` /
+# `sessionStart` `additionalContext` and on `modifiedTransformedPrompt` (hooks reference).
+HOOK_OUTPUT_LIMIT = 10 * 1024 * 1024
 
 
 def render(decision: Mapping[str, Any] | None) -> str:
@@ -49,6 +61,21 @@ def additional_context(text: str) -> dict[str, Any]:
     return {"additionalContext": _truncate(text)}
 
 
+def fits_hook_output(decision: Mapping[str, Any]) -> bool:
+    """Whether the rendered stdout line stays inside the runtime's hook-output limit."""
+    return len(render(decision).encode("utf-8")) + 1 <= HOOK_OUTPUT_LIMIT
+
+
+def fits_additional_context(text: str) -> bool:
+    """Whether a postToolUse `additionalContext` is delivered whole (not truncated)."""
+    return len(text.encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT
+
+
+def step_context(text: str) -> dict[str, Any]:
+    """H1 — `subagentStart` context: bounded by the hook-output limit only, never cut."""
+    return {"additionalContext": text}
+
+
 def transformed_prompt(context: str, transformed: str) -> dict[str, Any]:
     return {"modifiedTransformedPrompt": f"{context}{_CONTEXT_SEPARATOR}{transformed}"}
 
@@ -62,6 +89,18 @@ def write_rejected(report: Mapping[str, Any]) -> dict[str, Any]:
             "textResultForLlm": f"{_WRITE_REJECTED}{description}",
         },
         "additionalContext": _truncate(f"{description}\n\n{_WRITE_RETRY_DIRECTIVE}"),
+    }
+
+
+def write_unvalidated(report: Mapping[str, Any]) -> dict[str, Any]:
+    """H5 — an error outcome: the write was not validated; never claim it was restored."""
+    description = describe_report(report)
+    return {
+        "modifiedResult": {
+            "resultType": "success",
+            "textResultForLlm": f"{_WRITE_UNVALIDATED}{description}",
+        },
+        "additionalContext": _truncate(f"{description}\n\n{_WRITE_ERROR_DIRECTIVE}"),
     }
 
 
@@ -192,14 +231,19 @@ def _truncate(text: str) -> str:
 
 __all__ = [
     "ADDITIONAL_CONTEXT_LIMIT",
+    "HOOK_OUTPUT_LIMIT",
     "ContextRenderer",
     "additional_context",
     "deny",
     "describe_report",
+    "fits_additional_context",
+    "fits_hook_output",
     "read_error",
     "read_status",
     "render",
+    "step_context",
     "step_failed",
     "transformed_prompt",
     "write_rejected",
+    "write_unvalidated",
 ]

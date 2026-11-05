@@ -29,7 +29,7 @@ from session_identity import (
     derive_turn_session_id,
     sanitize_identifier,
 )
-from session_tracker import SessionTracker
+from session_tracker import UNREGISTERED_PREFIX, SessionTracker, is_unregistered
 
 _SUBAGENT_STOP = "SubagentStop"
 _HARNESS_ENTRYPOINT_NAME = "harness.py"
@@ -38,6 +38,11 @@ _STATE_HOME_VARIABLE = "XDG_STATE_HOME"
 _STATE_NAMESPACE = "saf-agentic-harness"
 _STARTED_STATUS = "started"
 _NOT_APPLICABLE_STATUS = "not-applicable"
+_UNREGISTERED_REASON = (
+    "this session is not registered with the harness (its start-session failed): its "
+    "writes, dispatches and harness requests are denied until a registration succeeds "
+    "(fail closed)"
+)
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
 _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
 _HARNESS_COMMAND = re.compile(
@@ -145,9 +150,20 @@ class Adapter:
                     "parentSessionId": None,
                 },
             )
-            if _read_status(registration) != _STARTED_STATUS:
-                self._tracker.clear_current(host_id)
-                return self._renderer.render_pass_through()
+        except Exception as failure:
+            self._tracker.reset_unregistered(host_id, session_id)
+            return self._renderer.render_system_message(str(failure))
+        status = _read_status(registration)
+        if status == _NOT_APPLICABLE_STATUS:
+            self._tracker.clear_current(host_id)
+            return self._renderer.render_pass_through()
+        if status != _STARTED_STATUS:
+            # Only `not-applicable` means ungoverned: a failed registration fails closed.
+            self._tracker.reset_unregistered(host_id, session_id)
+            return self._renderer.render_system_message(
+                f"the harness could not register this session: {_describe(registration)}"
+            )
+        try:
             self._tracker.reset_current(host_id, session_id)
             inquiry = {"sessionId": session_id, "parentSessionId": None}
             reports = (
@@ -173,6 +189,9 @@ class Adapter:
         if parent_session_id is None or agent_id is None or actor is None:
             return self._renderer.render_pass_through()
         session_id = derive_step_session_id(str(agent_id))
+        if is_unregistered(parent_session_id):
+            self._tracker.push_unregistered(host_id, session_id)
+            return self._renderer.render_pass_through()
         try:
             registration = self._command_runner.run_function(
                 "start-session",
@@ -182,8 +201,20 @@ class Adapter:
                     "parentSessionId": parent_session_id,
                 },
             )
-            if _read_status(registration) != _STARTED_STATUS:
-                return self._renderer.render_pass_through()
+        except Exception as failure:
+            self._tracker.push_unregistered(host_id, session_id)
+            return self._renderer.render_system_message(str(failure))
+        status = _read_status(registration)
+        if status == _NOT_APPLICABLE_STATUS:
+            return self._renderer.render_pass_through()
+        if status != _STARTED_STATUS:
+            # `step-session-bound` and every other error: the step is pushed UNREGISTERED,
+            # so its writes and dispatches are denied rather than attributed or passed.
+            self._tracker.push_unregistered(host_id, session_id)
+            return self._renderer.render_system_message(
+                f"the harness could not register this step session: {_describe(registration)}"
+            )
+        try:
             self._tracker.push_current(host_id, session_id)
             inquiry = {"sessionId": session_id, "parentSessionId": parent_session_id}
             reports = (
@@ -203,6 +234,8 @@ class Adapter:
         )
         if session_id is None:
             return self._renderer.render_pass_through()
+        if is_unregistered(session_id):
+            return self._renderer.render_denial(_UNREGISTERED_REASON)
         try:
             report = self._command_runner.run_function(
                 "check-step-preconditions",
@@ -223,6 +256,8 @@ class Adapter:
         tool_name = str(event.tool_name)
         if session_id is None or self._binding.resolve_write_action(tool_name) is None:
             return self._renderer.render_pass_through()
+        if is_unregistered(session_id):
+            return self._renderer.render_denial(_UNREGISTERED_REASON)
         path_actions = self._binding.resolve_path_actions(tool_name, event.tool_input)
         if not path_actions:
             return self._renderer.render_denial(_unextractable_write_reason(tool_name))
@@ -282,15 +317,21 @@ class Adapter:
         rejected, inquiry = _parse_harness_request(command, function)
         if rejected is not None:
             return self._reject(rejected)
-        session_id = self._tracker.resolve_current(
-            sanitize_identifier(event.raw_host_session_id)
-        )
+        host_id = sanitize_identifier(event.raw_host_session_id)
+        session_id = self._tracker.resolve_current(host_id)
         if session_id is None:
             return self._reject(
                 "no registered agent session to attribute this harness command to"
             )
+        if is_unregistered(session_id):
+            return self._reject(_UNREGISTERED_REASON)
         return self._answer_harness_request(
-            function, {**inquiry, "sessionId": session_id}
+            function,
+            {
+                **inquiry,
+                "sessionId": session_id,
+                "parentSessionId": self._tracker.resolve_parent(host_id),
+            },
         )
 
     def _answer_harness_request(
@@ -321,7 +362,7 @@ class Adapter:
         """H5 — the commit gate: validate the landed write set, or report its revert."""
         host_id = sanitize_identifier(event.raw_host_session_id)
         session_id = self._tracker.resolve_current(host_id)
-        if session_id is None:
+        if session_id is None or is_unregistered(session_id):
             return self._renderer.render_pass_through()
         artifact_paths = self._binding.extract_artifact_paths(event.tool_input)
         if not artifact_paths:
@@ -353,7 +394,7 @@ class Adapter:
         session_id = self._tracker.resolve_base(
             sanitize_identifier(event.raw_host_session_id)
         )
-        if session_id is None:
+        if session_id is None or is_unregistered(session_id):
             return self._renderer.render_pass_through()
         try:
             report = self._command_runner.run_function(
@@ -379,7 +420,11 @@ class Adapter:
             if agent_id is None:
                 return self._renderer.render_pass_through()
             ending_session_id = derive_step_session_id(str(agent_id))
-            if self._tracker.resolve_current(host_id) != ending_session_id:
+            current = self._tracker.resolve_current(host_id)
+            if current == f"{UNREGISTERED_PREFIX}{ending_session_id}":
+                self._tracker.pop_current(host_id)
+                return self._renderer.render_pass_through()
+            if current != ending_session_id:
                 return self._renderer.render_pass_through()
             self._close_session(ending_session_id)
             self._tracker.pop_current(host_id)
@@ -387,7 +432,8 @@ class Adapter:
         ending_session_id = self._tracker.resolve_current(host_id)
         if ending_session_id is None:
             return self._renderer.render_pass_through()
-        self._close_session(ending_session_id)
+        if not is_unregistered(ending_session_id):
+            self._close_session(ending_session_id)
         self._tracker.clear_current(host_id)
         return self._renderer.render_pass_through()
 
@@ -590,6 +636,13 @@ def _unextractable_write_reason(tool_name: str) -> str:
         f"write tool '{tool_name}' names no artifact path the adapter can extract: "
         "an unauthorizable write fails closed"
     )
+
+
+def _describe(report: Mapping[str, Any]) -> str:
+    error = (report.get("outcome") or {}).get("error")
+    if isinstance(error, Mapping):
+        return f"{_read_status(report)}: {error.get('code')} — {error.get('message')}"
+    return _read_status(report) or "no outcome"
 
 
 def _read_status(report: Mapping[str, Any]) -> str:

@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -36,24 +38,84 @@ class CommandRunner(Protocol):
         """Run one function command with its inquiry and answer its report."""
 
 
-ProcessRunner = Callable[[Sequence[str], Mapping[str, str]], "tuple[int, str, str]"]
+ProcessRunner = Callable[[Sequence[str], Mapping[str, str], "float | None"], "tuple[int, str, str]"]
 
 
-def run_subprocess(argv: Sequence[str], environment: Mapping[str, str]) -> tuple[int, str, str]:
-    completed = subprocess.run(
+def run_subprocess(
+    argv: Sequence[str], environment: Mapping[str, str], timeout: float | None = None
+) -> tuple[int, str, str]:
+    """Run one command; past `timeout` seconds its WHOLE process tree is killed and waited
+    for (`subprocess.TimeoutExpired`).
+
+    The harness starts git children (commit, revert); killing only the harness would let a
+    commit or revert go on changing the workspace after the adapter reported a failure,
+    with no harness left to journal it. So the command runs in its own process group
+    (POSIX) or console process group (Windows), and expiry kills the group / the tree.
+    """
+    options: dict[str, Any] = {}
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    process = subprocess.Popen(
         list(argv),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
         env=dict(environment),
-        check=False,
+        **options,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except BaseException:
+        _kill_tree(process)
+        raise
+    return process.returncode, stdout, stderr
+
+
+# Bounded: a reaped-late zombie must not eat the hook's remaining budget.
+_TREE_GRACE_SECONDS = 2.0
+
+
+def _kill_tree(process: subprocess.Popen[str]) -> None:
+    """Kill the command and every descendant, then wait until they are gone."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+        process.kill()
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    try:
+        process.communicate(timeout=_TREE_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
+    if os.name != "nt":
+        deadline = time.monotonic() + _TREE_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(process.pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.05)
 
 
 class SubprocessCommandRunner:
-    """Invoke `harness.py <function>` as its own process, one command per function."""
+    """Invoke `harness.py <function>` as its own process, one command per function.
+
+    `deadline` (a `clock` instant) bounds the WHOLE hook firing: the runtime treats a timed
+    out `preToolUse` as an allow, so every command gets only the time left before it, and a
+    command that would start or run past it raises `HarnessCommandError` — which a gating
+    boundary renders as a denial while the host can still honor it.
+    """
 
     def __init__(
         self,
@@ -61,11 +123,15 @@ class SubprocessCommandRunner:
         layout_environment: Mapping[str, str],
         run_process: ProcessRunner | None = None,
         python_executable: str | None = None,
+        deadline: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._harness_entrypoint = harness_entrypoint
         self._layout_environment = dict(layout_environment)
         self._run_process = run_process or run_subprocess
         self._python_executable = python_executable or sys.executable
+        self._deadline = deadline
+        self._clock = clock
 
     def run_function(self, function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any]:
         argv = [
@@ -80,7 +146,20 @@ class SubprocessCommandRunner:
             "PYTHONIOENCODING": "utf-8",
             "PYTHONUTF8": "1",
         }
-        exit_code, stdout, stderr = self._run_process(argv, environment)
+        timeout = None
+        if self._deadline is not None:
+            timeout = self._deadline - self._clock()
+            if timeout <= 0:
+                raise HarnessCommandError(
+                    f"harness command '{function}' was not run: the hook deadline has passed"
+                )
+        try:
+            exit_code, stdout, stderr = self._run_process(argv, environment, timeout)
+        except subprocess.TimeoutExpired as failure:
+            raise HarnessCommandError(
+                f"harness command '{function}' did not answer before the hook deadline "
+                f"({timeout:.1f}s left) and was stopped"
+            ) from failure
         if exit_code != 0:
             raise HarnessCommandError(
                 f"harness command '{function}' failed (exit {exit_code}): {stderr.strip()}",

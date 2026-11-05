@@ -25,10 +25,35 @@ _INTERPRETER_NAME = re.compile(r"python(?:3(?:\.[0-9]+)?)?|py")
 _NEEDS_QUOTES = re.compile(r"""[\s'";|&`$()<>{}]""")
 
 
-def unquote(token: str) -> str:
-    if len(token) >= 2 and token[0] == token[-1] and token[0] in "'\"":
+# Characters never accepted inside a quoted token, even where the shell reads them literally.
+_UNSAFE_IN_QUOTES = "`$;|&<>"
+_POSIX_APOSTROPHE = "'\"'\"'"
+_DOUBLE_QUOTED = rf'"[^"{_UNSAFE_IN_QUOTES}]*"'
+_SINGLE_BODY = rf"""[^'{_UNSAFE_IN_QUOTES}]*"""
+
+
+def quoted_pattern(powershell: bool) -> str:
+    """The quoted-token forms accepted for the shell, matching what `_quote` renders.
+
+    PowerShell: `'...'` with an apostrophe doubled (`'o''neil'`). POSIX: `'...'`, an
+    apostrophe rendered as the `'"'"'` concatenation (`'o'"'"'neil'`). Both: `"..."`.
+    """
+    if powershell:
+        single = rf"""'(?:{_SINGLE_BODY}(?:''{_SINGLE_BODY})*)'"""
+    else:
+        single = rf"""'{_SINGLE_BODY}'(?:"'"'{_SINGLE_BODY}')*"""
+    return rf"""(?:{single}|{_DOUBLE_QUOTED})"""
+
+
+def unquote(token: str, powershell: bool = False) -> str:
+    """Decode one token matched by `quoted_pattern` (or a plain token) to its value."""
+    if len(token) < 2 or token[0] not in "'\"":
+        return token
+    if token[0] == '"':
         return token[1:-1]
-    return token
+    if powershell:
+        return token[1:-1].replace("''", "'")
+    return token[1:-1].replace(_POSIX_APOSTROPHE, "'")
 
 
 def _quote(value: str, powershell: bool) -> str:
@@ -36,7 +61,7 @@ def _quote(value: str, powershell: bool) -> str:
         return value
     if powershell:
         return "'" + value.replace("'", "''") + "'"
-    return "'" + value.replace("'", "'\"'\"'") + "'"
+    return "'" + value.replace("'", _POSIX_APOSTROPHE) + "'"
 
 
 @dataclass(frozen=True)
@@ -92,4 +117,4 @@ class HarnessInvocation:
         return "\n".join(lines)
 
 
-__all__ = ["HarnessInvocation", "unquote"]
+__all__ = ["HarnessInvocation", "quoted_pattern", "unquote"]

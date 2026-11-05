@@ -40,3 +40,38 @@ def test_every_header_is_a_target_with_its_action() -> None:
 def test_an_unreadable_patch_raises(text: str) -> None:
     with pytest.raises(PatchParseError):
         parse_patch_targets(text)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "*** Add File: portfolio/a.md ",
+        "*** Add File:  portfolio/a.md",
+        "*** Add File: portfolio/a.md\r",
+        "*** Add File: ",
+        "*** Delete File: \tportfolio/a.md",
+        "*** Update File: portfolio/a.md\n*** Move to: portfolio/b.md ",
+        "  *** Add File: portfolio/a.md",
+        "*** Add File:portfolio/a.md",
+    ],
+    ids=[
+        "trailing-space",
+        "leading-space",
+        "trailing-cr",
+        "empty",
+        "leading-tab",
+        "move-trailing-space",
+        "indented-header",
+        "no-space-after-colon",
+    ],
+)
+def test_a_header_path_that_is_not_verbatim_makes_the_patch_unextractable(header: str) -> None:
+    """The host writes the header path verbatim: `portfolio/a.md ` is another file than
+    `portfolio/a.md` on POSIX, so a trimmed path would authorize the wrong target."""
+    with pytest.raises(PatchParseError):
+        parse_patch_targets(f"*** Begin Patch\n{header}\n+x\n*** End Patch\n")
+
+
+def test_header_paths_are_taken_verbatim() -> None:
+    patch = "*** Begin Patch\r\n*** Add File: portfolio/a b.md\n+x\r\n*** End Patch\r\n"
+    assert parse_patch_targets(patch) == (("portfolio/a b.md", "create"),)

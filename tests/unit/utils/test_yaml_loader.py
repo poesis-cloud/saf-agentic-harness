@@ -30,3 +30,80 @@ class TestYamlLoader:
 
         with pytest.raises(yaml.constructor.ConstructorError):
             YamlLoader().load_yaml(yaml_file)
+
+
+class TestJsonDataParsing:
+    """Artifact YAML is read in the JSON data model its JSON Schemas validate."""
+
+    def test_keeps_implicit_and_tagged_timestamps_as_strings(self) -> None:
+        data = YamlLoader().parse_json_data(
+            "day: 2026-11-04\nat: 2026-11-04T10:00:00Z\ntagged: !!timestamp 2026-11-04\n"
+            "n: 3\nok: true\nnothing: null\n"
+        )
+
+        assert dict(data) == {
+            "day": "2026-11-04", "at": "2026-11-04T10:00:00Z", "tagged": "2026-11-04",
+            "n": 3, "ok": True, "nothing": None,
+        }
+
+    def test_leaves_configuration_loading_unchanged(self, tmp_path) -> None:
+        import datetime
+
+        yaml_file = tmp_path / "sample.yaml"
+        yaml_file.write_text("day: 2026-11-04\n", encoding="utf-8")
+
+        assert YamlLoader().load_yaml(yaml_file)["day"] == datetime.date(2026, 11, 4)
+
+    def test_rejects_unsafe_yaml_tags(self) -> None:
+        with pytest.raises(yaml.constructor.ConstructorError):
+            YamlLoader().parse_json_data("!!python/object/apply:os.system ['echo unsafe']\n")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "tags: !!set {a: null}\n",
+            "blob: !!binary aGVsbG8=\n",
+            "items:\n  - ok\n  - !!set {b: null}\n",
+            "ratio: .nan\n",
+            "limit: .inf\n",
+            "? !!binary aGVsbG8=\n: x\n",
+        ],
+        ids=["set", "binary", "nested-set", "nan", "inf", "binary-key"],
+    )
+    def test_rejects_yaml_only_values_as_a_parse_failure(self, text: str) -> None:
+        """Artifact data is the JSON data model its schemas validate: a YAML-only value is
+        refused at load (a ValueError, the artifact store's parse failure)."""
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError) as raised:
+            YamlLoader().parse_json_data(text)
+        assert isinstance(raised.value, ValueError)
+
+    def test_markdown_frontmatter_rejects_yaml_only_values(self) -> None:
+        from utils import MarkdownLoader
+
+        with pytest.raises(ValueError):
+            MarkdownLoader().parse_markdown("---\ntags: !!set {a: null}\n---\n\n# Body\n")
+
+    @pytest.mark.parametrize(
+        "text",
+        ["a: &a [*a]\n", "a: &a {b: *a}\n", "&root\nchild: [1, {up: *root}]\n"],
+        ids=["list-cycle", "mapping-cycle", "indirect-cycle"],
+    )
+    def test_rejects_a_recursive_alias_as_a_parse_failure(self, text: str) -> None:
+        """A cycle has no JSON form; it must be a NonJsonDataError (the store's parse
+        finding and revert), never an escaping RecursionError."""
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError, match="recursive"):
+            YamlLoader().parse_json_data(text)
+
+    def test_accepts_a_shared_non_recursive_alias(self) -> None:
+        data = YamlLoader().parse_json_data("base: &b {x: 1}\none: *b\ntwo: *b\n")
+        assert dict(data["one"]) == dict(data["two"]) == {"x": 1}
+
+    def test_rejects_too_deep_nesting_as_a_parse_failure(self) -> None:
+        from utils.yaml_loader import NonJsonDataError
+
+        with pytest.raises(NonJsonDataError):
+            YamlLoader().parse_json_data("[" * 5000 + "]" * 5000)

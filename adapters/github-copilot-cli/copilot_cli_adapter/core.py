@@ -21,16 +21,19 @@ Boundary map (see `def/adapter/github-copilot-cli/spec.md`):
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import PurePath
 from typing import Any, Callable, Mapping, Sequence
 
 from . import renderer
 from .binding import TargetExtractionError, ToolBinding
-from .invocation import HarnessInvocation, unquote
-from .paths import host_basename, relativize
+from .folders import make_contained_folders
+from .invocation import HarnessInvocation, quoted_pattern, unquote
+from .paths import host_basename, is_within, relativize, resolve_host_path, workspace_parts
 from .payload import HookInput, MalformedPayloadError, ToolCall, sanitize_identifier
 from .renderer import ContextRenderer, read_status
 from .runner import CommandRunner, HarnessCommandError
@@ -67,7 +70,9 @@ _STARTED = "started"
 _RESOLVED = "resolved"
 _NOT_APPLICABLE = "not-applicable"
 _VALID = "valid"
-_ALLOWING = frozenset({"pass", "allowed"})
+_REVERTED = "reverted"
+_ALLOWED = "allowed"
+_ALLOWING = frozenset({"pass", _ALLOWED})
 _PASSING_STEP = frozenset({"pass", _NOT_APPLICABLE})
 _AGENT_INVOCABLE_FUNCTIONS = frozenset({"resolve-step", "resolve-step-model"})
 _ATTRIBUTION_FLAGS = ("--session-id", "--parent-session-id")
@@ -75,15 +80,26 @@ _TURN_MARKER = "-t"
 _HARNESS_MENTION = re.compile(r"harness\.py", re.IGNORECASE)
 # ONE plain invocation: `[&] <python|python3|py|abs interpreter> [-3[.x]] <harness.py> <fn>
 # [--flag [value]]...` — no chaining, piping, redirection, substitution or subexpression.
+# A quoted token takes exactly the forms the hint renders for the host's shell (PowerShell
+# on Windows, POSIX elsewhere), apostrophes included: see `invocation.quoted_pattern`.
 _PLAIN = r"""[^\s'";|&`$()<>{}]"""
-_QUOTED = r"""(?:'[^'`$;|&<>]*'|"[^"`$;|&<>]*")"""
-_STRICT_HARNESS_COMMAND = re.compile(
-    rf"""^\s*(?:&\s*)?(?P<interpreter>{_QUOTED}|{_PLAIN}+)(?:\s+-[0-9][0-9.]*)?"""
-    rf"""\s+(?P<harness>{_QUOTED}|{_PLAIN}+)\s+(?P<function>[a-z][a-z0-9-]*)"""
-    rf"""(?:\s+--[a-z][a-z0-9-]*(?:\s+(?!--)(?:{_QUOTED}|{_PLAIN}+))?)*\s*$"""
-)
-_TOKEN = re.compile(rf"{_QUOTED}|{_PLAIN}+")
+
+
+def _command_grammar(powershell: bool) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    quoted = quoted_pattern(powershell)
+    strict = re.compile(
+        rf"""^\s*(?:&\s*)?(?P<interpreter>{quoted}|{_PLAIN}+)(?:\s+-[0-9][0-9.]*)?"""
+        rf"""\s+(?P<harness>{quoted}|{_PLAIN}+)\s+(?P<function>[a-z][a-z0-9-]*)"""
+        rf"""(?:\s+--[a-z][a-z0-9-]*(?:\s+(?!--)(?:{quoted}|{_PLAIN}+))?)*\s*$"""
+    )
+    return strict, re.compile(rf"{quoted}|{_PLAIN}+")
+
+
+_COMMAND_GRAMMARS = {flavor: _command_grammar(flavor) for flavor in (False, True)}
 _TOKEN_TRIM = "'\"();|&<>`"
+# A `<rev>:<path>` git object name (`HEAD:portfolio/x.md`): never a drive (`C:`), a variable
+# (`$env:TEMP`) or a URL.
+_GIT_REVISION_PATH = re.compile(r"^(?![A-Za-z]:)[^:/\\$]+:(?!//)(?P<path>.+)$")
 
 # The deny reason is the ONLY preToolUse field the runtime shows the agent, so it carries the
 # harness's answer; these prefixes tell a result from a refusal of the request itself.
@@ -124,6 +140,7 @@ class Adapter:
         workspace_dir: str,
         invocation: HarnessInvocation,
         diagnostic: Diagnostic = _stderr,
+        make_folders: Callable[[str, Sequence[str]], None] = make_contained_folders,
     ) -> None:
         self._binding = binding
         self._tracker = tracker
@@ -132,6 +149,7 @@ class Adapter:
         self._workspace_dir = workspace_dir
         self._invocation = invocation
         self._diagnostic = diagnostic
+        self._make_folders = make_folders
         self._workspace_name = host_basename(workspace_dir) if workspace_dir else ""
         self._handlers: Mapping[str, Callable[[HookInput], Decision]] = {
             SESSION_START: self._announce_harness,
@@ -188,16 +206,23 @@ class Adapter:
                     "governed session but holds no step session; it stays ungoverned"
                 )
                 return None
+        if record is None or not record.registered:
             record = self._register_turn(hook, host_id)
-            if record is None:
+            if record is None or not record.registered:
                 return None
         if hook.event != USER_PROMPT_TRANSFORMED or record.context_injected:
             return None
         transformed = hook.payload.get("transformedPrompt")
         if not isinstance(transformed, str) or not transformed:
             return None
-        context, resolved = self._resolve_context(record, inline=True)
-        if resolved:
+        context, delivered = self._resolve_context(
+            record,
+            inline=True,
+            fits=lambda text: renderer.fits_hook_output(
+                renderer.transformed_prompt(text, transformed)
+            ),
+        )
+        if delivered:
             self._tracker.write(host_id, record.with_context_injected())
         if not context:
             return None
@@ -210,7 +235,8 @@ class Adapter:
             "start-session",
             {"agent": hook.scoping_agent, "sessionId": session_id, "parentSessionId": None},
         )
-        if report is None or read_status(report) != _STARTED:
+        if report is not None and read_status(report) == _NOT_APPLICABLE:
+            self._tracker.delete(host_id)
             return None
         parent = hook.raw_parent_host_session_id
         record = SessionRecord(
@@ -218,6 +244,7 @@ class Adapter:
             agent=str(hook.scoping_agent),
             origin=TURN_ORIGIN,
             parent_host_id=sanitize_identifier(parent) if parent else None,
+            registration_failure=self._registration_failure(report),
         )
         self._tracker.write(host_id, record)
         return record
@@ -236,6 +263,22 @@ class Adapter:
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
+        record = SessionRecord(
+            session_id=step_host,
+            agent=str(actor),
+            origin=STEP_ORIGIN,
+            parent_session_id=parent.session_id,
+            parent_host_id=parent_host,
+        )
+        if not parent.registered:
+            self._tracker.write(
+                step_host,
+                replace(
+                    record,
+                    registration_failure="its dispatcher's session is not registered",
+                ),
+            )
+            return None
         report = self._run_safely(
             "start-session",
             {
@@ -244,20 +287,21 @@ class Adapter:
                 "parentSessionId": parent.session_id,
             },
         )
-        if report is None or read_status(report) != _STARTED:
+        if report is not None and read_status(report) == _NOT_APPLICABLE:
             return None
-        record = SessionRecord(
-            session_id=step_host,
-            agent=str(actor),
-            origin=STEP_ORIGIN,
-            parent_session_id=parent.session_id,
-            parent_host_id=parent_host,
+        failure = self._registration_failure(report)
+        if failure is not None:
+            self._tracker.write(step_host, replace(record, registration_failure=failure))
+            return None
+        context, delivered = self._resolve_context(
+            record,
+            inline=True,
+            fits=lambda text: renderer.fits_hook_output(renderer.step_context(text)),
         )
-        context, resolved = self._resolve_context(record, inline=True)
-        self._tracker.write(step_host, record.with_context_injected() if resolved else record)
+        self._tracker.write(step_host, record.with_context_injected() if delivered else record)
         if not context:
             return None
-        return {"additionalContext": context}
+        return renderer.step_context(context)
 
     # H2 / H3 / H4 ---------------------------------------------------------------------
 
@@ -275,8 +319,9 @@ class Adapter:
             return renderer.deny([f"unreadable tool-call payload: {failure}"])
         reasons: list[str] = []
         requests: list[HarnessRequest] = []
+        creations: list[str] = []
         for call in calls:
-            reason, request = self._gate_tool_call(hook, record, call)
+            reason, request = self._gate_tool_call(hook, record, call, creations)
             if reason:
                 reasons.append(reason)
             if request is not None:
@@ -290,7 +335,32 @@ class Adapter:
             return renderer.deny(reasons)
         if requests:
             return self._answer_harness_request(record, requests[0])
+        self._prepare_parent_folders(hook, creations)
         return None
+
+    def _prepare_parent_folders(self, hook: HookInput, paths: Sequence[str]) -> None:
+        """H3 host adaptation — the runtime's `create` refuses a missing parent folder, and
+        no other tool offered to every model creates one. Once the WHOLE firing is allowed,
+        create the missing folders of each harness-allowed `create` target inside the
+        workspace: folders only, no content, no commit (git does not track empty folders).
+
+        Containment is checked lexically here and enforced again on the REAL filesystem by
+        `make_folders`, which refuses any symlink or junction under the workspace."""
+        for raw in paths:
+            if not is_within(raw, hook.cwd, self._workspace_dir):
+                continue
+            resolved = resolve_host_path(raw, hook.cwd, self._workspace_dir)
+            if type(resolved) is not type(PurePath()):
+                continue
+            parts = workspace_parts(resolved.parent, self._workspace_dir)
+            if parts is None:
+                continue
+            try:
+                self._make_folders(self._workspace_dir, parts)
+            except OSError as failure:
+                self._diagnostic(
+                    f"[{ADAPTER_ID}] could not create the folder of '{raw}': {failure}"
+                )
 
     def _gate_ungoverned(self, hook: HookInput) -> Decision:
         """Outside a governed session everything passes — except a harness command, which
@@ -316,17 +386,39 @@ class Adapter:
         return None
 
     def _gate_tool_call(
-        self, hook: HookInput, record: SessionRecord, call: ToolCall
+        self, hook: HookInput, record: SessionRecord, call: ToolCall, creations: list[str]
     ) -> tuple[str | None, HarnessRequest | None]:
+        if not record.registered:
+            return self._gate_unregistered_call(hook, record, call), None
         if self._binding.is_dispatch_tool(call.name):
             return self._gate_dispatch(record, call), None
         if self._binding.resolve_write_action(call.name, call.args) is not None:
-            return self._gate_write(hook, record, call), None
+            return self._gate_write(hook, record, call, creations), None
         if self._binding.is_mediated_command_tool(call.name) or self._binding.is_guarded_shell_tool(
             call.name
         ):
             return self._gate_shell(hook, record, call)
         return None, None
+
+    def _gate_unregistered_call(
+        self, hook: HookInput, record: SessionRecord, call: ToolCall
+    ) -> str | None:
+        """A session whose `start-session` failed is not ungoverned: its writes, dispatches
+        and harness requests are denied (fail closed); I9 still guards its shell."""
+        reason = (
+            f"this session is not registered with the harness ({record.registration_failure}): "
+            "its writes and dispatches are denied until a registration succeeds (fail closed)"
+        )
+        if self._binding.is_dispatch_tool(call.name) or (
+            self._binding.resolve_write_action(call.name, call.args) is not None
+        ):
+            return reason
+        if self._binding.is_mediated_command_tool(call.name) or self._binding.is_guarded_shell_tool(
+            call.name
+        ):
+            rejected, request = self._gate_shell(hook, record, call)
+            return f"{HARNESS_REJECTED}: {reason}" if request is not None else rejected
+        return None
 
     def _gate_dispatch(self, record: SessionRecord, call: ToolCall) -> str | None:
         """H2 — the step's preconditions gate its dispatch; async dispatch is refused."""
@@ -348,8 +440,13 @@ class Adapter:
             return None
         return renderer.describe_report(report)
 
-    def _gate_write(self, hook: HookInput, record: SessionRecord, call: ToolCall) -> str | None:
-        """H3 — authorize EVERY target of the write; unextractable targets are denied."""
+    def _gate_write(
+        self, hook: HookInput, record: SessionRecord, call: ToolCall, creations: list[str]
+    ) -> str | None:
+        """H3 — authorize EVERY target of the write; unextractable targets are denied.
+
+        Each `allowed` `create` target of a non-patch tool is collected into `creations`
+        (a patch's `*** Add File:` creates its own folders)."""
         try:
             targets = self._binding.extract_write_targets(call.name, call.args)
         except TargetExtractionError as failure:
@@ -369,6 +466,12 @@ class Adapter:
                 reasons.append("check-step-authorization unavailable")
             elif read_status(report) not in _ALLOWING:
                 reasons.append(renderer.describe_report(report))
+            elif (
+                action == "create"
+                and read_status(report) == _ALLOWED
+                and call.name not in self._binding.patch_tools
+            ):
+                creations.append(path)
         return "; ".join(reasons) or None
 
     def _gate_shell(
@@ -412,7 +515,9 @@ class Adapter:
         self, hook: HookInput, command: str
     ) -> tuple[str | None, HarnessRequest | None]:
         example = self._invocation.example("resolve-step --workflow-slug <slug>")
-        match = _STRICT_HARNESS_COMMAND.match(command)
+        powershell = self._invocation.windows
+        strict, token_pattern = _COMMAND_GRAMMARS[powershell]
+        match = strict.match(command)
         if match is None:
             return (
                 "a harness command must be one plain invocation, never chained or piped: "
@@ -431,20 +536,23 @@ class Adapter:
                 "harness hook attributes the request to your session itself; run: "
                 f"{self._invocation.example(function)}"
             ), None
-        interpreter = unquote(match.group("interpreter"))
+        interpreter = unquote(match.group("interpreter"), powershell)
         if not self._invocation.is_interpreter(interpreter):
             return (
                 f"'{interpreter}' is not a Python interpreter the harness runs under: "
                 f"{self._invocation.example(function)}"
             ), None
-        harness = unquote(match.group("harness"))
+        harness = unquote(match.group("harness"), powershell)
         if not self._invocation.is_harness(harness, hook.cwd):
             return (
                 f"'{harness}' is not the installed harness entry point: "
                 f"{self._invocation.example(function)}"
             ), None
         inquiry: dict[str, str] = {}
-        tokens = [unquote(token) for token in _TOKEN.findall(command[match.end("function") :])]
+        tokens = [
+            unquote(token, powershell)
+            for token in token_pattern.findall(command[match.end("function") :])
+        ]
         index = 0
         while index < len(tokens):
             flag = tokens[index]
@@ -461,8 +569,13 @@ class Adapter:
     def _answer_harness_request(self, record: SessionRecord, request: HarnessRequest) -> Decision:
         """H4 — run the requested function FOR the observed session and hand its report back
         as the only preToolUse text the agent sees: the deny reason. Attribution is the
-        hook's own (the record keyed by the payload's sessionId), never the agent's."""
-        inquiry = {**request.inquiry, "sessionId": record.session_id}
+        hook's own (the record keyed by the payload's sessionId, with the parent it tracks),
+        never the agent's."""
+        inquiry = {
+            **request.inquiry,
+            "sessionId": record.session_id,
+            "parentSessionId": record.parent_session_id,
+        }
         try:
             report = self._runner.run_function(request.function, inquiry)
         except HarnessCommandError as failure:
@@ -479,29 +592,82 @@ class Adapter:
         return renderer.deny([f"{HARNESS_RESULT} ({request.function}): {directive}\n\n{rendered}"])
 
     def _find_guarded_path(self, command: str, cwd: str | None) -> str | None:
-        markers = [f"{self._workspace_name}/", f"{self._workspace_name}\\", "logs/", "logs\\"]
-        workspace = self._workspace_dir.replace("\\", "/").rstrip("/").lower()
+        """I9 — the first token naming the workspace or `logs/`: by name, by absolute prefix,
+        or by a relative path that resolves into the workspace.
+
+        A relative path resolves against the event's `cwd`. A token is taken as a path when
+        it has a separator or a leading `.`, when it exists, or when it follows `--`. A git
+        `<rev>:<path>` object name counts as a path from the repository root: the workspace
+        when `cwd` is inside it.
+        """
+        pathspecs_only = False
         for token in command.split():
             candidate = token.strip(_TOKEN_TRIM)
             if not candidate:
+                if any(separator in token for separator in ";|&"):
+                    pathspecs_only = False
                 continue
-            if self._workspace_name and any(
-                candidate.startswith(marker) or f"/{marker}" in candidate or f"\\{marker}" in candidate
-                for marker in markers
-            ):
-                return candidate
-            if candidate == self._workspace_name and self._workspace_name:
-                return candidate
-            if workspace and candidate.replace("\\", "/").lower().startswith(workspace):
+            if candidate == "--":
+                pathspecs_only = True
+                continue
+            if self._names_guarded_path(candidate, cwd, pathspecs_only):
                 return candidate
         return None
+
+    def _names_guarded_path(self, candidate: str, cwd: str | None, pathspec: bool) -> bool:
+        references = [(candidate, cwd, pathspec)]
+        is_option = candidate.startswith("-")
+        if is_option and "=" in candidate:
+            # `--output="x"`: the token trim left the value's opening quote on.
+            references.append((candidate.split("=", 1)[1].strip(_TOKEN_TRIM), cwd, False))
+        # An option is never a `<rev>:<path>` object name (`--format=%h:%s`).
+        revision = None if is_option else _GIT_REVISION_PATH.match(candidate)
+        if revision is not None:
+            path = revision.group("path")
+            root = (
+                self._workspace_dir
+                if not path.startswith(".") and is_within(cwd or "", None, self._workspace_dir)
+                else cwd
+            )
+            references.append((path, root, True))
+        return any(
+            self._names_by_text(reference) or self._names_by_resolution(reference, anchor, explicit)
+            for reference, anchor, explicit in references
+        )
+
+    def _names_by_text(self, reference: str) -> bool:
+        name = self._workspace_name
+        markers = [f"{name}/", f"{name}\\", "logs/", "logs\\"]
+        if name and (
+            reference == name
+            or any(
+                reference.startswith(marker) or f"/{marker}" in reference or f"\\{marker}" in reference
+                for marker in markers
+            )
+        ):
+            return True
+        workspace = self._workspace_dir.replace("\\", "/").rstrip("/").lower()
+        return bool(workspace) and reference.replace("\\", "/").lower().startswith(workspace)
+
+    def _names_by_resolution(self, reference: str, anchor: str | None, explicit: bool) -> bool:
+        if not anchor or not reference or reference[0] in "-$~" or "://" in reference:
+            return False
+        if not (
+            explicit
+            or "/" in reference
+            or "\\" in reference
+            or reference.startswith(".")
+            or os.path.exists(str(resolve_host_path(reference, anchor, self._workspace_dir)))
+        ):
+            return False
+        return is_within(reference, anchor, self._workspace_dir)
 
     # H5 / H6 --------------------------------------------------------------------------
 
     def _settle_tool_call(self, hook: HookInput) -> Decision:
         host_id = hook.host_id
         record = self._tracker.read(host_id) if host_id else None
-        if record is None:
+        if record is None or not record.registered:
             return None
         try:
             (call,) = hook.read_tool_calls()
@@ -543,9 +709,12 @@ class Adapter:
                 "check-step-artifact unavailable: the write could not be validated. "
                 "Retry once the harness answers."
             )
-        if read_status(report) == _VALID:
+        status = read_status(report)
+        if status == _VALID:
             return None
-        return renderer.write_rejected(report)
+        if status == _REVERTED:
+            return renderer.write_rejected(report)
+        return renderer.write_unvalidated(report)
 
     def _settle_step(self, record: SessionRecord) -> Decision:
         """H6 — evaluate the returned step in the DISPATCHING session."""
@@ -565,15 +734,27 @@ class Adapter:
     def _append_late_context(
         self, host_id: str, record: SessionRecord, decision: dict[str, Any]
     ) -> dict[str, Any]:
-        """H0 fallback — when no prompt hook could inject, the first tool result does."""
-        context, resolved = self._resolve_context(record, inline=False)
-        if resolved:
+        """H0 fallback — when no prompt hook could inject, the first tool result does.
+
+        Its `additionalContext` is capped at 10 KB, so the context goes as load directives,
+        and is marked injected only when it fits whole next to what the decision already says.
+        """
+        existing = decision.get("additionalContext")
+
+        def joined(text: str) -> str:
+            return f"{existing}\n\n{text}" if existing else text
+
+        context, delivered = self._resolve_context(
+            record,
+            inline=False,
+            fits=lambda text: renderer.fits_additional_context(joined(text)),
+            truncate=True,
+        )
+        if delivered:
             self._tracker.write(host_id, record.with_context_injected())
         if not context:
             return decision
-        existing = decision.get("additionalContext")
-        joined = f"{existing}\n\n{context}" if existing else context
-        return {**decision, **renderer.additional_context(joined)}
+        return {**decision, **renderer.additional_context(joined(context))}
 
     # H7 -------------------------------------------------------------------------------
 
@@ -602,7 +783,8 @@ class Adapter:
         record = self._tracker.read(host_id)
         if record is None:
             return
-        self._run_safely("end-session", {"sessionId": record.session_id})
+        if record.registered:
+            self._run_safely("end-session", {"sessionId": record.session_id})
         self._tracker.delete(host_id)
 
     def _report_error(self, hook: HookInput) -> Decision:
@@ -613,8 +795,21 @@ class Adapter:
 
     # helpers --------------------------------------------------------------------------
 
-    def _resolve_context(self, record: SessionRecord, *, inline: bool) -> tuple[str, bool]:
-        """Answer the rendered context and whether it was fully resolved."""
+    def _resolve_context(
+        self,
+        record: SessionRecord,
+        *,
+        inline: bool,
+        fits: Callable[[str], bool],
+        truncate: bool = False,
+    ) -> tuple[str, bool]:
+        """Answer the context to inject and whether ALL of it is delivered by doing so.
+
+        Instruction bodies are inlined when `inline` and the output `fits` the event's limit;
+        otherwise they become load directives. Delivered means both resolutions answered
+        `resolved` AND the injected text fits whole. A context that cannot fit is answered
+        anyway when `truncate` (the renderer cuts it to the cap), else not at all.
+        """
         scope = "step" if record.origin == STEP_ORIGIN else "workflow"
         inquiry = {"sessionId": record.session_id, "parentSessionId": record.parent_session_id}
         reports: list[Mapping[str, Any]] = []
@@ -622,15 +817,33 @@ class Adapter:
             report = self._run_safely(f"resolve-{scope}-{kind}", inquiry)
             if report is not None:
                 reports.append(report)
-        try:
-            resolved = sum(read_status(report) == _RESOLVED for report in reports) == 2
-            context = self._context.render(reports, inline=inline)
-        except (OSError, ValueError) as failure:
-            self._diagnostic(f"[{ADAPTER_ID}] context rendering failed: {failure}")
-            return "", False
-        # Every governed agent learns the one harness line it may run — a nested orchestrator
-        # dispatched as a step needs it as much as a top-level one.
-        return "\n\n".join(part for part in (self._invocation.hint(), context) if part), resolved
+        resolved = sum(read_status(report) == _RESOLVED for report in reports) == 2
+        context = ""
+        for mode in (True, False) if inline else (False,):
+            try:
+                rendered = self._context.render(reports, inline=mode)
+            except (OSError, ValueError) as failure:
+                self._diagnostic(f"[{ADAPTER_ID}] context rendering failed: {failure}")
+                return "", False
+            # Every governed agent learns the one harness line it may run — a nested
+            # orchestrator dispatched as a step needs it as much as a top-level one.
+            context = "\n\n".join(part for part in (self._invocation.hint(), rendered) if part)
+            if fits(context):
+                return context, resolved
+        self._diagnostic(
+            f"[{ADAPTER_ID}] the {scope} context of '{record.session_id}' exceeds what the "
+            "runtime accepts for this event; it is not marked injected"
+        )
+        return (context if truncate else ""), False
+
+    @staticmethod
+    def _registration_failure(report: Mapping[str, Any] | None) -> str | None:
+        """None when `start-session` answered `started`, else why the session is unregistered."""
+        if report is None:
+            return "start-session unavailable"
+        if read_status(report) == _STARTED:
+            return None
+        return renderer.describe_report(report)
 
     def _run_safely(self, function: str, inquiry: Mapping[str, Any]) -> Mapping[str, Any] | None:
         """Run a harness function; a failure is a diagnostic, never a raw leak to the model."""

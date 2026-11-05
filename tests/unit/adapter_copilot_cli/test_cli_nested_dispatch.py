@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from cli_rig import CWD, WORKSPACE, Rig, build_report, post_tool_use, pre_tool_use
+from cli_rig import (
+    CWD,
+    HARNESS,
+    PYTHON,
+    WORKSPACE,
+    Rig,
+    build_error_report,
+    build_report,
+    post_tool_use,
+    pre_tool_use,
+)
 
 PLUGIN = "poesis-saf-agentic-organization"
 VMO = "value-management-officer"
@@ -163,3 +173,27 @@ def test_session_end_closes_the_nested_step_under_the_root_orchestrator(rig: Rig
     rig.fire("subagentStart", NESTED_START)
     rig.fire("sessionEnd", {"sessionId": D1, "reason": "user_exit", "cwd": CWD})
     assert rig.tracker.read(STEP) is None and rig.tracker.read(D1) is None
+
+
+def test_a_nested_step_harness_request_is_attributed_with_its_tracked_parent(rig: Rig) -> None:
+    """Trial: the actor's `resolve-step` (refused `not-facilitator`) was journaled with a
+    null parent. The hook-executed H4 passes both host-observed ids: the step session and
+    the orchestrator session that opened it."""
+    orchestrator = _open_orchestrator(rig)
+    rig.fire("subagentStart", NESTED_START)
+    rig.runner.calls.clear()
+    rig.runner.script["resolve-step"] = build_error_report(
+        "resolve-step", code="not-facilitator", message="Only the facilitator resolves steps."
+    )
+    command = f"& {PYTHON} {HARNESS} resolve-step --workflow-slug portfolio-sync"
+    payload = {**pre_tool_use(("powershell", {"command": command}), host=STEP),
+               "agentId": STEP, "parentAgentId": D1}
+    decision = rig.fire("preToolUse", payload)
+    assert decision is not None and decision["permissionDecision"] == "deny"
+    assert "modifiedArgs" not in decision
+    (inquiry,) = rig.runner.inquiries("resolve-step")
+    assert inquiry == {
+        "workflowSlug": "portfolio-sync",
+        "sessionId": STEP,
+        "parentSessionId": orchestrator,
+    }

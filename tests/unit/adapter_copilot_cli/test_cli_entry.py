@@ -172,3 +172,44 @@ def test_the_catalogue_is_rechecked_on_every_load_never_cached(
     assert code == 2 and "retired-model" in err
     write_bound_catalogue(framework, ADAPTER_DIR / "models.yaml")
     assert _bootstrap_session_start(tmp_path, monkeypatch, framework)[0] == 0
+
+
+def test_layout_overrides_reach_the_build_and_unknown_ones_fail_closed(rig: Rig) -> None:
+    seen = []
+
+    def build(*arguments):
+        seen.append(arguments)
+        return rig.adapter, rig.binding
+
+    argv = ["hook", "--event", "sessionStart", "--layout", "FRAMEWORK_WORKSPACE_DIR=/ws"]
+    code, _, _ = _run(argv, {"sessionId": "x"}, build)
+    assert code == 0 and seen[-1][2] == {"FRAMEWORK_WORKSPACE_DIR": "/ws"}
+    for bad in ("FRAMEWORK_DIR=/x", "PATH=/x", "FRAMEWORK_WORKSPACE_DIR", "FRAMEWORK_SKILLS_DIR="):
+        code, out, err = _run(["hook", "--event", "preToolUse", "--layout", bad], {}, build)
+        assert (code, out) == (ENTRY.EXIT_FAIL_CLOSED, "") and "--layout" in err
+
+
+def test_the_default_build_honors_a_layout_override(tmp_path: Path, monkeypatch) -> None:
+    framework = tmp_path / "fw"
+    for name in ("agents", "artifacts", "instructions", "skills", "templates", "workflows"):
+        (framework / name).mkdir(parents=True)
+    (framework / ".env").write_text(
+        "\n".join(
+            f"FRAMEWORK_{name.upper()}_DIR={name}"
+            for name in ("agents", "artifacts", "instructions", "skills", "templates", "workflows", "workspace")
+        ),
+        encoding="utf-8",
+    )
+    write_bound_catalogue(framework, ADAPTER_DIR / "models.yaml")
+    elsewhere = tmp_path / "portfolio-root"
+    elsewhere.mkdir()
+    for variable in ("FRAMEWORK_DIR", "FRAMEWORK_WORKSPACE_DIR"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setenv("SAF_HARNESS_STATE_DIR", str(tmp_path / "state"))
+    argv = [
+        "hook", "--event", "sessionStart", "--framework-dir", str(framework),
+        "--layout", f"FRAMEWORK_WORKSPACE_DIR={elsewhere}",
+    ]
+    code, out, err = _run(argv, {"sessionId": "x"}, ENTRY.build_adapter)
+    assert code == 0, err
+    assert f"(FRAMEWORK_WORKSPACE_DIR): {elsewhere}" in json.loads(out)["additionalContext"]

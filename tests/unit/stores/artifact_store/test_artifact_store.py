@@ -515,3 +515,104 @@ class TestDiscoverArtifactsByKind:
             portfolio_store.discover_artifacts_by_kind("story")
 
         assert raised.value.code == "artifact-schema-unresolved"
+
+
+_MANIFEST_REF = "portfolio/portfolio-manifest.yaml"
+
+
+@pytest.fixture()
+def yaml_store(workspace: Path, tmp_path: Path) -> ArtifactStore:
+    """A `.yaml` artifact whose schema types a date as a string, as the org's manifest does."""
+    schema_path = tmp_path / "portfolio-manifest.artifact.schema.json"
+    schema_path.write_text(
+        json.dumps(
+            {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "gsmarc://tests/contracts/portfolio-manifest-artifact/v1",
+                "$ref": "gsmarc://saf/contracts/artifact/v1",
+                "properties": {
+                    "slug": {"type": "string"},
+                    "stepOutcomes": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"date": {"type": "string"}}},
+                    },
+                },
+                "required": ["slug"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    layout = WorkspaceLayout(
+        nodes=(
+            _folder_node(
+                "portfolio",
+                _artifact_node("portfolio-manifest.yaml", "portfolio-manifest"),
+                _artifact_node("<name>.yml", "portfolio-manifest"),
+                _artifact_node("<name>.json", "portfolio-manifest"),
+            ),
+        )
+    )
+    return ArtifactStore(workspace, {"portfolio-manifest": schema_path}, layout)
+
+
+_MANIFEST = "slug: acme\nstepOutcomes:\n  - step: sync\n    date: 2026-11-04\n"
+
+
+class TestYamlArtifacts:
+    """The format is the one the artifact's own file extension declares (`.yaml`/`.yml`)."""
+
+    @pytest.mark.parametrize("ref", [_MANIFEST_REF, "portfolio/other.yml"])
+    def test_validates_a_yaml_artifact_as_yaml(
+        self, workspace: Path, yaml_store: ArtifactStore, ref: str
+    ) -> None:
+        """Live trial: `portfolio-manifest.yaml` was parsed as JSON ("Expecting value:
+        line 1 column 1 (char 0)"); an unquoted date then failed "is not of type 'string'"."""
+        _stage(workspace, ref, _MANIFEST)
+
+        assert yaml_store.validate_artifact(Path(ref)) == ()
+
+    def test_discovers_a_committed_yaml_artifact_in_the_json_data_model(
+        self, workspace: Path, yaml_store: ArtifactStore
+    ) -> None:
+        _stage(workspace, _MANIFEST_REF, _MANIFEST)
+        _run_git(workspace, "add", "--", _MANIFEST_REF)
+        _run_git(workspace, "commit", "-m", "add manifest")
+
+        (artifact,) = yaml_store.discover_artifacts_by_kind("portfolio-manifest")
+
+        assert artifact.data == {
+            "slug": "acme", "stepOutcomes": ({"step": "sync", "date": "2026-11-04"},)
+        }
+
+    def test_a_json_artifact_is_still_read_as_json(
+        self, workspace: Path, yaml_store: ArtifactStore
+    ) -> None:
+        _stage(workspace, "portfolio/acme.json", "slug: acme\n")
+
+        (finding,) = yaml_store.validate_artifact(Path("portfolio/acme.json"))
+
+        assert finding.rule == "parse"
+
+    @pytest.mark.parametrize(
+        ("ref", "content"),
+        [(_MANIFEST_REF, "slug: [unclosed\n"), (_EPIC_REF, "---\nslug: [unclosed\n---\n")],
+    )
+    def test_reports_malformed_yaml_as_a_parse_finding(
+        self, workspace: Path, yaml_store: ArtifactStore, portfolio_store: ArtifactStore,
+        ref: str, content: str,
+    ) -> None:
+        store = yaml_store if ref == _MANIFEST_REF else portfolio_store
+        _stage(workspace, ref, content)
+
+        (finding,) = store.validate_artifact(Path(ref))
+
+        assert finding.rule == "parse"
+
+    def test_a_markdown_frontmatter_date_stays_a_string(
+        self, workspace: Path, portfolio_store: ArtifactStore
+    ) -> None:
+        _stage(workspace, _EPIC_REF, "---\nslug: payments\nstatus: 2026-11-04\n---\n")
+
+        (finding,) = portfolio_store.validate_artifact(Path(_EPIC_REF))
+
+        assert "'2026-11-04' is not one of" in finding.message

@@ -75,7 +75,8 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   `hooks` file path, the installer writes there instead; an inline `hooks` object is refused.
   Every entry is `exec: <venv python>`, `args: [adapter.py, hook, --event, …,
   --framework-dir, <fw>]`, with `cwd: <fw>` and an `env` holding `FRAMEWORK_DIR` plus every
-  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env` and `--workspace-dir`, plus
+  `FRAMEWORK_*_DIR` as resolved from `<fw>/.env`, the installer's environment and
+  `--workspace-dir`, plus
   `SAF_HARNESS_PYTHON` (the recorded interpreter). **No user-level variables (`setx`) are
   needed:** hooks get their layout from `env`, and agents get absolute paths from the
   injected hint (see below).
@@ -86,7 +87,8 @@ make install-hooks-copilot-cli FRAMEWORK_DIR=… BUNDLE_DIR=… [WORKSPACE_DIR=�
   (`<bundle>/agents/<slug>.agent.md`). The orchestrators are the agents that
   `workflows/**/*.workflow.conf.yaml` names as `orchestrator:`. The block holds the scoped
   `userPromptSubmitted`/`userPromptTransformed` hooks that open the harness session (H0).
-  Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
+  A scoped hook cannot carry `env`, so its command passes the same resolved layout as
+  `--layout FRAMEWORK_<X>_DIR=<value>` arguments. Re-running the installer replaces the block. An agent with its own `hooks:` key is refused.
 
 **`--framework-dir` is the framework CHECKOUT, not the rendered bundle.** It is where `.env`,
 `workflows/`, `instructions/` and `skills/` live. The bundle is only the package the host
@@ -171,10 +173,17 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
 - **Folder trust.** In an untrusted folder, repository hooks never run, so the boundaries they
   register never fire. Harness commands are then denied with a diagnosis. Plugin hooks are
   not affected.
-- **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget.
+- **Timeouts fail open** in this runtime. The gating hooks have a 120 s budget, and the
+  adapter stops every harness call 30 s before it: a stalled call is a denial, not a
+  timeout.
 - **Shell writes are not mediated.** The adapter denies shell commands that name the
   workspace or `logs/`, but a determined command can evade a textual check. The core's
-  commit-set check is the backstop. Agents must write through `create`/`edit`.
+  commit-set check is the backstop. Agents must write through `create`/`edit` (or
+  `apply_patch`, which GPT-5.x models get instead).
+- **Missing folders.** The runtime's `create` refuses a missing parent folder. The hook
+  creates the missing folders of a `create` the harness allowed inside the workspace (folders
+  only, no commit), so agents need no shell `mkdir`. It never creates a folder through a
+  symlink or junction under the workspace.
 - **Batching (app).** A harness command must be the only tool call in its batch. The CLI fires
   `preToolUse` once per call.
 - **Plugin agent names.** Agents and dispatches must use the runtime's

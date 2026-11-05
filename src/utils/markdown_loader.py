@@ -7,7 +7,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-import yaml
+from utils.yaml_loader import load_json_data
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,11 @@ class MarkdownLoader:
         return self.parse_markdown(Path(path).read_text(encoding="utf-8"))
 
     def parse_markdown(self, content: str) -> MarkdownDocument:
-        """Split YAML frontmatter from the markdown body of raw content."""
+        """Split YAML frontmatter from the markdown body of raw content.
+
+        The frontmatter is read in the JSON data model (`load_json_data`): artifact schemas
+        validate it as JSON data, so an unquoted date stays a string.
+        """
         if not content.startswith("---\n"):
             return MarkdownDocument(frontmatter=MappingProxyType({}), body=content)
 
@@ -44,7 +48,7 @@ class MarkdownLoader:
             raise ValueError("Markdown frontmatter is missing its closing delimiter.")
 
         raw_frontmatter, body = remainder.split("\n---\n", 1)
-        loaded_frontmatter = yaml.safe_load(raw_frontmatter) or {}
+        loaded_frontmatter = load_json_data(raw_frontmatter) or {}
         if not isinstance(loaded_frontmatter, dict):
             raise ValueError("Markdown frontmatter must be a YAML mapping.")
 

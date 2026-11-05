@@ -82,7 +82,7 @@ def test_the_hook_runs_the_request_and_returns_the_report(rig: Rig, command: str
     assert "not an error" in reason and "do not re-issue" in reason
     assert _report_in(reason) == RESOLVED
     assert _harness_calls(rig) == [
-        ("resolve-step", {"workflowSlug": "pi-planning", "sessionId": TURN_SESSION})
+        ("resolve-step", {"workflowSlug": "pi-planning", "sessionId": TURN_SESSION, "parentSessionId": None})
     ]
 
 
@@ -100,22 +100,22 @@ def test_the_command_is_never_modified(rig: Rig) -> None:
         assert decision["permissionDecision"] == "deny"
 
 
-def test_resolve_step_model_carries_only_the_observed_session(rig: Rig) -> None:
+def test_a_turn_request_carries_the_observed_session_and_no_parent(rig: Rig) -> None:
     rig.open_turn()
     rig.runner.script["resolve-step-model"] = {**RESOLVED, "context": {"function": "resolve-step-model"}}
     decision = _command(rig, f"python {HARNESS} resolve-step-model")
     assert decision["permissionDecisionReason"].startswith(f"{HARNESS_RESULT} (resolve-step-model)")
-    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": TURN_SESSION})]
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": TURN_SESSION, "parentSessionId": None})]
 
 
-def test_attribution_comes_from_the_payload_session(rig: Rig) -> None:
+def test_attribution_comes_from_the_payload_session_and_its_tracked_parent(rig: Rig) -> None:
     rig.open_turn()
     rig.open_step()
     rig.runner.script["resolve-step-model"] = RESOLVED
     _command(rig, f"python {HARNESS} resolve-step-model", host=SUBAGENT)
-    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": SUBAGENT})]
+    assert _harness_calls(rig) == [("resolve-step-model", {"sessionId": SUBAGENT, "parentSessionId": TURN_SESSION})]
     _command(rig, f"python {HARNESS} resolve-step-model", host=HOST)
-    assert _harness_calls(rig)[-1] == ("resolve-step-model", {"sessionId": TURN_SESSION})
+    assert _harness_calls(rig)[-1] == ("resolve-step-model", {"sessionId": TURN_SESSION, "parentSessionId": None})
 
 
 def test_a_harness_error_report_is_still_the_result(rig: Rig) -> None:
@@ -139,7 +139,7 @@ def test_a_harness_refusal_is_relayed_as_a_rejection(rig: Rig) -> None:
         f"{HARNESS_REJECTED}: harness: invalid-inquiry: harness.py resolve-step: "
         "unrecognized arguments: --bogus y"
     )
-    assert _harness_calls(rig) == [("resolve-step", {"bogus": "y", "sessionId": TURN_SESSION})]
+    assert _harness_calls(rig) == [("resolve-step", {"bogus": "y", "sessionId": TURN_SESSION, "parentSessionId": None})]
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,7 @@ def test_bash_on_posix_is_answered_the_same_way(tmp_path, binding) -> None:
         )
     )
     assert decision["permissionDecisionReason"].startswith(HARNESS_RESULT)
-    assert runner.calls[-1] == ("resolve-step-model", {"sessionId": session})
+    assert runner.calls[-1] == ("resolve-step-model", {"sessionId": session, "parentSessionId": None})
 
 
 @pytest.mark.parametrize(
@@ -261,3 +261,58 @@ def test_the_hint_says_the_shell_never_runs_the_line_and_how_the_result_arrives(
 def test_the_hint_quotes_a_path_only_when_the_request_needs_it() -> None:
     spaced = make_invocation(python=r"C:\Program Files\Python312\python.exe")
     assert r"& 'C:\Program Files\Python312\python.exe' " in spaced.hint()
+
+
+def _flavored_adapter(tmp_path, binding, invocation, workspace: str):
+    (tmp_path / "i").mkdir()
+    (tmp_path / "s").mkdir()
+    tracker, runner = SessionTracker(tmp_path / "state"), FakeRunner()
+    runner.script["resolve-step"] = RESOLVED
+    adapter = Adapter(
+        binding, tracker, ContextRenderer(tmp_path / "i", tmp_path / "s"), runner,
+        workspace, invocation, diagnostic=lambda _: None,
+    )
+    adapter.handle(HookInput("userPromptSubmitted", {"sessionId": "h", "prompt": "p"}, binding, "rte"))
+
+    def ask(command: str, tool: str):
+        payload = {"sessionId": "h", "cwd": workspace, "toolCalls": [
+            {"name": tool, "args": {"command": command}}
+        ]}
+        return adapter.handle(HookInput("preToolUse", payload, binding, None)), runner
+
+    return ask
+
+
+@pytest.mark.parametrize(
+    "windows, python, harness, tool",
+    [
+        (True, r"C:\Users\o'neil\h\.venv\Scripts\python.exe", r"C:\Users\o'neil\h\harness.py",
+         "powershell"),
+        (False, "/home/o'neil/h/.venv/bin/python", "/home/o'neil/h/harness.py", "bash"),
+        (False, "/home/o'neil/h/py", "/home/it's'/h/harness.py'", "bash"),
+    ],
+    ids=["powershell-doubled-apostrophe", "posix-concatenated-apostrophe", "posix-edge-apostrophes"],
+)
+def test_the_hinted_line_is_accepted_when_a_path_holds_an_apostrophe(
+    tmp_path, binding, windows, python, harness, tool
+) -> None:
+    """The hint renders `'C:\\Users\\o''neil\\...'` (PowerShell) or `'/home/o'"'"'neil/...'`
+    (POSIX); following it exactly must be answered, not rejected."""
+    invocation = make_invocation(python=python, harness=harness, windows=windows)
+    command = invocation.example("resolve-step --workflow-slug pi-planning")
+    ask = _flavored_adapter(tmp_path, binding, invocation, "/srv/org/workspace")
+    decision, runner = ask(command, tool)
+    assert decision["permissionDecisionReason"].startswith(HARNESS_RESULT), decision
+    assert runner.calls[-1][0] == "resolve-step"
+    assert runner.calls[-1][1]["workflowSlug"] == "pi-planning"
+
+
+def test_a_powershell_doubled_apostrophe_is_not_decoded_for_posix(tmp_path, binding) -> None:
+    """In POSIX `'o''neil'` is `oneil`, not `o'neil`: decoding it the PowerShell way would
+    match a path the shell never names."""
+    harness = "/home/o'neil/h/harness.py"
+    invocation = make_invocation(python="/usr/bin/python3", harness=harness, windows=False)
+    ask = _flavored_adapter(tmp_path, binding, invocation, "/srv/org/workspace")
+    decision, runner = ask("python3 '/home/o''neil/h/harness.py' resolve-step", "bash")
+    assert decision["permissionDecisionReason"].startswith(HARNESS_REJECTED)
+    assert [call for call in runner.calls if call[0] == "resolve-step"] == []

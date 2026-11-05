@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 from itertools import chain
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Iterable, Iterator, Mapping, Sequence
+
+import yaml
 
 from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, StateError, SystemFailureError
@@ -17,9 +19,11 @@ from stores.artifact_store.finding import Finding
 from utils.json_loader import JsonLoader
 from utils.markdown_loader import MarkdownLoader
 from utils.schema_validator import SchemaValidator, ValidationErrorRecord
+from utils.yaml_loader import YamlLoader
 
 _CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "contracts"
 _MARKDOWN_SUFFIX = ".md"
+_YAML_SUFFIXES = (".yaml", ".yml")
 _UNRESOLVABLE_RESOURCE = "unresolvable-resource"
 
 
@@ -39,6 +43,7 @@ class ArtifactStore:
         schema_validator: SchemaValidator | None = None,
         json_loader: JsonLoader | None = None,
         markdown_loader: MarkdownLoader | None = None,
+        yaml_loader: YamlLoader | None = None,
     ) -> None:
         """Create the store over a workspace repository, compiling contracts once.
 
@@ -49,6 +54,7 @@ class ArtifactStore:
         self._workspace_layout = workspace_layout
         self._json_loader = json_loader or JsonLoader()
         self._markdown_loader = markdown_loader or MarkdownLoader()
+        self._yaml_loader = yaml_loader or YamlLoader()
         schema_paths = tuple(Path(path) for path in artifact_schemas.values())
         self._schema_ids: Mapping[str, str] = MappingProxyType(
             {
@@ -241,7 +247,7 @@ class ArtifactStore:
         """Validate one artifact's raw bytes, returning its findings and its data."""
         try:
             data = self._read_document(ref, document)
-        except (json.JSONDecodeError, ValueError) as error:
+        except (ValueError, yaml.YAMLError) as error:
             return (
                 (Finding(source=ref, rule="parse", message=f"{error}"),),
                 None,
@@ -258,10 +264,14 @@ class ArtifactStore:
 
         A markdown artifact's schema binds its FRONTMATTER (function 9's worked
         example reports `frontmatter.status: ...`); the body is prose no contract
-        describes.
+        describes. A `.yaml`/`.yml` artifact is a YAML document, and anything else is JSON.
+        YAML is read in the JSON data model the schemas validate: timestamps stay strings.
         """
-        if ref.endswith(_MARKDOWN_SUFFIX):
+        suffix = PurePosixPath(ref).suffix
+        if suffix == _MARKDOWN_SUFFIX:
             return self._markdown_loader.parse_markdown(document).frontmatter
+        if suffix in _YAML_SUFFIXES:
+            return self._yaml_loader.parse_json_data(document)
         return json.loads(document)
 
     def _render_message(self, record: ValidationErrorRecord) -> str:
