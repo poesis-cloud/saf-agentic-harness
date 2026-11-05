@@ -14,7 +14,8 @@ Renders, from this directory's `hooks.yaml` and `agent-hooks.yaml`:
 Every entry runs the adapter with an explicit Python interpreter (default: the one running
 this installer — run it from the harness venv) and absolute paths, so the output is
 machine-specific: generated, never committed. Everything is validated before anything is
-written; a refused run writes nothing.
+written, and the files are then committed all or nothing: a refused or failed run leaves
+the previous registration intact.
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ import json
 import os
 import shlex
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import subprocess
 
@@ -469,14 +471,102 @@ def main(argv: Sequence[str] | None = None, environment: Mapping[str, str] | Non
     except (InstallError, OSError, yaml.YAMLError) as failure:
         print(f"install.py: refused: {failure}", file=sys.stderr)
         return 1
-    for path, text in outputs.items():
-        if arguments.dry_run:
+    if arguments.dry_run:
+        for path in outputs:
             print(f"would write {path}")
-            continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
+        return 0
+    try:
+        write_all_or_nothing(outputs)
+    except InstallError as failure:
+        print(f"install.py: refused: {failure}", file=sys.stderr)
+        return 1
+    for path in outputs:
         print(f"wrote {path}")
     return 0
+
+
+# --- all-or-nothing commit ------------------------------------------------------------
+
+
+def write_all_or_nothing(
+    outputs: Mapping[Path, str], replace: Callable[[str, str], None] = os.replace
+) -> None:
+    """Write every output or none: a failed install leaves the previous registration intact.
+
+    Every output is first staged next to its destination and every existing destination is
+    read back, so nothing is touched until all of it can be. The staged files then replace
+    their destinations one by one; a failure restores every destination already replaced
+    (previous content, or no file) and removes the folders this run created.
+    """
+    created: list[Path] = []
+    staged: dict[Path, Path] = {}
+    previous: dict[Path, bytes | None] = {}
+    try:
+        for path, text in outputs.items():
+            created.extend(_make_parents(path.parent))
+            previous[path] = path.read_bytes() if path.exists() else None
+            staged[path] = _stage(path, text.encode("utf-8"))
+    except OSError as failure:
+        _discard(staged.values(), created)
+        raise InstallError(f"could not stage the installation: {failure}") from failure
+    committed: list[Path] = []
+    try:
+        for path, staging in staged.items():
+            replace(str(staging), str(path))
+            committed.append(path)
+    except OSError as failure:
+        unrestored = _restore(committed, previous)
+        _discard((staging for path, staging in staged.items() if path not in committed), created)
+        detail = f"; could not restore {', '.join(map(str, unrestored))}" if unrestored else ""
+        raise InstallError(
+            f"could not write {path}: {failure} — the previous registration was restored"
+            f"{detail}"
+        ) from failure
+
+
+def _make_parents(folder: Path) -> list[Path]:
+    missing: list[Path] = []
+    while not folder.exists():
+        missing.append(folder)
+        folder = folder.parent
+    for current in reversed(missing):
+        current.mkdir()
+    return missing
+
+
+def _stage(path: Path, content: bytes) -> Path:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    return Path(temporary)
+
+
+def _restore(committed: Sequence[Path], previous: Mapping[Path, bytes | None]) -> list[Path]:
+    unrestored: list[Path] = []
+    for path in reversed(committed):
+        try:
+            content = previous[path]
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                os.replace(_stage(path, content), path)
+        except OSError:
+            unrestored.append(path)
+    return unrestored
+
+
+def _discard(staged: Iterable[Path], created: Sequence[Path]) -> None:
+    for staging in staged:
+        staging.unlink(missing_ok=True)
+    for folder in sorted(created, key=lambda folder: len(folder.parts), reverse=True):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

@@ -227,3 +227,59 @@ def test_scoped_h0_commands_carry_the_same_resolved_layout_as_the_global_hooks(
     )
     assert scoped_layout == global_layout
     assert f"'FRAMEWORK_WORKSPACE_DIR={elsewhere}'" in scoped["windows"]
+
+
+def test_a_failed_write_restores_the_previous_registration(framework, bundle, capsys) -> None:
+    """The installer used to overwrite destinations one by one: a failure on a later agent
+    left the global hooks and earlier agents changed. Now the previous files come back."""
+    argv = ("--framework-dir", str(framework), "--bundle-dir", str(bundle))
+    assert _install(*argv) == 0
+    before = {path: path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+    arguments = INSTALL._parse_arguments([*argv, "--hook-style", "shell"])
+    outputs = INSTALL.plan(arguments, {})
+    assert len(outputs) == 3
+    calls = []
+
+    def flaky_replace(source: str, destination: str) -> None:
+        calls.append(destination)
+        if len(calls) == 3:
+            raise PermissionError("locked by the host")
+        INSTALL.os.replace(source, destination)
+
+    with pytest.raises(INSTALL.InstallError, match="previous registration was restored"):
+        INSTALL.write_all_or_nothing(outputs, replace=flaky_replace)
+    after = {path: path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+    assert after == before
+
+
+def test_a_failed_first_install_leaves_no_file_or_folder_behind(framework, tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for slug in ORCHESTRATORS:
+        (framework / "agents" / f"{slug}.agent.md").write_text(
+            AGENT.format(slug=slug), encoding="utf-8"
+        )
+    arguments = INSTALL._parse_arguments(
+        ["--framework-dir", str(framework), "--target-repo", str(repo)]
+    )
+    outputs = INSTALL.plan(arguments, {})
+
+    def failing_replace(source: str, destination: str) -> None:
+        if destination.endswith(".agent.md"):
+            raise OSError("disk full")
+        INSTALL.os.replace(source, destination)
+
+    with pytest.raises(INSTALL.InstallError):
+        INSTALL.write_all_or_nothing(outputs, replace=failing_replace)
+    assert list(repo.iterdir()) == []
+
+
+def test_a_write_error_is_a_refusal_not_a_crash(framework, bundle, capsys) -> None:
+    """A destination that cannot be written is reported by the installer's own handler."""
+    (bundle / "hooks.json").mkdir()
+    code = _install("--framework-dir", str(framework), "--bundle-dir", str(bundle))
+    assert code == 1
+    assert "install.py: refused:" in capsys.readouterr().err
+    for slug in ORCHESTRATORS:
+        text = (bundle / "agents" / f"{slug}.agent.md").read_text(encoding="utf-8")
+        assert INSTALL.BLOCK_OPEN not in text

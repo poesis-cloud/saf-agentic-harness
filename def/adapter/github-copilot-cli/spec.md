@@ -362,6 +362,9 @@ committed.
 - **Orchestrators** are every `orchestrator:` named by `<fw>/workflows/**/*.workflow.conf.yaml`.
   A missing agent file refuses the install.
 - **All or nothing:** every output is rendered and validated before any file is written.
+  The outputs are then staged next to their destinations and replace them one by one; a
+  failed write restores every destination already replaced (or removes it, if it is new)
+  and is reported as a refusal, so the previous registration stays intact.
 
 ## Limited or unsupported boundaries, and their fallbacks
 
