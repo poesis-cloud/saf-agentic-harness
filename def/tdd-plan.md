@@ -348,7 +348,7 @@ time of this refresh; `make verify` is authoritative):
 
 Recorded honestly — every item below is real and currently open unless marked resolved.
 
-**Spec ahead of implementation — step transactionality.** The core spec now makes the
+**Resolved — step transactionality is implemented** (#20). The core spec makes the
 **step instance** (one execution of a step, identified by its worker session id) the unit of
 acceptance, without any checkout — the working tree stays on the workspace branch and
 workspace state stays its committed `HEAD`: function 8 claims a create-only **artifact lock**
@@ -359,9 +359,8 @@ without moving `HEAD`, and function 10 rebases in memory, evaluates the **step s
 pass **promotes** it by one compare-and-swap fast-forward of the workspace branch — so
 workspace state only ever holds the output of step instances that passed function 10 (core
 spec: Terminology, C0, C1, C6, functions 0, 3, 5, 8, 9, 10, Outcomes rule 1, Internal
-validation, Workspace Git plane, Isolation level, Logging). Nothing below is implemented yet;
-the implementation change follows the spec's approval and owes, each with its red tests
-first:
+validation, Workspace Git plane, Isolation level, Logging). The implementation change (#20)
+delivered each item below with its red tests first, except the last, which stays open:
 
 - contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
   `check-step-postconditions.output.schema.json`; the two new normative codes
@@ -385,8 +384,8 @@ first:
 - `ArtifactStore` — the step-ref and lock Git operations, reads of the step state, the logs
   path in `.git/info/exclude`, and the sweep reporting step refs as step instances plus stale
   locks; the class diagram (`harness-src-classes.puml`, note already updated) gains them and
-  `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered then (the committed
-  PNG is a crop that does not show `artifact_store`);
+  `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered (the full diagram,
+  `artifact_store` included);
 - the **worker session** rename — the spec now pairs "orchestrator session" with "worker
   session" (formerly "step session"): the normative code `step-session-bound` becomes
   `worker-session-bound` (`report.schema.json`, `src/`, tests), the tools-configuration key
@@ -395,15 +394,16 @@ first:
   `find_worker_session_ids` / `host_worker_session_keys`, as the class diagrams already show;
 - adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
   "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
-  with the core when the adapters are.
+  with the core when the adapters are — **still open**: #20 verified both adapters against
+  the step transactions without changing their specs.
 
-**Spec ahead of implementation — the condition language.** The core spec (function 5,
+**Resolved — the condition language is implemented** (#20). The core spec (function 5,
 invariant 2; function 10, invariant 1) replaces the `stateCondition` CEL vocabulary: the
 `artifacts['<kind>']` map and the `artifact` constant are gone, and `setQuery` /
 `setPredicate` read `workspace` (artifact instances: `kind`, `path`, `data`), `workflows` and
 `steps` (workflow and step instances from this machine's logs), `workflow` and `step` (the
 current ones), and `selected`. The condition keys are unchanged. The implementation change
-owes, each with its red tests first:
+(#20) delivered each item below with its red tests first:
 
 - `ConditionEvaluator` — the CEL activation: `workspace` from the evaluated state (the
   workspace branch for function 5, the step state for function 10); `workflows` and `steps`
