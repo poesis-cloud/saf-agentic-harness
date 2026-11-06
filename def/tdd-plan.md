@@ -360,7 +360,8 @@ pass **promotes** it by one compare-and-swap fast-forward of the workspace branc
 workspace state only ever holds the output of step instances that passed function 10 (core
 spec: Terminology, C0, C1, C6, functions 0, 3, 5, 8, 9, 10, Outcomes rule 1, Internal
 validation, Workspace Git plane, Isolation level, Logging). The implementation change (#20)
-delivered each item below with its red tests first, except the last, which stays open:
+delivered each item below with its red tests first; the last — the adapter specs' wording —
+followed in a `def/`-only change:
 
 - contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
   `check-step-postconditions.output.schema.json`; the two new normative codes
@@ -394,8 +395,10 @@ delivered each item below with its red tests first, except the last, which stays
   `find_worker_session_ids` / `host_worker_session_keys`, as the class diagrams already show;
 - adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
   "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
-  with the core when the adapters are — **still open**: #20 verified both adapters against
-  the step transactions without changing their specs.
+  with the core when the adapters are — **resolved**: both adapter specs now say a validated
+  write commits onto the step ref, never the workspace branch; function 8 claims the locks
+  and denies out-of-step writes; and function 10 promotes (H3, H5, H6, I6, I8, and the
+  `github-copilot-cli` limits table).
 
 **Resolved — the condition language is implemented** (#20). The core spec (function 5,
 invariant 2; function 10, invariant 1) replaces the `stateCondition` CEL vocabulary: the

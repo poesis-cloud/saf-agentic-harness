@@ -229,7 +229,10 @@ own permission flow still applies to what the harness lets through.
    No target, a non-object argument, or an unparseable patch → **deny (fail closed)**.
    Otherwise run `check-step-authorization` for every target path, relativized to the
    workspace (Windows drive letters and separators are normalized; the comparison is
-   case-insensitive). Any `denied` → deny.
+   case-insensitive). Any `denied` → deny. Function 8 claims each allowed path's artifact
+   lock for the acting step instance, and denies a write made outside an in-flight step
+   instance — from a turn (orchestrator) session — or to a path another step instance's lock
+   holds (core function 8, invariants 7–8).
 
    **Host adaptation (missing folders).** `create` refuses a missing parent folder and no
    tool every model gets creates one, so an actor would fall back to a shell `mkdir`, which
@@ -294,8 +297,11 @@ own permission flow still applies to what the harness lets through.
 
 - **H5** runs only on `postToolUse` of a write tool in a governed session:
   `check-step-artifact --artifact-path <each target>`.
-  - `valid` → pass.
-  - `reverted` → the harness has already restored or deleted the files. Return
+  - `valid` → pass. The set is committed onto the step instance's step ref, never onto the
+    workspace branch: it enters workspace state only when H6's function 10 promotes the
+    step instance.
+  - `reverted` → the harness has already restored the files (from the step ref tip or
+    `HEAD`) or deleted them. Return
     `modifiedResult` ("write rejected: …") and `additionalContext` with the retry directive.
   - any other status (an error report) → `modifiedResult` ("write outcome unknown: …") and
     `additionalContext` naming the error. Its commit and restoration state are both unknown
@@ -303,7 +309,10 @@ own permission flow still applies to what the harness lets through.
     before it journals), so neither is claimed: the actor is directed to inspect the
     artifact before retrying.
 - **H6** runs on `postToolUse` *or* `postToolUseFailure` of `task` in the dispatcher's session:
-  `check-step-postconditions`. On `fail`, return `additionalContext` with the failing
+  `check-step-postconditions`. It is also the acceptance point: on `pass`, function 10
+  promotes the step instance (the workspace branch fast-forwards to the evaluated step state,
+  its locks are released); on `fail`, workspace state is untouched. On `fail`, return
+  `additionalContext` with the failing
   conditions, then `[artifact delivery] fail — <artifactDelivery.failureMessage>` when
   delivery failed, and the "re-resolve" directive. The step's result text is NOT read; the runtime
   elides it.
@@ -316,8 +325,8 @@ own permission flow still applies to what the harness lets through.
 - `subagentStop` ends the worker session named by `agentId`. This is idempotent with the
   subagent's own `agentStop`.
 - `sessionEnd` ends the session and every recorded descendant.
-- All three always pass. A failed `end-session` is a diagnostic only, and the C6 commit-set
-  remediation in the core is the backstop.
+- All three always pass. A failed `end-session` is a diagnostic only, and the core's C6
+  detect-and-remediate plane is the backstop.
 
 ## Fail-closed entry
 
@@ -404,10 +413,10 @@ committed.
 | Boundary / guarantee | Limitation in this runtime | Fallback |
 | --- | --- | --- |
 | Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Every harness call of a firing is bounded by a deadline inside the event's registered `timeoutSec` (by 25 %, at least 5 s): a call that would start or run past it is stopped, its whole process tree killed (git children included: a process group on POSIX, `taskkill /T` on Windows) so no commit or revert outlives it, and is a harness failure, so the boundary DENIES while the host still honors the answer. Only a stall before the adapter runs (interpreter start) can still reach the host timeout. H5 still validates and reverts after the fact. |
-| Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core's commit-set check (C6) at the next `check-step-artifact`/`end-session` is the backstop. Document "write through `create`/`edit`" in the agents. |
+| Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core bounds them: their bytes land only in the working tree, never in a commit or in workspace state (only promotion advances it), and a dirtied unclaimed path fails function 8's staging-baseline check; C6's detect-and-remediate plane owns cleanup. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a worker session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
-| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 commit-set remediation. |
+| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 detect-and-remediate plane. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
 | `apply_patch` | Offered instead of `create`/`edit` to GPT-5.x models only (CLI 1.0.105); `toolArgs` is the raw patch string. | Bound as a patch tool: every header target is authorized; an unparseable patch → deny. |
