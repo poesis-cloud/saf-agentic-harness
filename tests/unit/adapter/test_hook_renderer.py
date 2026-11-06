@@ -42,6 +42,8 @@ def renderer(framework_dirs: tuple[Path, Path]) -> HookRenderer:
     return HookRenderer(instructions_dir=instructions_dir, skills_dir=skills_dir)
 
 
+STEP_REF = "refs/harness/steps/verification-01J9XQ/review/01j9xqr7t3"
+
 class TestHookRenderer:
     """Adapter spec — Hooks at a glance + each hook's Output construction."""
 
@@ -443,6 +445,48 @@ class TestHookRenderer:
         )
         assert rendered["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
         assert "Rewrite the artifact" in rendered["hookSpecificOutput"]["additionalContext"]
+
+    @pytest.mark.parametrize(
+        ("revert", "rendered_revert"),
+        [
+            pytest.param(
+                {"action": "restored", "from": STEP_REF},
+                f"restored from {STEP_REF}",
+                id="restored-from-the-step-ref",
+            ),
+            pytest.param(
+                {"action": "restored", "from": "HEAD"}, "restored from HEAD", id="restored-from-head"
+            ),
+            pytest.param({"action": "restored"}, "restored", id="restored-no-source"),
+            pytest.param({"action": "deleted"}, "deleted", id="deleted"),
+        ],
+    )
+    def test_renders_the_revert_the_report_records_never_a_fixed_source(
+        self, renderer: HookRenderer, assert_valid_stdout, revert, rendered_revert
+    ) -> None:
+        """Core function 9, invariant 2: a failing path is restored from the step ref tip
+        or from `HEAD`, or deleted — the revert record says which. The retry directive
+        renders exactly that, and names no source the record does not give."""
+        path = "portfolio/payments/features/feature-refunds.md"
+        decision = renderer.render_write_outcome(
+            build_report(
+                "check-step-artifact",
+                "reverted",
+                artifactChecks=[
+                    {"artifactPath": path, "failureMessage": "invalid", "revert": revert}
+                ],
+            )
+        )
+
+        rendered = assert_valid_stdout(decision.stdout)
+        context = rendered["hookSpecificOutput"]["additionalContext"]
+        assert context == (
+            f"The write was discarded ({path} {rendered_revert}). "
+            "Rewrite the artifact to satisfy its schema and retry."
+        )
+        assert rendered["reason"].endswith(f"({rendered_revert})")
+        if "from" not in revert:
+            assert "HEAD" not in context and "refs/harness" not in context
 
     def test_renders_a_harness_error_at_the_commit_gate_as_a_block(
         self, renderer: HookRenderer, assert_valid_stdout

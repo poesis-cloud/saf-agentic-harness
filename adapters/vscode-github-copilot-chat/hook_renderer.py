@@ -17,10 +17,7 @@ _SKILLS_HEADER = "# Skills"
 _LOAD_DIRECTIVE = "Read `{path}` before acting."
 _INSTRUCTION_FILE_SUFFIX = ".instructions.md"
 _SKILL_FILE_SUFFIX = ".skill.md"
-_WRITE_RETRY_DIRECTIVE = (
-    "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its "
-    "schema and retry."
-)
+_WRITE_RETRY_TAIL = "Rewrite the artifact to satisfy its schema and retry."
 _STEP_RETRY_DIRECTIVE = (
     "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed "
     "step; do not surface step details to the user."
@@ -146,7 +143,7 @@ class HookRenderer:
         """
         if _read_status(report) == _VALID_STATUS:
             return _decide({"continue": True})
-        return self.render_block(_describe_report(report), _WRITE_RETRY_DIRECTIVE)
+        return self.render_block(_describe_report(report), _write_retry_directive(report))
 
     def render_step_outcome(self, report: Mapping[str, Any]) -> HookDecision:
         """Render the step-ended evaluation's outcome (H6).
@@ -279,9 +276,34 @@ def _describe_authorization(report: Mapping[str, Any]) -> str:
 def _describe_artifact_checks(report: Mapping[str, Any]) -> str:
     return "; ".join(
         f"{check.get('artifactPath')}: {check.get('failureMessage')} "
-        f"({(check.get('revert') or {}).get('action')})"
+        f"({_describe_revert(check.get('revert'))})"
         for check in report.get("artifactChecks") or ()
     )
+
+
+def _describe_revert(revert: Mapping[str, Any] | None) -> str:
+    """Render one revert record as what happened: `restored from <from>`, `deleted`, ….
+
+    Spec (core function 9, invariant 2): a failing path is restored from the step ref
+    tip or from `HEAD` — the record's `from` names which — or deleted. A record that
+    names no source renders without one.
+    """
+    record = revert or {}
+    action = record.get("action")
+    source = record.get("from")
+    if action == "restored" and source:
+        return f"restored from {source}"
+    return str(action) if action else "discarded"
+
+
+def _write_retry_directive(report: Mapping[str, Any]) -> str:
+    """Direct the retry, naming each failing path's revert as the report records it."""
+    reverts = "; ".join(
+        f"{check.get('artifactPath')} {_describe_revert(check.get('revert'))}"
+        for check in report.get("artifactChecks") or ()
+    )
+    discarded = f"The write was discarded ({reverts})." if reverts else "The write was discarded."
+    return f"{discarded} {_WRITE_RETRY_TAIL}"
 
 
 __all__ = ["HookRenderer"]
