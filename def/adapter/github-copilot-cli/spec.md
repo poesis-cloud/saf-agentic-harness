@@ -299,9 +299,10 @@ own permission flow still applies to what the harness lets through.
 
 - **H5** runs only on `postToolUse` of a write tool in a governed session:
   `check-step-artifact --artifact-path <each target>`.
-  - `valid` → pass. The set is committed onto the step instance's step ref, never onto the
-    workspace branch: it enters workspace state only when H6's function 10 promotes the
-    step instance.
+  - `valid` → pass. A changed set is committed onto the step instance's step ref, never
+    onto the workspace branch: it enters workspace state only when H6's function 10
+    promotes the step instance. A set byte-identical to the step ref tip commits nothing
+    (`commitId: null`, core function 9, invariant 4).
   - `reverted` → the harness has already restored the files (from the step ref tip or
     `HEAD`) or deleted them. Return
     `modifiedResult` ("write rejected: …") and `additionalContext` with the retry directive.

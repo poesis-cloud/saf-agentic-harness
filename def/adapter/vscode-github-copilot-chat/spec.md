@@ -1223,7 +1223,8 @@ mirroring H3's fail-closed denial.
 
 **Out** (stdout, exit 0)
 
-- Valid (validated and committed onto the step ref):
+- Valid (validated; committed onto the step ref, or — every path byte-identical to the step
+  ref tip — nothing to commit, `commitId: null`, function 9, invariant 4):
 
 ```json
 { "continue": true }
@@ -1242,8 +1243,8 @@ mirroring H3's fail-closed denial.
 }
 ```
 
-**Output construction** — `outcome: valid` → plain success (the whole set's commit already
-happened
+**Output construction** — `outcome: valid` → plain success (the whole set's commit, if any,
+already happened
 harness-side; nothing to tell the model). `outcome: reverted` → `decision: "block"` with
 `reason` concatenating each `artifactChecks[]` entry's path and `failureMessage` verbatim
 plus its revert record — the host
@@ -1273,8 +1274,9 @@ claimed path on a clean staging baseline — and the step instance has its own s
 2. ONE function-9 invocation per tool call, carrying the whole path set — unlike H3's per-path
    function-8 fan-out: authorization is per-path, the commit gate is per-call (the set is the
    transaction).
-3. The hook never returns `valid` without the commit having succeeded — commit failure is a
-   `system-error` → block.
+3. The hook never returns `valid` while a needed commit failed — commit failure is a
+   `system-error` → block; a `valid` with `commitId: null` committed nothing because nothing
+   changed (function 9, invariant 4).
 
 ### H6 `PostToolUse` — dispatch class — step-ended
 
