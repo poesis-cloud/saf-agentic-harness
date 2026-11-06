@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import uuid
+from contextlib import contextmanager
 from dataclasses import replace
 from itertools import chain
 from pathlib import Path, PurePosixPath
@@ -27,6 +28,7 @@ from stores.artifact_store.commit import Commit
 from stores.artifact_store.finding import Finding
 from stores.artifact_store.step_ref import STEP_REF_NAMESPACE, StepRef, build_step_ref_name
 from stores.artifact_store.workspace_sweep import WorkspaceSweep
+from utils.exclusive_file_lock import ExclusiveFileLock
 from utils.json_loader import JsonLoader
 from utils.markdown_loader import MarkdownLoader
 from utils.schema_validator import SchemaValidator, ValidationErrorRecord
@@ -40,6 +42,7 @@ _HEAD = "HEAD"
 _LOGS_EXCLUDE_PATTERN = "/logs/"
 _STEP_REBASE_CONFLICT = "step-rebase-conflict"
 _SESSION_ID_TRAILER = "session-id: "
+_REGISTRATION_LOCK_NAME = "harness-registration.lock"
 
 
 class ArtifactStore:
@@ -524,6 +527,32 @@ class ArtifactStore:
                 )
 
     # -- repository metadata and the sweep ---------------------------------------
+
+    @contextmanager
+    def hold_registration_lock(self) -> Iterator[None]:
+        """Serialize session registrations on this clone with an exclusive OS file lock.
+
+        Function 0, invariant 5: a step resolution admits exactly ONE worker session,
+        so the check that no worker session is registered yet and the registration
+        itself are one critical section across processes. The lock file sits in the
+        repository's Git directory — repository metadata, like `.git/info/exclude`:
+        never workspace state, never a ref, never a commit — and only the OS lock on
+        it carries meaning, released when the section ends or its process dies.
+        """
+        path = Path(self._run_git("rev-parse", "--absolute-git-dir")) / _REGISTRATION_LOCK_NAME
+        try:
+            lock = ExclusiveFileLock(path).__enter__()
+        except (OSError, TimeoutError) as failure:
+            raise SystemFailureError(
+                "registration-lock-failed",
+                f"The session registration lock '{path}' could not be acquired: {failure}",
+                True,
+            ) from failure
+        try:
+            yield
+        finally:
+            lock.__exit__(None, None, None)
+
 
     def exclude_logs_path(self) -> None:
         """Exclude the logs path from Git in `.git/info/exclude`, idempotently.

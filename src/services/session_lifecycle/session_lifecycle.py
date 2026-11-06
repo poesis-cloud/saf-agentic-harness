@@ -130,18 +130,22 @@ class SessionLifecycle:
             parent_session_id=parent_session_id,
             workflow_instance_id=None,
         )
+        # Function 0, invariant 5: checking that the resolution has no worker session
+        # yet and registering this one are ONE critical section, so two concurrent
+        # starts for one resolution can never both register.
         try:
-            log = self._find_session_log(session_id)
-            if log is not None:
-                return self._replay_registration(context, log, agent)
-            admitted, resolution = self._admits_session(agent, parent_session_id)
-            if not admitted:
-                return SessionStartReport(
-                    context=context, outcome=Outcome(status="not-applicable")
-                )
+            with self._artifact_store.hold_registration_lock():
+                log = self._find_session_log(session_id)
+                if log is not None:
+                    return self._replay_registration(context, log, agent)
+                admitted, resolution = self._admits_session(agent, parent_session_id)
+                if not admitted:
+                    return SessionStartReport(
+                        context=context, outcome=Outcome(status="not-applicable")
+                    )
+                report = self._register_session(context, agent)
         except HarnessError as error:
             return SessionStartReport(context=context, outcome=_error_outcome(error))
-        report = self._register_session(context, agent)
         if resolution is None or report.outcome.status != "started":
             return report
         return self._create_step_ref(report, resolution)
