@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,7 @@ import pytest
 from config import AccessControlList, WorkspaceLayout
 from errors import InquiryError, StateError, SystemFailureError
 from services.session_lifecycle import SessionLifecycle
+from services.session_lifecycle.session_start_report import SessionStartReport
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import (
     Context,
@@ -788,3 +791,66 @@ class TestLogsExclusion:
         assert report.outcome.status == "system-error"
         assert report.outcome.error.code == "logs-exclude-failed"
         assert not (workspace / "logs" / "sess-root.log.jsonl").exists()
+
+
+class _SlowWorkerLookupStore(SessionLogStore):
+    """A real store whose worker-session lookup lingers before answering.
+
+    It widens the window between function 0's check ("no worker session registered
+    yet") and its registration, so two concurrent starts both reach that window
+    unless the check and the registration form one critical section.
+    """
+
+    def find_worker_session_ids(self, parent_session_id: str, agent: str, since: str):
+        found = super().find_worker_session_ids(parent_session_id, agent, since)
+        time.sleep(0.3)
+        return found
+
+
+class TestConcurrentWorkerRegistration:
+    def test_two_concurrent_starts_for_one_resolution_register_exactly_one(
+        self, workspace: Path, artifact_store: ArtifactStore
+    ) -> None:
+        """Spec function 0, invariant 5: a step resolution admits exactly ONE worker
+        session — even when the orchestrator dispatches the resolved step twice at once.
+        Exactly one start is `started`; the other is refused `worker-session-bound`,
+        unjournaled, with no log and no step ref of its own."""
+        store = _SlowWorkerLookupStore(workspace)
+        store.create_session_log(_start_entry("sess-root", "orchestrator"))
+        store.append_log_entry("sess-root", _resolution_entry("sess-root", actor="reviewer"))
+        barrier = threading.Barrier(2)
+        reports: dict[str, SessionStartReport] = {}
+
+        def start(session_id: str) -> None:
+            lifecycle = SessionLifecycle(
+                session_log_store=store,
+                access_control_list=_ACL,
+                artifact_store=artifact_store,
+            )
+            barrier.wait()
+            reports[session_id] = lifecycle.start_session(
+                agent="reviewer", session_id=session_id, parent_session_id="sess-root"
+            )
+
+        threads = [threading.Thread(target=start, args=(sid,)) for sid in ("sess-a", "sess-b")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        outcomes = sorted(
+            (report.outcome.status, report.outcome.error.code if report.outcome.error else None)
+            for report in reports.values()
+        )
+        assert outcomes == [("started", None), ("state-error", "worker-session-bound")]
+        winner = next(sid for sid, report in reports.items() if report.outcome.status == "started")
+        loser = next(sid for sid in reports if sid != winner)
+        assert (workspace / "logs" / f"{winner}.log.jsonl").exists()
+        assert not (workspace / "logs" / f"{loser}.log.jsonl").exists()
+        step_refs = _run_git(
+            workspace, "for-each-ref", "--format=%(refname)", "refs/harness/steps/"
+        ).split()
+        assert [ref.rsplit("/", 1)[-1] for ref in step_refs] == [winner]
+        assert store.find_worker_session_ids("sess-root", "reviewer", "2026-08-18T09:01:00Z") == (
+            winner,
+        )

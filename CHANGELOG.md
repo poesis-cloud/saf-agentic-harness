@@ -50,6 +50,17 @@ GitHub pre-releases.
   predecessor or a path join with `step` are configuration load errors. Only the kinds the
   guards fix are read from the evaluated state.
 
+### Fixes
+
+- **Function 0 now enforces "one worker session per step resolution" under concurrency.**
+  When the same resolved step was dispatched twice in parallel, both worker sessions could
+  register, because function 0 checked and then registered in two separate steps. Function
+  10 then failed closed. The check and the registration now run as one critical section,
+  under an exclusive OS file lock: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows. The
+  lock file is `harness-registration.lock` in the workspace repository's Git directory, so
+  it is repository metadata, not workspace state, a ref, or a log entry. A second
+  concurrent start is refused with `worker-session-bound`.
+
 ### Adapters
 
 - **The H5 retry hint names the revert the harness performed.** Both adapters used to say

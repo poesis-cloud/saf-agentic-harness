@@ -7,6 +7,10 @@ workspace, and the invariants observable from outside.
 
 from __future__ import annotations
 
+import json
+import time
+from pathlib import Path
+
 import pytest
 
 from functional_fixtures import (
@@ -14,7 +18,9 @@ from functional_fixtures import (
     assert_contract_round_trip,
     assert_journal_contract,
     assert_report_journaled_byte_identically,
+    run_git,
 )
+from utils.exclusive_file_lock import ExclusiveFileLock
 
 FUNCTION = "start-session"
 
@@ -172,6 +178,69 @@ class TestStartSession:
         assert not harness.is_session_logged("second-session")
         assert harness.read_log_lines(orchestrator_session) == parent_before
         assert len(harness.read_log("step-session")) == 1
+
+    def test_concurrent_starts_for_one_resolution_register_exactly_one_worker(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 0, invariant 5): a step resolution admits exactly ONE worker
+        session, also when the same resolved step is dispatched several times at once —
+        real, concurrent harness processes. Exactly one is `started`; every other is
+        `worker-session-bound`, with no log and no step ref of its own."""
+        harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
+        workers = [f"worker-{index}" for index in range(4)]
+
+        processes = {
+            worker: harness.spawn_entry_shim(
+                FUNCTION,
+                sessionId=worker,
+                parentSessionId=orchestrator_session,
+                agent="builder",
+            )
+            for worker in workers
+        }
+        reports = {}
+        for worker, process in processes.items():
+            stdout, stderr = process.communicate(timeout=120)
+            assert process.returncode == 0, stderr
+            reports[worker] = json.loads(stdout)
+
+        statuses = sorted(
+            (report["outcome"]["status"], (report["outcome"].get("error") or {}).get("code"))
+            for report in reports.values()
+        )
+        assert statuses == [("started", None)] + [("state-error", "worker-session-bound")] * 3
+        (winner,) = [w for w, r in reports.items() if r["outcome"]["status"] == "started"]
+        assert [w for w in workers if harness.is_session_logged(w)] == [winner]
+        step_refs = run_git(
+            harness.workspace_dir, "for-each-ref", "--format=%(refname)", "refs/harness/steps/"
+        ).split()
+        assert [ref.rsplit("/", 1)[-1] for ref in step_refs] == [winner]
+
+    def test_a_registration_waits_for_another_process_in_the_critical_section(
+        self, harness: FunctionalHarness, orchestrator_session: str
+    ) -> None:
+        """Spec (function 0, invariant 5): the check and the registration are ONE
+        critical section across processes. While another process holds the
+        registration lock, a real harness process cannot register; it registers as
+        soon as the lock is released."""
+        harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
+        git_dir = Path(run_git(harness.workspace_dir, "rev-parse", "--absolute-git-dir").strip())
+
+        with ExclusiveFileLock(git_dir / "harness-registration.lock"):
+            process = harness.spawn_entry_shim(
+                FUNCTION,
+                sessionId="worker-0",
+                parentSessionId=orchestrator_session,
+                agent="builder",
+            )
+            time.sleep(2.0)
+            assert process.poll() is None
+            assert not harness.is_session_logged("worker-0")
+
+        stdout, stderr = process.communicate(timeout=120)
+        assert process.returncode == 0, stderr
+        assert json.loads(stdout)["outcome"]["status"] == "started"
+        assert harness.is_session_logged("worker-0")
 
     def test_a_re_resolved_step_admits_a_new_step_session(
         self, harness: FunctionalHarness, orchestrator_session: str

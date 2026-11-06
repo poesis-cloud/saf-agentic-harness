@@ -308,12 +308,24 @@ class FunctionalHarness:
 
     def invoke_entry_shim(self, function: str, **inquiry: Any) -> CommandRun:
         """Run one function through `harness.py`, the repository's entry shim."""
-        flags = self.render_flags(inquiry)
-        completed = subprocess.run(
-            [sys.executable, str(ENTRY_SHIM), function, *flags],
-            capture_output=True,
+        process = self.spawn_entry_shim(function, **inquiry)
+        stdout, stderr = process.communicate(timeout=120)
+        return CommandRun(
+            function=function,
+            inquiry=dict(inquiry),
+            exit_code=process.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    def spawn_entry_shim(self, function: str, **inquiry: Any) -> subprocess.Popen[str]:
+        """Start one function through `harness.py` as its own process, without waiting."""
+        return subprocess.Popen(
+            [sys.executable, str(ENTRY_SHIM), function, *self.render_flags(inquiry)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            check=False,
+            encoding="utf-8",
             cwd=REPO_ROOT,
             env={
                 # A stripped PATH, plus Git's own directory: Git is a harness
@@ -324,13 +336,6 @@ class FunctionalHarness:
                 "FRAMEWORK_DIR": str(self.framework_dir),
                 **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if "SYSTEMROOT" in os.environ else {}),
             },
-        )
-        return CommandRun(
-            function=function,
-            inquiry=dict(inquiry),
-            exit_code=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
         )
 
     def validate_inquiry(
