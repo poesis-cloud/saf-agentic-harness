@@ -369,6 +369,43 @@ def test_h5_replaces_the_result_of_a_rejected_write(rig: Rig) -> None:
     assert "frontmatter.status is required" in decision["additionalContext"]
 
 
+@pytest.mark.parametrize(
+    ("revert", "rendered_revert"),
+    [
+        pytest.param(
+            {"action": "restored", "from": "refs/harness/steps/pi-01ABCD/draft/w1"},
+            "restored from refs/harness/steps/pi-01ABCD/draft/w1",
+            id="restored-from-the-step-ref",
+        ),
+        pytest.param({"action": "restored", "from": "HEAD"}, "restored from HEAD", id="restored-from-head"),
+        pytest.param({"action": "restored"}, "restored", id="restored-no-source"),
+        pytest.param({"action": "deleted"}, "deleted", id="deleted"),
+    ],
+)
+def test_h5_renders_the_revert_the_report_records(rig: Rig, revert, rendered_revert) -> None:
+    """Core function 9, invariant 2: a failing path is restored from the step ref tip or
+    from `HEAD`, or deleted — the revert record says which. The retry directive renders
+    exactly that, and names no source the record does not give."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    path = "portfolio/art/a1/f1.feature.md"
+    rig.runner.script["check-step-artifact"] = build_report(
+        "check-step-artifact",
+        "reverted",
+        artifactChecks=[{"artifactPath": path, "failureMessage": "invalid", "revert": revert}],
+    )
+    decision = rig.fire("postToolUse", post_tool_use("create", {"path": ARTIFACT}))
+    context = decision["additionalContext"]
+    assert context.endswith(
+        f"The write was discarded ({path} {rendered_revert}). "
+        "Rewrite the artifact to satisfy its schema and retry."
+    )
+    assert f"({rendered_revert})" in decision["modifiedResult"]["textResultForLlm"]
+    if "from" not in revert:
+        directive = context.rsplit("\n\n", 1)[-1]
+        assert "HEAD" not in directive and "refs/harness" not in directive
+
+
 def test_h5_never_claims_a_restore_for_an_error_outcome(rig: Rig) -> None:
     """`log-unreadable` (or any error) is returned before artifact processing: the file may
     still be modified, so the result names the error and claims no rollback."""

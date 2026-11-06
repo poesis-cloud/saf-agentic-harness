@@ -19,10 +19,7 @@ _INSTRUCTION_FILE_SUFFIX = ".instructions.md"
 _SKILL_FILE_SUFFIX = ".skill.md"
 _CONTEXT_SEPARATOR = "\n\n---\n\n"
 _WRITE_REJECTED = "WRITE REJECTED by the SAFe agentic harness: "
-_WRITE_RETRY_DIRECTIVE = (
-    "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its "
-    "schema and retry."
-)
+_WRITE_RETRY_TAIL = "Rewrite the artifact to satisfy its schema and retry."
 _WRITE_UNVALIDATED = "WRITE OUTCOME UNKNOWN — the SAFe agentic harness answered an error: "
 # An error can follow the commit (`log-append-failed`: the harness commits, then journals),
 # so neither the commit nor a restore can be claimed or denied.
@@ -88,7 +85,7 @@ def write_rejected(report: Mapping[str, Any]) -> dict[str, Any]:
             "resultType": "success",
             "textResultForLlm": f"{_WRITE_REJECTED}{description}",
         },
-        "additionalContext": _truncate(f"{description}\n\n{_WRITE_RETRY_DIRECTIVE}"),
+        "additionalContext": _truncate(f"{description}\n\n{_write_retry_directive(report)}"),
     }
 
 
@@ -205,10 +202,35 @@ def _describe_condition_checks(report: Mapping[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def _describe_revert(revert: Mapping[str, Any] | None) -> str:
+    """Render one revert record as what happened: `restored from <from>`, `deleted`, ….
+
+    Spec (core function 9, invariant 2): a failing path is restored from the step ref
+    tip or from `HEAD` — the record's `from` names which — or deleted. A record that
+    names no source renders without one.
+    """
+    record = revert or {}
+    action = record.get("action")
+    source = record.get("from")
+    if action == "restored" and source:
+        return f"restored from {source}"
+    return str(action) if action else "discarded"
+
+
+def _write_retry_directive(report: Mapping[str, Any]) -> str:
+    """Direct the retry, naming each failing path's revert as the report records it."""
+    reverts = "; ".join(
+        f"{check.get('artifactPath')} {_describe_revert(check.get('revert'))}"
+        for check in report.get("artifactChecks") or ()
+    )
+    discarded = f"The write was discarded ({reverts})." if reverts else "The write was discarded."
+    return f"{discarded} {_WRITE_RETRY_TAIL}"
+
+
 def _describe_artifact_checks(report: Mapping[str, Any]) -> str:
     return "; ".join(
         f"{check.get('artifactPath')}: {check.get('failureMessage')} "
-        f"({(check.get('revert') or {}).get('action')})"
+        f"({_describe_revert(check.get('revert'))})"
         for check in report.get("artifactChecks") or ()
     )
 

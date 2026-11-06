@@ -50,6 +50,13 @@ GitHub pre-releases.
   predecessor or a path join with `step` are configuration load errors. Only the kinds the
   guards fix are read from the evaluated state.
 
+### Adapters
+
+- **The H5 retry hint names the revert the harness performed.** Both adapters used to say
+  "restored from HEAD" for every rejected write. They now render each failing path's revert
+  record from the function-9 report: "restored from <step ref>", "restored from HEAD", or
+  "deleted". A record that names no source renders without one.
+
 ## v1.0.0-alpha.1
 
 The first pinnable pre-release of the SAFe agentic orchestration harness. It **supersedes
