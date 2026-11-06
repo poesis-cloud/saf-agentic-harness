@@ -68,7 +68,9 @@ and implementation parts prescribe its realization.
   committed, onto the in-flight step instance's **step ref** and without moving `HEAD`; an
   invalid write is discarded from staging, so no commit ever holds invalid bytes. A committed
   write becomes workspace state only through its step instance's **promotion**; until then its
-  bytes simply stay in the working tree, outside workspace state.
+  bytes simply stay in the working tree, outside workspace state. In the condition language
+  (function 5, invariant 2), `workspace` names the artifact plane only; `workflows` and
+  `steps` expose the log plane.
 - **Artifact** — the framework's content: every business, governance, or orchestration
   deliverable persisted under the workspace state paths. Schema-bound (C5),
   valid-by-construction once persisted (C6), and the sole basis for every check the harness
@@ -742,13 +744,20 @@ Example:
       "instructions": ["instructions/review.instructions.md"],
       "artifact": "review-report",
       "conditions": [
-        { "kind": "precondition", "slug": "after_build", "step": "build" },
+        { "kind": "precondition", "slug": "after-build", "step": "build" },
         {
-          "kind": "postcondition", "slug": "report_approved",
+          "kind": "precondition", "slug": "build-passed",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.status == 'approved')"
+            "setQuery": "workspace.filter(a, steps.exists(s, s.workflow == workflow.id && s.slug == 'build' && s.outcome == 'pass' && s.artifact.path == a.path))"
           },
-          "setPredicate": "selected.size() > 0"
+          "setPredicate": "selected.size() == 1 && selected.all(a, a.data.status == 'passed')"
+        },
+        {
+          "kind": "postcondition", "slug": "report-approved",
+          "setSelector": {
+            "setQuery": "workspace.filter(a, a.path == step.artifact.path && a.data.status == 'approved')"
+          },
+          "setPredicate": "selected.size() == 1"
         }
       ],
       "capabilities": {
@@ -1004,16 +1013,16 @@ Example:
     },
     "outcome": { "status": "fail" },
     "conditionChecks": [
-      { "condition": { "kind": "precondition", "slug": "after_build", "step": "build" }, "outcome": "pass" },
+      { "condition": { "kind": "precondition", "slug": "after-build", "step": "build" }, "outcome": "pass" },
       {
         "condition": {
-          "kind": "precondition", "slug": "build_passed",
+          "kind": "precondition", "slug": "build-passed",
           "setSelector": {
-            "setQuery": "artifacts['build-report'].filter(a, a.status == 'passed')"
+            "setQuery": "workspace.filter(a, steps.exists(s, s.workflow == workflow.id && s.slug == 'build' && s.outcome == 'pass' && s.artifact.path == a.path))"
           },
-          "setPredicate": "selected.size() > 0"
+          "setPredicate": "selected.size() == 1 && selected.all(a, a.data.status == 'passed')"
         },
-        "outcome": "fail", "failureMessage": "no 'build-report' instance has status 'passed'"
+        "outcome": "fail", "failureMessage": "the 'build-report' delivered by step 'build' does not have status 'passed'"
       }
     ]
   }
@@ -1061,19 +1070,114 @@ state, and re-resolution recovers. Residual cleanup is C6's detect-and-remediate
   successor) is advisory — a documentation cross-reference mirroring that successor's own
   `kind: precondition` declaration — never itself re-checked as a hard gate: the DAG edge it
   declares is enforced once, from the successor's side.
-2. `stateCondition`: `setSelector.setQuery` is a CEL expression that references artifacts
-   directly by their schema slug via the `artifacts` runtime constant (a map: artifact slug ->
-   matching instances — every committed path the workspace layout binds to that artifact
-   kind, wherever it lives, e.g. `artifacts['review-report']`) to produce `selected`; `setPredicate`
-   is then evaluated over `selected`. The step's declared `artifact` ref is in scope as a
-   runtime constant. Every `artifacts['<slug>'].<property>` reference is statically validated
-   against that slug's artifact schema — an unresolvable slug or an undeclared property is a
-   hard error, not a false pass. An empty selected set is a normal value: the predicate decides
-   whether it passes or fails. A CEL expression failing **at runtime** (an evaluation error,
-   not a false predicate) is `state-error` (`condition-evaluation-failed`), journaled, the
-   error detail naming the condition slug; a false predicate is never an error — it is a
-   `fail` check inside a normal report. Statically invalid expressions (unresolvable slug,
-   undeclared property) cannot reach runtime — the configuration load rejects them.
+2. `stateCondition` — the **condition language**. `setSelector.setQuery` is a CEL
+   expression whose result is bound to `selected`; `setPredicate` is a CEL boolean then
+   evaluated over it. Both read the evaluated state through these variables:
+
+   ```text
+   workspace    the artifact instances in the state being evaluated (artifacts only, no logs)
+     a.kind     schema slug, from the workspace layout
+     a.path     workspace path
+     a.data     authored content, validated by the kind's schema
+   workflows    workflow instances, from the logs (the instance view)
+     w.slug     its workflow definition
+     w.id       the workflow instance id
+   steps        step instances of every workflow instance, from the logs, oldest first
+     s.slug     its step definition
+     s.id       its worker session id (1 step instance = 1 worker session)
+     s.workflow its workflow instance id (joins workflows by w.id)
+     s.actor    the actor agent
+     s.outcome  'pass' | 'fail' | 'in-flight'
+     s.artifact { kind, path } | null  the artifact instance it delivered (its function-10 artifactDelivery; joins workspace by path)
+   workflow     the current workflow instance (an element of workflows)
+   step         the current step instance (an element of steps); in its own postconditions, step.artifact is the artifact instance about to be promoted
+   selected     in setPredicate: the result of setQuery
+   ```
+
+   Everything else is plain CEL: `filter`, `exists`, `exists_one`, `all`, `map`, `size`,
+   `has`, `in`, `==`, `&&`, `||`. There is no per-kind artifact map and no step-artifact
+   constant: a kind is selected by a guard on `a.kind` (below), and `step.artifact.kind`
+   gives the step's declared kind.
+
+   **Naming.** C0's "workspace state" means artifacts plus logs. In the condition language,
+   `workspace` names the artifact plane only, while `workflows` and `steps` expose the log
+   plane — in line with C5: artifacts are the framework's content, logs are the harness's
+   record, and log evidence is read from the logs and asserted as state.
+
+   **Evaluated state.** `workspace` holds the artifact instances of the state the condition
+   is checked against (C1): the workspace branch for a precondition, the step state being
+   promoted for a postcondition (function 10, invariant 1).
+
+   **Scope.** The current `workflow` and its step instances are always complete. `workflows`
+   and `steps` cover only this machine's logs, which are local-only (C0), so a condition
+   about another workflow instance should rely on artifact content, which syncs. In a step's
+   own postconditions, `steps` includes the current step instance with `outcome:
+   'in-flight'` and its `artifact` set to the delivery being evaluated.
+
+   **Typing, checked at configuration load.** A read of `a.data.<p>` is valid only where the
+   kind of `a` is fixed by a guard in the same macro — the macro binding `a`, the read
+   sitting anywhere inside it, nested macros included. The guard is either:
+
+   - `a.kind == '<literal>'`; or
+   - a path join of `a.path` with the `artifact.path` of a step instance whose `s.slug` is a
+     literal step of a known workflow — the current one (`step` itself, or `s.workflow ==
+     workflow.id`), or one fixed by a literal workflow slug through `w.slug == '<literal>'`
+     joined by `s.workflow == w.id`. The kind is that step's declared `artifact`.
+
+   A macro ranging over the result of a `filter` whose guard fixed the kind — `selected`
+   included — reads elements of that kind. The loader checks `<p>` against that kind's
+   schema. Each of these is a **configuration load error** (see
+   [Internal validation](#internal-validation--not-functions)), never a false pass:
+
+   - an unguarded `a.data` read;
+   - an unknown kind;
+   - an unknown step or workflow slug;
+   - in a precondition, a reference to a current-workflow step that has not necessarily run
+     yet — one that is not a declared predecessor of the step (its `kind: precondition`
+     `stepCondition`s, directly or through theirs).
+
+   **Runtime.** An empty `selected` is a normal value: the predicate decides whether it
+   passes or fails. A CEL expression failing **at runtime** (an evaluation error, not a
+   false predicate) is `state-error` (`condition-evaluation-failed`), journaled, the error
+   detail naming the condition slug; a false predicate is never an error — it is a normal
+   `fail` check inside a normal report.
+
+   **Examples** (workflow configuration YAML):
+
+   ```yaml
+   # feature-derivation / derive-business (artifact: feature), postcondition:
+   # the feature's parent Epic is approved
+   - kind: postcondition
+     slug: parent-epic-approved
+     setSelector:
+       setQuery: >-
+         workspace.filter(e, e.kind == 'epic' && workspace.exists(f,
+         f.path == step.artifact.path && f.data.parentEpic == e.data.id))
+     setPredicate: >-
+       selected.size() == 1 && selected.all(e,
+       e.data.status in ['portfolio-backlog','implementing'])
+
+   # owner-rewrite, postcondition: it rewrites the artifact instance this workflow
+   # instance's discovery-and-draft step delivered
+   - kind: postcondition
+     slug: rewrites-drafted-artifact
+     setSelector:
+       setQuery: >-
+         steps.filter(s, s.workflow == workflow.id && s.slug == 'discovery-and-draft'
+         && s.outcome == 'pass' && s.artifact.path == step.artifact.path)
+     setPredicate: selected.size() == 1
+
+   # verification / review, precondition: the build report this workflow instance's
+   # build step delivered (build is a declared predecessor) has status 'passed'
+   - kind: precondition
+     slug: build-passed
+     setSelector:
+       setQuery: >-
+         workspace.filter(a, steps.exists(s, s.workflow == workflow.id
+         && s.slug == 'build' && s.outcome == 'pass' && s.artifact.path == a.path))
+     setPredicate: selected.size() == 1 && selected.all(a, a.data.status == 'passed')
+   ```
+
 3. Condition slugs are the audit handle: unique within a step, and every check logs the full
    condition object with its outcome under that slug.
 4. A step declaring zero preconditions passes vacuously: `outcome: pass` with an empty
@@ -1539,11 +1643,11 @@ Example:
     "conditionChecks": [
       {
         "condition": {
-          "kind": "postcondition", "slug": "report_approved",
+          "kind": "postcondition", "slug": "report-approved",
           "setSelector": {
-            "setQuery": "artifacts['review-report'].filter(a, a.status == 'approved')"
+            "setQuery": "workspace.filter(a, a.path == step.artifact.path && a.data.status == 'approved')"
           },
-          "setPredicate": "selected.size() > 0"
+          "setPredicate": "selected.size() == 1"
         },
         "outcome": "pass"
       }
@@ -1641,7 +1745,10 @@ outcome.
 
 1. `state` assertions evaluate over the step state — the persisted, committed artifacts of
    the latest workspace state plus the step instance's validated commits rebased onto it —
-   never agent memory, and never the working tree (C2). A CEL
+   never agent memory, and never the working tree (C2). They use the condition language of
+   function 5, invariant 2, with `workspace` holding the step state's artifact instances, and
+   `steps` including the current step instance — `outcome: 'in-flight'`, its `artifact` (and
+   `step.artifact`) the delivery being evaluated (invariant 5). A CEL
    expression failing at runtime is `state-error` (`condition-evaluation-failed`), journaled,
    exactly as function 5, invariant 2; like any error outcome, it withholds.
 2. Postconditions are evaluated ONCE per step pass, at the step-ended boundary — the step's

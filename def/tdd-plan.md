@@ -397,6 +397,31 @@ first:
   "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
   with the core when the adapters are.
 
+**Spec ahead of implementation — the condition language.** The core spec (function 5,
+invariant 2; function 10, invariant 1) replaces the `stateCondition` CEL vocabulary: the
+`artifacts['<kind>']` map and the `artifact` constant are gone, and `setQuery` /
+`setPredicate` read `workspace` (artifact instances: `kind`, `path`, `data`), `workflows` and
+`steps` (workflow and step instances from this machine's logs), `workflow` and `step` (the
+current ones), and `selected`. The condition keys are unchanged. The implementation change
+owes, each with its red tests first:
+
+- `ConditionEvaluator` — the CEL activation: `workspace` from the evaluated state (the
+  workspace branch for function 5, the step state for function 10); `workflows` and `steps`
+  from the logs, `steps` oldest first, with `s.outcome` and `s.artifact` from each step
+  instance's function-10 outcome and `artifactDelivery`; in a step's own postconditions, the
+  current step instance `in-flight`, its `artifact` the delivery being evaluated;
+- `ConfigLoader` — the typing check, by an AST walk with scope tracking: an `a.data.<p>` read
+  is valid only under a kind guard in the same macro (`a.kind == '<literal>'`, or a path join
+  with a step instance of a literal step of a known workflow), `<p>` is checked against that
+  kind's schema, and an unguarded read, an unknown kind, an unknown step or workflow slug, or
+  — in a precondition — a reference to a current-workflow step that is not a declared
+  predecessor is a configuration load error;
+- loading only the kinds the guards reference, where possible;
+- runtime CEL errors stay `state-error` (`condition-evaluation-failed`); a false predicate
+  stays a normal `fail`;
+- the conditions of the fixture and golden workflow configurations, rewritten in the new
+  vocabulary.
+
 **Resolved since 2026-08-21.** The `Makefile` is no longer stale: `verify` runs the whole
 pytest suite, `unit` / `functional` / `adapter` run one plane each, `test` aliases `verify`, and
 the `check-catalog` / `tests/integration/` references are gone.
