@@ -321,7 +321,7 @@ workspace branch) or reverts it.
 **Out** — reverted:
 
 ```json
-{ "decision": "block", "reason": "check-step-artifact reverted …: frontmatter.status: 'shipped' is not one of the enum values", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its schema and retry." } }
+{ "decision": "block", "reason": "check-step-artifact reverted …: frontmatter.status: 'shipped' is not one of the enum values (restored from HEAD)", "hookSpecificOutput": { "hookEventName": "PostToolUse", "additionalContext": "The write was discarded (… restored from HEAD). Rewrite the artifact to satisfy its schema and retry." } }
 ```
 
 **H6 `PostToolUse` — dispatch class — step-ended.** THE evaluation point (function 10) — the
@@ -1235,10 +1235,10 @@ mirroring H3's fail-closed denial.
 ```json
 {
   "decision": "block",
-  "reason": "check-step-artifact reverted portfolio/payments/features/feature-refunds.md: frontmatter.status: 'shipped' is not one of the enum values",
+  "reason": "check-step-artifact reverted portfolio/payments/features/feature-refunds.md: frontmatter.status: 'shipped' is not one of the enum values (restored from HEAD)",
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "The write was discarded (restored from HEAD). Rewrite the artifact to satisfy its schema and retry."
+    "additionalContext": "The write was discarded (portfolio/payments/features/feature-refunds.md restored from HEAD). Rewrite the artifact to satisfy its schema and retry."
   }
 }
 ```
