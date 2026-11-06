@@ -756,3 +756,18 @@ class TestSessionLifecycle:
 
         assert report.outcome.status == "system-error"
         assert report.outcome.error.code == "log-append-failed"
+
+
+class TestLogsExclusion:
+    def test_a_root_registration_excludes_the_logs_path_from_git(
+        self, lifecycle: SessionLifecycle, workspace: Path
+    ) -> None:
+        """Logging: the harness adds the logs path to `.git/info/exclude`, so no
+        commit ever picks up a log — from the very first (root) session's log on."""
+        report = lifecycle.start_session(
+            agent="orchestrator", session_id="sess-root", parent_session_id=None
+        )
+
+        assert report.outcome.status == "started"
+        assert "/logs/" in (workspace / ".git" / "info" / "exclude").read_text().splitlines()
+        assert _run_git(workspace, "status", "--porcelain", "--untracked-files=all") == ""

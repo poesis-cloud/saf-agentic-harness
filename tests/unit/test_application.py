@@ -187,6 +187,8 @@ def framework_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (root / "instructions" / f"{instruction}.instructions.md").write_text(
             "# instructions\n", encoding="utf-8"
         )
+    # The governed workspace is a Git repository: registration excludes the logs path.
+    _init_git_workspace(workspace)
     return root
 
 
@@ -450,7 +452,6 @@ class TestApplication:
         invariant 1).
         """
         workspace = _workspace_dir(framework_root)
-        _init_git_workspace(workspace)
         application = Application(framework_root)
         application.dispatch_command(
             ["start-session", "--session-id", "o1", "--agent", "facilitator"]

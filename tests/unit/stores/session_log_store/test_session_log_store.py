@@ -464,3 +464,119 @@ class TestSessionLogStoreSlugConstraint:
         assert raised.value.code == "invalid-inquiry"
         assert not (tmp_path / "escape.log.jsonl").exists()
 
+
+
+def _worker_start(session_id: str, parent: str, timestamp: str, agent: str = "agent-a") -> LogEntry:
+    return LogEntry(
+        timestamp=timestamp,
+        report=Report(
+            context=Context(function="start-session", session_id=session_id, parent_session_id=parent),
+            outcome=Outcome(status="started"),
+            payload={"session": {"agent": agent, "sessionId": session_id, "parentSessionId": parent}},
+        ),
+    )
+
+
+def _outcome(timestamp: str, status: str, path: str | None, session_id: str = "orch-1") -> LogEntry:
+    """A function-10 entry: `pass`/`fail` with a delivery, or an error outcome without one."""
+    if status not in ("pass", "fail"):
+        return LogEntry(
+            timestamp=timestamp,
+            report=Report(
+                context=Context(
+                    function="check-step-postconditions",
+                    session_id=session_id,
+                    workflow_instance_id="flow-01AB",
+                ),
+                outcome=Outcome(
+                    status=status,
+                    error=Error(code="step-rebase-conflict", message="moved", retryable=False),
+                ),
+            ),
+        )
+    delivery = {"artifact": "sample", "artifactPath": path, "outcome": "pass" if path else "fail"}
+    if path is None:
+        delivery["failureMessage"] = "nothing delivered"
+    return _entry(
+        timestamp,
+        "check-step-postconditions",
+        status,
+        session_id=session_id,
+        workflow_instance_id="flow-01AB",
+        payload={
+            "conditionChecks": [],
+            "artifactDelivery": delivery,
+            "promotion": {
+                "outcome": "promoted" if status == "pass" else "withheld",
+                "workspaceCommit": "0" * 40,
+            },
+        },
+    )
+
+
+class TestStepInstances:
+    """Function 5, invariant 2: `steps` and `workflows` — the instances the logs record."""
+
+    def _journal(self, store: SessionLogStore, *entries: LogEntry, session_id: str = "orch-1") -> None:
+        for entry in entries:
+            store.append_log_entry(session_id, entry)
+
+    def test_maps_each_worker_session_to_its_step_instance_and_outcome(self, tmp_path: Path) -> None:
+        """Step instance fields: `pass` when its function-10 outcome passed; `fail` for a
+        `fail` OR an error outcome; `in-flight` while none concludes it (a crashed one
+        stays `in-flight`). `artifact` comes from `artifactDelivery` when it names an
+        `artifactPath`; an error outcome carries none. Oldest first."""
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry("orch-1", "2026-08-17T13:00:00Z"))
+        timeline = [
+            ("w-pass", "draft", "pass", "sample/a.json"),
+            ("w-fail", "review", "fail", None),
+            ("w-error", "review", "state-error", None),
+            ("w-crash", "review", None, None),
+        ]
+        for index, (worker, step, status, path) in enumerate(timeline):
+            minute = 10 + index * 10
+            self._journal(store, _resolution(f"2026-08-17T13:{minute}:00Z", "flow-01AB", step, session_id="orch-1"))
+            store.create_session_log(_worker_start(worker, "orch-1", f"2026-08-17T13:{minute}:30Z"))
+            if status is not None:
+                self._journal(store, _outcome(f"2026-08-17T13:{minute + 5}:00Z", status, path))
+
+        instances = store.list_step_instances()
+
+        assert [
+            (i.session_id, i.step_slug, i.workflow_instance_id, i.actor, i.outcome, i.artifact_path)
+            for i in instances
+        ] == [
+            ("w-pass", "draft", "flow-01AB", "agent-a", "pass", "sample/a.json"),
+            ("w-fail", "review", "flow-01AB", "agent-a", "fail", None),
+            ("w-error", "review", "flow-01AB", "agent-a", "fail", None),
+            ("w-crash", "review", "flow-01AB", "agent-a", "in-flight", None),
+        ]
+        assert instances[0].artifact_kind == "sample"
+        assert store.list_workflow_instance_ids() == ("flow-01AB",)
+
+    def test_a_retry_correlates_to_its_own_resolution(self, tmp_path: Path) -> None:
+        """A retry is a new step instance: each worker session correlates to the
+        resolution it registered under, and to the outcome that concluded it."""
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry("orch-1", "2026-08-17T13:00:00Z"))
+        self._journal(store, _resolution("2026-08-17T13:10:00Z", "flow-01AB", "draft", session_id="orch-1"))
+        store.create_session_log(_worker_start("w-1", "orch-1", "2026-08-17T13:10:30Z"))
+        self._journal(store, _outcome("2026-08-17T13:15:00Z", "fail", None))
+        self._journal(store, _resolution("2026-08-17T13:20:00Z", "flow-01AB", "draft", session_id="orch-1"))
+        store.create_session_log(_worker_start("w-2", "orch-1", "2026-08-17T13:20:30Z"))
+
+        instances = store.list_step_instances()
+
+        assert [(i.session_id, i.outcome) for i in instances] == [("w-1", "fail"), ("w-2", "in-flight")]
+
+    def test_a_foreign_worker_session_is_no_step_instance(self, tmp_path: Path) -> None:
+        """Only a registration correlated to an unresolved resolution of its parent, naming
+        the resolved actor, is a step instance (function 0, invariant 5)."""
+        store = SessionLogStore(tmp_path)
+        store.create_session_log(_start_entry("orch-1", "2026-08-17T13:00:00Z"))
+        self._journal(store, _resolution("2026-08-17T13:10:00Z", "flow-01AB", "draft", session_id="orch-1"))
+        store.create_session_log(_worker_start("w-other", "orch-1", "2026-08-17T13:10:30Z", agent="agent-b"))
+        store.create_session_log(_worker_start("w-early", "orch-1", "2026-08-17T13:05:00Z"))
+
+        assert store.list_step_instances() == ()

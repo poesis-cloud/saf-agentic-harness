@@ -323,7 +323,12 @@ class SessionLifecycle:
         return candidates[-1][1]
 
     def _register_session(self, context: Context, agent: str) -> SessionStartReport:
-        """Write the registration entry as the new log's first line."""
+        """Write the registration entry as the new log's first line.
+
+        Logging: the logs path is excluded from Git (`.git/info/exclude`) before any
+        session's log exists — root sessions included — so no commit, the
+        harness's or a human's, ever picks a log up.
+        """
         report = SessionStartReport(
             context=context,
             outcome=Outcome(status="started"),
@@ -334,6 +339,7 @@ class SessionLifecycle:
             ),
         )
         try:
+            self._artifact_store.exclude_logs_path()
             self._session_log_store.create_session_log(
                 LogEntry(timestamp=self._clock.read_timestamp(), report=report)
             )
