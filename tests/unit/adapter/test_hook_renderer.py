@@ -470,6 +470,7 @@ class TestHookRenderer:
                 "pass",
                 conditionChecks=[],
                 artifactDelivery=DELIVERED,
+                promotion={"outcome": "promoted", "workspaceCommit": "0" * 40},
             )
         )
 
@@ -499,6 +500,7 @@ class TestHookRenderer:
                     }
                 ],
                 artifactDelivery=DELIVERED,
+                promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
             )
         )
 
@@ -530,6 +532,7 @@ class TestHookRenderer:
                     "outcome": "fail",
                     "failureMessage": "step 'review' delivered no 'review-report' instance",
                 },
+                promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
             )
         )
 

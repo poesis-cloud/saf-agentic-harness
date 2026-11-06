@@ -603,3 +603,63 @@ class TestStepResolutionReport:
             },
             "outcome": {"status": "no-next-step"},
         }
+
+
+class TestSingleDriver:
+    """Function 3, invariant 10: one live driver per workflow instance."""
+
+    NEXT_DRIVER = "orchestrator-2"
+
+    def _orphan_a_resolution(self, log_store: SessionLogStore) -> None:
+        """The first driver resolves `build` and never concludes it."""
+        start_session_log(log_store)
+        append_resolution(log_store, "2026-08-17T13:01:00Z", "build")
+        start_session_log(log_store, session_id=self.NEXT_DRIVER, timestamp="2026-08-17T14:00:00Z")
+
+    def test_a_live_driver_holding_an_unfinished_resolution_makes_the_instance_busy(
+        self, log_store: SessionLogStore, workspace_dir: Path
+    ) -> None:
+        """Another orchestrator session that has not ended holds an unfinished step
+        resolution in the deduced workflow instance — `state-error`
+        (`workflow-instance-busy`), journaled with no `workflowInstanceId`."""
+        self._orphan_a_resolution(log_store)
+        resolver = _build_resolver(log_store, build_step("build"))
+
+        report = resolver.resolve_step(self.NEXT_DRIVER, None, WORKFLOW_SLUG)
+
+        assert (report.outcome.status, report.outcome.error.code) == (
+            "state-error",
+            "workflow-instance-busy",
+        )
+        assert report.context.workflow_instance_id is None
+        journaled = read_entries(workspace_dir, self.NEXT_DRIVER)[-1]["report"]
+        assert journaled["outcome"]["error"]["code"] == "workflow-instance-busy"
+        assert journaled["context"]["workflowInstanceId"] is None
+
+    def test_an_ended_driver_lets_the_next_session_continue_the_instance(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Once the previous driver has ended (C8), a later orchestrator session
+        continues the workflow instance: the step is re-resolved (function 10,
+        invariant 7 — crash recovery)."""
+        self._orphan_a_resolution(log_store)
+        append_ending(log_store, timestamp="2026-08-17T13:30:00Z")
+        resolver = _build_resolver(log_store, build_step("build"))
+
+        report = resolver.resolve_step(self.NEXT_DRIVER, None, WORKFLOW_SLUG)
+
+        assert report.outcome.status == "step-resolution"
+        assert report.context.workflow_instance_id == INSTANCE_ID
+        assert report.step.slug == "build"
+
+    def test_the_drivers_own_unfinished_resolution_stays_step_in_flight(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """Invariant 9: the session's own in-flight step is `step-in-flight`, not busy."""
+        start_session_log(log_store)
+        append_resolution(log_store, "2026-08-17T13:01:00Z", "build")
+        resolver = _build_resolver(log_store, build_step("build"))
+
+        report = resolver.resolve_step(ORCHESTRATOR_SESSION, None, WORKFLOW_SLUG)
+
+        assert report.outcome.error.code == "step-in-flight"

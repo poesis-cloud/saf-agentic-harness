@@ -11,6 +11,7 @@ cannot exercise either resolution.
 from __future__ import annotations
 
 import json
+import subprocess
 from typing import Any, Callable, Mapping
 
 from functional_fixtures import FunctionalHarness, build_capabilities, run_git
@@ -158,6 +159,27 @@ DELIVERY_WORKFLOW: Mapping[str, Any] = {
     ],
 }
 
+# The reviewer's own workflow, so a `reviewer` worker session exists for feature writes:
+# every artifact write happens inside a governed step instance (function 8, invariant 7).
+FEATURE_DELIVERY_WORKFLOW: Mapping[str, Any] = {
+    "slug": "feature-delivery",
+    "orchestrator": "orchestrator",
+    "skills": ["workflow-selection"],
+    "instructions": ["workflow-selection-handling"],
+    "steps": [
+        {
+            "slug": "draft-feature",
+            "actor": "reviewer",
+            "artifact": "feature",
+            "instructions": ["draft-guidance"],
+            "capabilities": build_capabilities(writing_quality=6),
+        }
+    ],
+}
+
+# The workflow whose single step each step actor acts — what `open_session` resolves.
+_ACTOR_WORKFLOWS: Mapping[str, str] = {"builder": "delivery", "reviewer": "feature-delivery"}
+
 
 def _artifact_schema(slug: str) -> Mapping[str, Any]:
     """Build one fixture artifact schema extending the harness base contract.
@@ -191,7 +213,10 @@ def build_write_boundary_harness(
 ) -> FunctionalHarness:
     """Assemble the nested write-boundary rig: layout, ACL, workflow, and schemas."""
     harness = build_harness(
-        workflows={"delivery": DELIVERY_WORKFLOW},
+        workflows={
+            "delivery": DELIVERY_WORKFLOW,
+            "feature-delivery": FEATURE_DELIVERY_WORKFLOW,
+        },
         access_control_list=WRITE_BOUNDARY_ACL,
         workspace_layout=workspace_layout or NESTED_WORKSPACE_LAYOUT,
     )
@@ -200,9 +225,77 @@ def build_write_boundary_harness(
 
 
 def open_session(harness: FunctionalHarness, session_id: str, agent: str) -> str:
-    """Register one agent's session and answer its id — function 8's actor source."""
-    harness.invoke("start-session", sessionId=session_id, agent=agent)
+    """Register one agent's session and answer its id — function 8's actor source.
+
+    A step actor's session is a WORKER session: an orchestrator session
+    (`<session_id>-orchestrator`) resolves the actor's step, and function 0 registers
+    the worker under it, creating its step ref (function 0, invariant 6). Any other
+    agent opens a root session.
+    """
+    workflow = _ACTOR_WORKFLOWS.get(agent)
+    if workflow is None:
+        harness.invoke("start-session", sessionId=session_id, agent=agent)
+        return session_id
+    orchestrator = f"{session_id}-orchestrator"
+    harness.invoke("start-session", sessionId=orchestrator, agent="orchestrator")
+    resolved = harness.invoke("resolve-step", sessionId=orchestrator, workflowSlug=workflow)
+    assert resolved.status == "step-resolution", resolved.stdout
+    started = harness.invoke(
+        "start-session", sessionId=session_id, parentSessionId=orchestrator, agent=agent
+    )
+    assert started.status == "started", started.stdout
     return session_id
+
+
+def find_step_ref(harness: FunctionalHarness, session_id: str) -> str | None:
+    """Find the step ref of the step instance a worker session IS, if any."""
+    listing = run_git(
+        harness.workspace_dir, "for-each-ref", "--format=%(refname)", "refs/harness/steps/"
+    )
+    for name in listing.split():
+        if name.rsplit("/", 1)[-1] == session_id:
+            return name
+    return None
+
+
+def read_step_ref_tip(harness: FunctionalHarness, session_id: str) -> str:
+    """Read the commit a worker session's step ref points at."""
+    ref = find_step_ref(harness, session_id)
+    assert ref is not None, f"no step ref for {session_id}"
+    return run_git(harness.workspace_dir, "rev-parse", ref).strip()
+
+
+def read_step_ref_file(harness: FunctionalHarness, session_id: str, path: str) -> str:
+    """Read one path's bytes at a worker session's step ref tip."""
+    return run_git(harness.workspace_dir, "show", f"{read_step_ref_tip(harness, session_id)}:{path}")
+
+
+def list_step_ref_paths(harness: FunctionalHarness, session_id: str) -> tuple[str, ...]:
+    """List every path at a worker session's step ref tip."""
+    listing = run_git(
+        harness.workspace_dir, "ls-tree", "-r", "--name-only", read_step_ref_tip(harness, session_id)
+    )
+    return tuple(sorted(line for line in listing.splitlines() if line))
+
+
+def find_artifact_lock_holder(harness: FunctionalHarness, path: str) -> str | None:
+    """Read the step ref name an artifact lock names, or none when the path is unlocked."""
+    ref = f"refs/harness/locks/{path}"
+    probe = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", ref],
+        cwd=harness.workspace_dir,
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        return None
+    return run_git(harness.workspace_dir, "cat-file", "blob", probe.stdout.strip())
+
+
+def count_step_ref_commits(harness: FunctionalHarness, session_id: str) -> int:
+    """Count the commits a worker session's step ref carries beyond `HEAD`."""
+    tip = read_step_ref_tip(harness, session_id)
+    return int(run_git(harness.workspace_dir, "rev-list", "--count", f"HEAD..{tip}").strip())
 
 
 def epic_markdown(slug: str, status: str) -> str:
@@ -257,6 +350,7 @@ __all__ = [
     "AMBIGUOUS_WORKSPACE_LAYOUT",
     "BASE_ARTIFACT_CONTRACT_ID",
     "DELIVERY_WORKFLOW",
+    "FEATURE_DELIVERY_WORKFLOW",
     "EPIC_REF",
     "FEATURE_REF",
     "LOGS_REF",
@@ -267,6 +361,12 @@ __all__ = [
     "WRITE_BOUNDARY_ACL",
     "build_write_boundary_harness",
     "commit_write",
+    "count_step_ref_commits",
+    "find_artifact_lock_holder",
+    "find_step_ref",
+    "list_step_ref_paths",
+    "read_step_ref_file",
+    "read_step_ref_tip",
     "epic_markdown",
     "feature_json",
     "install_artifact_schemas",

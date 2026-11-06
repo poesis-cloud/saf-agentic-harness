@@ -218,7 +218,7 @@ def append_outcome(
     session_id: str = STEP_SESSION,
     workflow_instance_id: str = INSTANCE_ID,
 ) -> None:
-    """Journal a function 10 postcondition outcome into a step session log."""
+    """Journal a function 10 postcondition outcome into a worker session log."""
     store.append_log_entry(
         session_id,
         build_entry(
@@ -230,6 +230,7 @@ def append_outcome(
             payload={
                 "conditionChecks": build_condition_checks(status),
                 "artifactDelivery": DELIVERED,
+                "promotion": {"outcome": "promoted" if status == "pass" else "withheld", "workspaceCommit": "0" * 40},
             },
         ),
     )

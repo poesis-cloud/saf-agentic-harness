@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from config import AccessControlList
+from config import AccessControlList, WorkspaceLayout
 from errors import InquiryError, StateError, SystemFailureError
 from services.session_lifecycle import SessionLifecycle
+from stores.artifact_store import ArtifactStore
 from stores.session_log_store import (
     Context,
     Log,
@@ -129,7 +131,11 @@ def _postconditions_entry(
         "pass",
         session_id,
         workflow_instance_id=workflow_instance_id,
-        payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
+        payload={
+            "conditionChecks": [],
+            "artifactDelivery": DELIVERED,
+            "promotion": {"outcome": "promoted", "workspaceCommit": "0" * 40},
+        },
     )
 
 
@@ -166,10 +172,27 @@ class _FailingSessionLogStore:
         raise SystemFailureError("log-append-failed", "Log append failed.", True)
 
 
+def _run_git(workspace: Path, *args: str) -> str:
+    """Run one Git command in the tmp workspace, failing loudly."""
+    return subprocess.run(
+        ("git", *args), cwd=workspace, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> Path:
-    """Provide an empty tmp-dir workspace."""
+    """Provide a tmp-dir Git workspace with a baseline commit — the step refs' base."""
+    _run_git(tmp_path, "init", "-q")
+    _run_git(tmp_path, "config", "user.email", "test@example.com")
+    _run_git(tmp_path, "config", "user.name", "Test User")
+    _run_git(tmp_path, "commit", "-q", "--allow-empty", "-m", "baseline")
     return tmp_path
+
+
+@pytest.fixture
+def artifact_store(workspace: Path) -> ArtifactStore:
+    """Provide the real artifact store — function 0 creates step refs through it."""
+    return ArtifactStore(workspace, {}, WorkspaceLayout(nodes=()))
 
 
 @pytest.fixture
@@ -179,11 +202,14 @@ def session_log_store(workspace: Path) -> SessionLogStore:
 
 
 @pytest.fixture
-def lifecycle(session_log_store: SessionLogStore) -> SessionLifecycle:
+def lifecycle(
+    session_log_store: SessionLogStore, artifact_store: ArtifactStore
+) -> SessionLifecycle:
     """Provide the service under test with its injected collaborators."""
     return SessionLifecycle(
         session_log_store=session_log_store,
         access_control_list=_ACL,
+        artifact_store=artifact_store,
     )
 
 
@@ -257,7 +283,7 @@ class TestSessionLifecycle:
     def test_start_session_registers_a_step_session_correlated_to_its_parent(
         self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore
     ) -> None:
-        """Spec function 0, precondition (E) — the correlation gate: for a step session
+        """Spec function 0, precondition (E) — the correlation gate: for a worker session
         the parent's unresolved step resolution naming this agent IS the check."""
         session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
         session_log_store.append_log_entry(
@@ -316,8 +342,8 @@ class TestSessionLifecycle:
         read_journal,
     ) -> None:
         """Spec function 0, invariant 5: 1 step = 1 session — a resolution that already
-        registered its step session refuses a second one with `state-error`
-        (`step-session-bound`), returned but never journaled (Outcomes rule 4)."""
+        registered its worker session refuses a second one with `state-error`
+        (`worker-session-bound`), returned but never journaled (Outcomes rule 4)."""
         session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
         session_log_store.append_log_entry(
             "sess-root", _resolution_entry("sess-root", actor="reviewer")
@@ -331,7 +357,7 @@ class TestSessionLifecycle:
         )
 
         assert report.outcome.status == "state-error"
-        assert report.outcome.error.code == "step-session-bound"
+        assert report.outcome.error.code == "worker-session-bound"
         assert report.session is None
         assert not (workspace / "logs" / "sess-second.log.jsonl").exists()
         assert len(read_journal("sess-root")) == 2
@@ -340,7 +366,7 @@ class TestSessionLifecycle:
     def test_start_session_still_replays_the_bound_step_session(
         self, lifecycle: SessionLifecycle, session_log_store: SessionLogStore, read_journal
     ) -> None:
-        """Spec function 0, invariants 4-5: the bound step session's own redelivered
+        """Spec function 0, invariants 4-5: the bound worker session's own redelivered
         start is a replay, not a second session."""
         session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
         session_log_store.append_log_entry(
@@ -362,7 +388,7 @@ class TestSessionLifecycle:
     ) -> None:
         """Spec function 0, invariant 5: recovery is the initial spec's — function 10
         concludes the step, the orchestrator re-resolves it, and the NEW resolution
-        admits a new step session."""
+        admits a new worker session."""
         session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
         session_log_store.append_log_entry(
             "sess-root", _resolution_entry("sess-root", actor="reviewer")
@@ -386,6 +412,7 @@ class TestSessionLifecycle:
                         "outcome": "fail",
                         "failureMessage": "Step 'review' committed no 'story'.",
                     },
+                    "promotion": {"outcome": "withheld", "workspaceCommit": "0" * 40},
                 },
             ),
         )
@@ -512,12 +539,15 @@ class TestSessionLifecycle:
         assert report.session is None
         assert len(read_journal("sess-root")) == 2
 
-    def test_start_session_reports_a_system_error_when_log_creation_fails(self) -> None:
+    def test_start_session_reports_a_system_error_when_log_creation_fails(
+        self, artifact_store: ArtifactStore
+    ) -> None:
         """Spec Outcomes rule 1, `system-error`: the environment fails (log creation
         failing) — the report is still returned; the entry is lost."""
         lifecycle = SessionLifecycle(
             session_log_store=_FailingSessionLogStore(),
             access_control_list=_ACL,
+            artifact_store=artifact_store,
         )
 
         report = lifecycle.start_session(
@@ -616,7 +646,7 @@ class TestSessionLifecycle:
         from a session's log is not a fault condition anywhere else in this contract.
 
         A session whose closure was never observed (host crash, force-quit) stays fully
-        serviceable: its registration still replays as `started`, and a step session still
+        serviceable: its registration still replays as `started`, and a worker session still
         correlates to it. Nothing reads the missing ending entry as an error.
         """
         session_log_store.create_session_log(_start_entry("sess-root", "orchestrator"))
@@ -690,13 +720,16 @@ class TestSessionLifecycle:
         assert raised.value.code == "invalid-inquiry"
         assert not (workspace / "logs").exists()
 
-    def test_a_conflict_whose_entry_is_lost_keeps_its_primary_error(self) -> None:
+    def test_a_conflict_whose_entry_is_lost_keeps_its_primary_error(
+        self, artifact_store: ArtifactStore
+    ) -> None:
         """Spec Outcomes rule 1, `system-error`: an error report whose own entry is lost
         keeps its primary error — `session-conflict` stays a non-retryable refusal."""
         log = Log(session_id="sess-root", entries=(_start_entry("sess-root", "orchestrator"),))
         lifecycle = SessionLifecycle(
             session_log_store=_FailingSessionLogStore(log),
             access_control_list=_ACL,
+            artifact_store=artifact_store,
         )
 
         report = lifecycle.start_session(
@@ -707,16 +740,51 @@ class TestSessionLifecycle:
         assert report.outcome.error.code == "session-conflict"
         assert report.outcome.error.retryable is False
 
-    def test_end_session_reports_a_system_error_when_the_append_fails(self) -> None:
+    def test_end_session_reports_a_system_error_when_the_append_fails(
+        self, artifact_store: ArtifactStore
+    ) -> None:
         """Spec Outcomes rule 1, `system-error`: log append failing still returns the
         report; the entry is lost — best-effort."""
         log = Log(session_id="sess-root", entries=(_start_entry("sess-root", "orchestrator"),))
         lifecycle = SessionLifecycle(
             session_log_store=_FailingSessionLogStore(log),
             access_control_list=_ACL,
+            artifact_store=artifact_store,
         )
 
         report = lifecycle.end_session(session_id="sess-root")
 
         assert report.outcome.status == "system-error"
         assert report.outcome.error.code == "log-append-failed"
+
+
+class TestLogsExclusion:
+    def test_a_root_registration_excludes_the_logs_path_from_git(
+        self, lifecycle: SessionLifecycle, workspace: Path
+    ) -> None:
+        """Logging: the harness adds the logs path to `.git/info/exclude`, so no
+        commit ever picks up a log — from the very first (root) session's log on."""
+        report = lifecycle.start_session(
+            agent="orchestrator", session_id="sess-root", parent_session_id=None
+        )
+
+        assert report.outcome.status == "started"
+        assert "/logs/" in (workspace / ".git" / "info" / "exclude").read_text().splitlines()
+        assert _run_git(workspace, "status", "--porcelain", "--untracked-files=all") == ""
+
+    def test_an_unwritable_exclude_file_is_a_structured_system_error(
+        self, lifecycle: SessionLifecycle, workspace: Path
+    ) -> None:
+        """Rule 1: the environment failing is the uniform `system-error` — a report,
+        never a raw exception — and the session is not registered."""
+        exclude = workspace / ".git" / "info" / "exclude"
+        exclude.unlink(missing_ok=True)
+        exclude.mkdir(parents=True)
+
+        report = lifecycle.start_session(
+            agent="orchestrator", session_id="sess-root", parent_session_id=None
+        )
+
+        assert report.outcome.status == "system-error"
+        assert report.outcome.error.code == "logs-exclude-failed"
+        assert not (workspace / "logs" / "sess-root.log.jsonl").exists()

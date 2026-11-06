@@ -24,6 +24,10 @@ adapters/github-copilot-cli/
 - **Python 3.10 or newer**, in a virtual environment that holds `requirements.txt`. The
   installer records that interpreter's absolute path in every hook, so hooks never depend on
   `PATH`, on bash, or on a `python` alias.
+- **Git ≥ 2.38** on `PATH` (the harness rebases step instances in memory with
+  `git merge-tree --write-tree`), and a **Git identity in the governed workspace**
+  (`git config user.name` / `user.email`, in the workspace repository or globally): the
+  harness commits every validated write onto its step instance's step ref.
 - A **framework checkout**, e.g. [`saf-agentic-organization`](https://github.com/poesis-cloud/saf-agentic-organization).
   It must contain `.env`, `workflows/`, `instructions/`, `skills/` and `workspace/`.
 - The framework's **Copilot plugin bundle**, rendered by the framework itself. For
@@ -122,7 +126,7 @@ either checkout or recreating the venv.
    A plugin agent is named `<plugin-name>:<agent>` by the runtime (for
    `saf-agentic-organization`: `poesis-saf-agentic-organization:release-train-engineer`), and
    so is the `agent_type` of every `task` dispatch of a plugin agent; a bare name is refused
-   by the runtime. The adapter strips that namespace before opening the step session.
+   by the runtime. The adapter strips that namespace before opening the worker session.
    Its scoped hook opens the harness session. Every session also receives a short context
    from `sessionStart` naming the framework root, the workspace, and the exact harness command
    lines.
@@ -205,4 +209,4 @@ These are detailed, with their fallbacks, in the spec's *Limited or unsupported 
 - **Nested dispatch** (observed in the app): an orchestrator subagent that dispatches a step
   fires a `subagentStart` whose `sessionId` is unrelated. The dispatcher is read from
   `parentAgentId`. An orchestrator acting a step still fires its scoped hook. That hook
-  leaves the step session alone and never opens a root turn under a governed dispatcher.
+  leaves the worker session alone and never opens a root turn under a governed dispatcher.

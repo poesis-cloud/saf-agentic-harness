@@ -31,7 +31,7 @@
             "null"
           ],
           "pattern": "^[0-9a-f]{40,64}$",
-          "description": "The Git object id of the one commit that promoted the validated set into workspace state, or null when nothing was committed (every path byte-identical to HEAD — function 9, invariant 4)."
+          "description": "The Git object id of the one commit that committed the validated set onto the acting step instance's step ref, or null when nothing was committed (every path byte-identical to the step ref tip — function 9, invariant 4)."
         },
         "committedPaths": {
           "type": "array",
@@ -112,12 +112,12 @@
                       "restored",
                       "deleted"
                     ],
-                    "description": "Whether the file was restored from HEAD or deleted."
+                    "description": "Whether the path was restored (from the step ref tip when the step ref changed it, otherwise from HEAD) or deleted (a new path)."
                   },
                   "from": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "Source path restored from, when applicable."
+                    "description": "The ref the path was restored from — the step ref's name or HEAD — when restored."
                   }
                 },
                 "unevaluatedProperties": false,

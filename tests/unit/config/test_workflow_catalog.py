@@ -271,50 +271,172 @@ class TestConditionExpressionStaticValidation:
         with pytest.raises(ConfigurationError, match="does not compile"):
             config_loader.load_workflow_catalog(framework_root)
 
-    def test_rejects_an_artifact_slug_the_framework_declares_no_schema_for(self, config_loader, framework_root) -> None:
-        """Spec (function 5, invariant 2): an unresolvable slug is a hard error, not a false pass."""
+    def _load_with(self, config_loader, framework_root, **expressions):
+        """Load the planning workflow whose `review` precondition uses these expressions."""
         write_yaml(
             framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
-            workflow_yaml(set_query="artifacts['ghost']"),
+            workflow_yaml(**expressions),
+        )
+        return config_loader.load_workflow_catalog(framework_root)
+
+    @staticmethod
+    def _state_condition(catalog):
+        """Read the `review` step's `state-ready` condition back from the catalog."""
+        review = catalog.find_workflow("planning").steps[1]
+        return next(condition for condition in review.conditions if condition.slug == "state-ready")
+
+    @pytest.mark.parametrize(
+        ("set_query", "set_predicate", "code"),
+        [
+            pytest.param(
+                "workspace.filter(a, a.data.state == 'x')",
+                "size(selected) > 0",
+                "unguarded-artifact-data",
+                id="unguarded-data-read",
+            ),
+            pytest.param(
+                "workspace",
+                "selected.all(a, a.data.state == 'x')",
+                "unguarded-artifact-data",
+                id="unguarded-selected-read",
+            ),
+            pytest.param(
+                "workspace.filter(a, a.kind == 'ghost')",
+                "size(selected) > 0",
+                "unknown-artifact-kind",
+                id="unknown-kind",
+            ),
+            pytest.param(
+                "workspace.filter(a, a.kind == 'epic' && a.data.ghost == 'x')",
+                "size(selected) > 0",
+                "undeclared-artifact-property",
+                id="undeclared-property",
+            ),
+            pytest.param(
+                "steps.filter(s, s.slug == 'ghost')",
+                "size(selected) > 0",
+                "unknown-condition-step",
+                id="unknown-step",
+            ),
+            pytest.param(
+                "workflows.filter(w, w.slug == 'ghost')",
+                "size(selected) > 0",
+                "unknown-condition-workflow",
+                id="unknown-workflow",
+            ),
+            pytest.param(
+                "steps.filter(s, s.workflow == workflow.id && s.slug == 'review')",
+                "size(selected) > 0",
+                "precondition-step-not-predecessor",
+                id="not-a-predecessor",
+            ),
+            pytest.param(
+                "workspace.filter(a, a.path == step.artifact.path)",
+                "size(selected) > 0",
+                "precondition-step-path-join",
+                id="path-join-with-step",
+            ),
+            pytest.param(
+                "artifacts['epic']",
+                "size(selected) > 0",
+                "unknown-condition-variable",
+                id="retired-artifacts-map",
+            ),
+            pytest.param(
+                "workspace.filter(a, a.kind == artifact)",
+                "size(selected) > 0",
+                "unknown-condition-variable",
+                id="retired-artifact-constant",
+            ),
+        ],
+    )
+    def test_rejects_an_ill_typed_condition_at_load(
+        self, config_loader, framework_root, set_query, set_predicate, code
+    ) -> None:
+        """Spec (function 5, invariant 2, Typing): each of these is a configuration load
+        error, never a false pass — an unguarded `a.data` read, an unknown kind, an
+        undeclared property of the guarded kind, an unknown step or workflow slug, and,
+        in a precondition, a current-workflow step that is not a declared predecessor or
+        a path join with `step`. The retired `artifacts` map and `artifact` constant are
+        no variables of the condition language."""
+        with pytest.raises(ConfigurationError) as refused:
+            self._load_with(
+                config_loader, framework_root, set_query=set_query, set_predicate=set_predicate
+            )
+
+        assert refused.value.code == code
+        assert "state-ready" in refused.value.message
+
+    @pytest.mark.parametrize(
+        ("set_query", "set_predicate", "kinds"),
+        [
+            pytest.param(
+                "workspace.filter(a, a.kind == 'epic' && a.data.state == 'approved')",
+                "size(selected) > 0",
+                frozenset({"epic"}),
+                id="kind-guard",
+            ),
+            pytest.param(
+                "workspace.filter(a, steps.exists(s, s.workflow == workflow.id"
+                " && s.slug == 'draft' && s.outcome == 'pass' && s.artifact.path == a.path))",
+                "selected.all(a, a.data.state == 'approved')",
+                frozenset({"epic"}),
+                id="path-join-with-a-declared-predecessor",
+            ),
+            pytest.param(
+                "workspace.filter(a, workflows.exists(w, w.slug == 'planning'"
+                " && steps.exists(s, s.workflow == w.id && s.slug == 'draft'"
+                " && s.artifact.path == a.path)))",
+                "selected.exists(a, a.data.state == 'approved')",
+                frozenset({"epic"}),
+                id="path-join-through-a-literal-workflow",
+            ),
+            pytest.param(
+                "workspace.filter(a, steps.exists(s, s.slug == 'draft'"
+                " && s.artifact.path == a.path && workflows.exists(w, w.slug == 'planning'"
+                " && s.workflow == w.id)))",
+                "selected.exists(a, a.data.state == 'approved')",
+                frozenset({"epic"}),
+                id="workflow-fixed-in-a-nested-macro",
+            ),
+            pytest.param(
+                "workspace.map(a, a.kind == 'epic', a.data.state)",
+                "selected.all(state, state == 'approved')",
+                frozenset({"epic"}),
+                id="map-transform-under-its-predicates-guard",
+            ),
+            pytest.param(
+                "steps.filter(s, s.workflow == workflow.id && s.slug == 'draft' && s.outcome == 'pass')",
+                "size(selected) == 1",
+                frozenset(),
+                id="log-plane-only",
+            ),
+            pytest.param(
+                "workspace.filter(a, (a.kind == 'epic' && a.data.state == 'x')"
+                " || (a.kind == 'epic' && a.data.slug == 'y'))",
+                "size(selected) > 0",
+                None,
+                id="guards-under-or",
+            ),
+            pytest.param(
+                "workspace.all(a, a.kind == 'epic')",
+                "selected",
+                None,
+                id="all-reads-every-kind",
+            ),
+        ],
+    )
+    def test_admits_a_well_typed_condition_and_records_the_kinds_it_reads(
+        self, config_loader, framework_root, set_query, set_predicate, kinds
+    ) -> None:
+        """Spec (function 5, invariant 2, Typing): a `data` read is valid under a kind
+        guard in the same macro — `a.kind == '<literal>'`, or a path join with a step
+        instance of a literal step of a known workflow (the current one or a literal
+        one), its kind that step's declared artifact — and a macro over a guarded
+        `filter` result, `selected` included, reads that kind. The load records the
+        only kinds `workspace` needs (`None`: every kind), so only those are read."""
+        catalog = self._load_with(
+            config_loader, framework_root, set_query=set_query, set_predicate=set_predicate
         )
 
-        with pytest.raises(ConfigurationError, match="ghost"):
-            config_loader.load_workflow_catalog(framework_root)
-
-    def test_rejects_a_property_the_artifact_schema_does_not_declare(self, config_loader, framework_root) -> None:
-        """Spec (function 5, invariant 2): an undeclared property is a hard error, not a false pass.
-
-        `artifacts['<slug>'].<property>` is validated against that slug's artifact
-        schema — the direct access form, which is what the static reach covers.
-        """
-        write_yaml(
-            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
-            workflow_yaml(set_query="artifacts['epic'].ghost"),
-        )
-
-        with pytest.raises(ConfigurationError, match="ghost"):
-            config_loader.load_workflow_catalog(framework_root)
-
-    def test_admits_a_property_the_artifact_schema_declares(self, config_loader, framework_root) -> None:
-        """Spec (function 5, invariant 2): validation is against the slug's schema, not a blanket ban."""
-        write_yaml(
-            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
-            workflow_yaml(set_query="artifacts['epic'].state"),
-        )
-
-        assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
-
-    def test_admits_a_comprehension_variable_the_static_reach_cannot_follow(self, config_loader, framework_root) -> None:
-        """Spec (function 5, invariant 2): static validation covers the direct access form.
-
-        A property read through a macro-bound variable (`a.ghost` inside `.exists(a, ...)`)
-        is not a `artifacts['<slug>'].<property>` reference; resolving it would need a
-        scope-tracking CEL AST walk. The load compiles the expression and validates the
-        slug, and admits the comprehension body rather than reject it on a guess.
-        """
-        write_yaml(
-            framework_root / "conf" / "workflows" / "planning.workflow.conf.yaml",
-            workflow_yaml(set_query="artifacts['epic'].exists(a, a.ghost == 'x')"),
-        )
-
-        assert config_loader.load_workflow_catalog(framework_root).find_workflow("planning")
+        assert self._state_condition(catalog).workspace_kinds == kinds

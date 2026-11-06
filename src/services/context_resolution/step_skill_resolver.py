@@ -21,7 +21,7 @@ class StepSkillResolver(ContextResolver):
         session_id: str,
         parent_session_id: str | None = None,
     ) -> StepSkillsReport:
-        """Resolve the skill ids loaded at the step session's open."""
+        """Resolve the skill ids loaded at the worker session's open."""
         return self._resolve_session_context(session_id, parent_session_id)
 
     def _correlate_step_resolution(self, session_ref: Mapping[str, Any]) -> LogEntry:

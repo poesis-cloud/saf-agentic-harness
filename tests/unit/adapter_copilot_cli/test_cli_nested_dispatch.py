@@ -177,7 +177,7 @@ def test_session_end_closes_the_nested_step_under_the_root_orchestrator(rig: Rig
 
 def test_a_nested_step_harness_request_is_attributed_with_its_tracked_parent(rig: Rig) -> None:
     """Trial: the actor's `resolve-step` (refused `not-facilitator`) was journaled with a
-    null parent. The hook-executed H4 passes both host-observed ids: the step session and
+    null parent. The hook-executed H4 passes both host-observed ids: the worker session and
     the orchestrator session that opened it."""
     orchestrator = _open_orchestrator(rig)
     rig.fire("subagentStart", NESTED_START)

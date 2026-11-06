@@ -10,6 +10,8 @@ the process environment carrying the framework layout (Configuration plane).
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -158,8 +160,8 @@ PLANNING_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "precondition",
                     "slug": "report-approved",
-                    "setSelector": {"setQuery": "artifacts['report']"},
-                    "setPredicate": "selected.exists(a, a.state == 'approved')",
+                    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
+                    "setPredicate": "selected.exists(a, a.data.state == 'approved')",
                 },
             ],
         },
@@ -200,7 +202,7 @@ UNEVALUABLE_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "precondition",
                     "slug": "unevaluable",
-                    "setSelector": {"setQuery": "artifacts['report']"},
+                    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
                     "setPredicate": "selected",
                 }
             ],
@@ -314,8 +316,13 @@ class FunctionalHarness:
             check=False,
             cwd=REPO_ROOT,
             env={
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                # A stripped PATH, plus Git's own directory: Git is a harness
+                # prerequisite (step refs), and on Windows it lives elsewhere.
+                "PATH": os.pathsep.join(
+                    ("/usr/bin", "/bin", "/usr/local/bin", str(Path(shutil.which("git") or "git").parent))
+                ),
                 "FRAMEWORK_DIR": str(self.framework_dir),
+                **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if "SYSTEMROOT" in os.environ else {}),
             },
         )
         return CommandRun(
@@ -418,7 +425,7 @@ class FunctionalHarness:
     ) -> CommandRun:
         """Deliver the in-flight step's report, then conclude it through function 10.
 
-        The rig binds every step's `report` kind under `report/`; the step session's id
+        The rig binds every step's `report` kind under `report/`; the worker session's id
         is the report's state, so re-executing a step never writes byte-identical bytes.
         """
         step = next(
@@ -438,7 +445,7 @@ class FunctionalHarness:
         return self.invoke("check-step-postconditions", sessionId=parent_session_id)
 
     def _next_step_session_id(self, agent: str) -> str:
-        """Mint a step session id no earlier session of this rig used."""
+        """Mint a worker session id no earlier session of this rig used."""
         logged = len(list((self.workspace_dir / "logs").glob(f"*{LOG_FILE_SUFFIX}")))
         return f"{agent}-step-{logged}"
 

@@ -244,7 +244,7 @@ class TestAdapter:
     ) -> None:
         """Adapter spec H1: function 0 carries `agent_type` as the actor, the sanitized
         `agent_id` as the session, and the dispatching orchestrator's CURRENT agent
-        session as parent; after resolving the parent the adapter PUSHES the step session
+        session as parent; after resolving the parent the adapter PUSHES the worker session
         as current, then resolves functions 6 and 7.
         """
         runner = FakeCommandRunner()
@@ -848,7 +848,7 @@ class TestAdapter:
         self, make_adapter, tracker: SessionTracker, assert_valid_stdout
     ) -> None:
         """Adapter spec H4, rule 3: attribution is the tracker's current session for the
-        envelope `session_id` — inside a dispatched subagent that is the step session.
+        envelope `session_id` — inside a dispatched subagent that is the worker session.
         """
         runner = FakeCommandRunner()
         adapter = make_adapter(runner)
@@ -869,7 +869,7 @@ class TestAdapter:
     def test_journals_a_step_request_with_the_tracked_parent_session(
         self, make_adapter, tracker: SessionTracker
     ) -> None:
-        """Core mediated attribution: a step session's request carries both its session
+        """Core mediated attribution: a worker session's request carries both its session
         and the parent the tracker observed opening it, never a null parent.
         """
         runner = FakeCommandRunner()
@@ -1138,6 +1138,7 @@ class TestAdapter:
                             }
                         ],
                         artifactDelivery=DELIVERED,
+                        promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
                     )
                 ]
             )
@@ -1372,7 +1373,7 @@ class TestAdapter:
 
 class TestFailedRegistration:
     """Core rule 2: only `not-applicable` leaves a session ungoverned. A failed
-    `start-session` (an error report, `step-session-bound` included, or no report) must not
+    `start-session` (an error report, `worker-session-bound` included, or no report) must not
     let the session's writes and dispatches bypass authorization: they are denied."""
 
     @staticmethod
@@ -1441,7 +1442,7 @@ class TestFailedRegistration:
             reports=queue_reports(
                 start_session=[
                     build_error_report(
-                        "start-session", code="step-session-bound", message="already bound"
+                        "start-session", code="worker-session-bound", message="already bound"
                     )
                 ]
             )

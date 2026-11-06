@@ -49,7 +49,7 @@ class TestStepInstructionResolver:
         self, resolver: StepInstructionResolver, step_session: str, read_journal
     ) -> None:
         """Spec function 6, Postconditions: the invocation appends its own entry to the
-        step session's log — what was resolved, for which step."""
+        worker session's log — what was resolved, for which step."""
         resolver.resolve_step_instructions(
             session_id=step_session, parent_session_id="sess-orch"
         )

@@ -54,6 +54,13 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
 - Python 3.10–3.12.
 - Runtime: `pip install -r requirements.txt` (cel-python, jsonschema, PyYAML). Tests
   additionally need `pip install -r requirements-dev.txt`.
+- **Git ≥ 2.38** on `PATH`: step transactions rebase in memory with
+  `git merge-tree --write-tree` ([Workspace Git plane](def/core/spec.md#workspace-git-plane)).
+- **A Git identity in the governed workspace** (`git config user.name` and
+  `git config user.email` in the workspace repository, or globally): the harness commits
+  every validated write onto its step ref and replays step commits on promotion, so Git must
+  be able to name the committer. The harness's `refs/harness/*` refs (step refs, artifact
+  locks) are local-only: Git's default refspecs never push or fetch them.
 - The interpreter that runs the hooks must have `requirements.txt` installed:
   `make install-hooks` records that absolute interpreter (`HARNESS_PYTHON`, defaulting to the
   interpreter running the renderer, i.e. `PYTHON`) and `FRAMEWORK_DIR` into every rendered

@@ -30,7 +30,8 @@
     {
       "required": [
         "conditionChecks",
-        "artifactDelivery"
+        "artifactDelivery",
+        "promotion"
       ],
       "properties": {
         "outcome": {
@@ -113,13 +114,29 @@
             }
           ],
           "description": "The step delivered its artifact — required for a passing outcome."
+        },
+        "promotion": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/promotion"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "promoted"
+                }
+              }
+            }
+          ],
+          "description": "The step ref was promoted: the workspace branch fast-forwarded to the evaluated step state — required for a passing outcome."
         }
       }
     },
     {
       "required": [
         "conditionChecks",
-        "artifactDelivery"
+        "artifactDelivery",
+        "promotion"
       ],
       "properties": {
         "outcome": {
@@ -193,6 +210,21 @@
         "artifactDelivery": {
           "$ref": "#/$defs/artifactDelivery",
           "description": "The delivery verdict; a failed delivery fails the aggregate."
+        },
+        "promotion": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/promotion"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "withheld"
+                }
+              }
+            }
+          ],
+          "description": "The step ref was withheld: the workspace branch is untouched."
         }
       },
       "anyOf": [
@@ -266,7 +298,7 @@
               "type": "null"
             }
           ],
-          "description": "The one instance of the declared kind the step's session committed a change to, or null when it committed zero or more than one."
+          "description": "The one artifact instance of the declared kind the step state changes, or null when it changes zero or more than one, or the worker session's own commits do not change it."
         },
         "outcome": {
           "type": "string",
@@ -279,7 +311,7 @@
         "failureMessage": {
           "type": "string",
           "minLength": 1,
-          "description": "On failure: names the step, the kind, and why — zero instances, or more than one."
+          "description": "On failure: names the step, the kind, and why — zero instances, more than one, or none the worker session's own commits change."
         }
       },
       "if": {
@@ -315,7 +347,31 @@
         }
       },
       "unevaluatedProperties": false,
-      "description": "Function 10, invariant 5: the delivery verdict — a harness invariant, not a condition: no slug, never configurable. Read from the step session's function-9 `valid` entries (`committedPaths`)."
+      "description": "Function 10, invariant 5: the delivery verdict — a harness invariant, not a condition: no slug, never configurable. Read from the diff between the worker session's step ref and its base (the workspace branch tip, after any rebase) and from the worker session's function-9 `valid` entries (`committedPaths`)."
+    },
+    "promotion": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "workspaceCommit"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "promoted",
+            "withheld"
+          ],
+          "description": "Whether the step ref was promoted into workspace state (function 10, invariant 6)."
+        },
+        "workspaceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$",
+          "description": "The workspace branch tip the invocation leaves: the evaluated step state's commit when promoted, the unchanged tip when withheld."
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Function 10, invariant 6: the acceptance verdict — whether the step instance's step ref was promoted by one compare-and-swap fast-forward of the workspace branch, and the tip it leaves."
     }
   },
   "description": "Output contract for the check-step-postconditions harness function."

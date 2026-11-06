@@ -100,6 +100,7 @@ def default_script() -> dict[str, dict[str, Any]]:
                 "artifactPath": "reviews/r1.json",
                 "outcome": "pass",
             },
+            promotion={"outcome": "promoted", "workspaceCommit": "0" * 40},
         ),
         build_report(
             "check-step-authorization", "allowed", authorization=dict(_DEFAULT_AUTHORIZATION)

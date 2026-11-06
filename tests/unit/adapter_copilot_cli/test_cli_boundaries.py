@@ -426,6 +426,7 @@ def test_h6_evaluates_the_returned_step_in_the_dispatcher(rig: Rig) -> None:
         "fail",
         conditionChecks=[build_failing_condition_check("feature-written", "no feature file")],
         artifactDelivery=DELIVERED,
+        promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
     )
     decision = rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
     assert "no feature file" in decision["additionalContext"]
@@ -447,6 +448,7 @@ def test_h6_shows_the_reason_of_a_delivery_only_failure(rig: Rig) -> None:
             "outcome": "fail",
             "failureMessage": "step 'draft' delivered no 'feature' instance",
         },
+        promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
     )
     decision = rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
     assert (
@@ -537,10 +539,10 @@ def test_a_failed_turn_registration_is_retried_at_the_next_prompt(rig: Rig) -> N
 @pytest.mark.parametrize(
     "answer",
     [
-        build_error_report("start-session", code="step-session-bound", message="bound"),
+        build_error_report("start-session", code="worker-session-bound", message="bound"),
         RuntimeError("harness unavailable"),
     ],
-    ids=["step-session-bound", "no-report"],
+    ids=["worker-session-bound", "no-report"],
 )
 def test_a_failed_step_registration_fails_closed(rig: Rig, answer) -> None:
     rig.open_turn()

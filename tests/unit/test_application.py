@@ -187,6 +187,8 @@ def framework_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (root / "instructions" / f"{instruction}.instructions.md").write_text(
             "# instructions\n", encoding="utf-8"
         )
+    # The governed workspace is a Git repository: registration excludes the logs path.
+    _init_git_workspace(workspace)
     return root
 
 
@@ -441,18 +443,32 @@ class TestApplication:
         self, framework_root: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """Spec (`application`): the commit gate reaches `StepArtifactChecker` itself
-        — the validated set is promoted into committed state by the wired service's
-        own Git transaction (function 9, invariant 3).
+        — the validated set is committed onto the worker session's step ref by the
+        wired service's own Git transaction (function 9, invariant 3), the step ref
+        function 0 created when it registered the worker session (invariant 6).
 
         The path is the one the framework's own workspace layout binds to the `epic`
         artifact, which is how `ArtifactStore` matches a path to its schema (function 9,
         invariant 1).
         """
         workspace = _workspace_dir(framework_root)
-        _init_git_workspace(workspace)
         application = Application(framework_root)
         application.dispatch_command(
-            ["start-session", "--session-id", "s1", "--agent", "planner"]
+            ["start-session", "--session-id", "o1", "--agent", "facilitator"]
+        )
+        application.dispatch_command(
+            ["resolve-step", "--session-id", "o1", "--workflow-slug", "planning"]
+        )
+        application.dispatch_command(
+            [
+                "start-session",
+                "--session-id",
+                "s1",
+                "--parent-session-id",
+                "o1",
+                "--agent",
+                "planner",
+            ]
         )
         capsys.readouterr()
         staged = workspace / "portfolio" / "epics" / "one.md"
@@ -473,10 +489,17 @@ class TestApplication:
         assert exit_code == 0
         assert report["context"]["function"] == "check-step-artifact"
         assert report["outcome"]["status"] == "valid"
+        step_ref = _git(
+            workspace, "for-each-ref", "--format=%(refname)", "refs/harness/steps/"
+        ).strip()
+        assert step_ref.endswith("/draft/s1")
         assert "portfolio/epics/one.md" in _git(
+            workspace, "ls-tree", "-r", "--name-only", step_ref
+        )
+        assert "s1" in _git(workspace, "log", "-1", "--format=%B", step_ref)
+        assert "portfolio/epics/one.md" not in _git(
             workspace, "ls-tree", "-r", "--name-only", "HEAD"
         )
-        assert "s1" in _git(workspace, "log", "-1", "--format=%B")
 
     def test_surfaces_an_invalid_inquiry_at_the_exit_plane_without_a_report(
         self, framework_root: Path, capsys: pytest.CaptureFixture[str]

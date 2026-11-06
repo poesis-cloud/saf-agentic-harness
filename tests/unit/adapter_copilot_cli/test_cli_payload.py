@@ -61,7 +61,7 @@ def test_inside_a_subagent_the_host_id_is_the_agent_id(binding: ToolBinding) -> 
     started = next(s["input"] for s in captured_payloads() if s["hookType"] == "subagentStart")
     hook = _hook(binding, "subagentStart", started)
     assert hook.host_id == "1d793d07-adc6-4f25-bec3-5b03b44e949e"
-    assert binding.probe(started, binding.host_step_session_keys) == inner["sessionId"]
+    assert binding.probe(started, binding.host_worker_session_keys) == inner["sessionId"]
 
 
 def test_the_documented_single_call_shape_is_read_too(binding: ToolBinding) -> None:

@@ -58,7 +58,7 @@ class HookBinding:
     path_keys: tuple[str, ...]
     nested_path_keys: tuple[str, ...]
     host_session_keys: tuple[str, ...]
-    host_step_session_keys: tuple[str, ...]
+    host_worker_session_keys: tuple[str, ...]
     host_step_actor_keys: tuple[str, ...]
     dispatch_agent_keys: tuple[str, ...]
     dispatch_model_keys: tuple[str, ...]
@@ -68,7 +68,7 @@ class HookBinding:
     patch_keys: tuple[str, ...] = ()
 
     def is_dispatch_tool(self, tool_name: str | None) -> bool:
-        """Tell whether this tool opens a step session (H2/H6)."""
+        """Tell whether this tool opens a worker session (H2/H6)."""
         return tool_name in self.dispatch_tools
 
     def is_write_class_tool(self, tool_name: str | None) -> bool:
@@ -246,7 +246,7 @@ def load_hook_binding(
         nested_path_keys=_as_tuple(tools.get("nestedPathKeys")),
         patch_keys=_as_tuple(tools.get("patchKeys")),
         host_session_keys=_as_tuple(tools.get("hostSessionKeys")),
-        host_step_session_keys=_as_tuple(tools.get("hostStepSessionKeys")),
+        host_worker_session_keys=_as_tuple(tools.get("hostWorkerSessionKeys")),
         host_step_actor_keys=_as_tuple(tools.get("hostStepActorKeys")),
         dispatch_agent_keys=_as_tuple(tools.get("dispatchAgentKeys")),
         dispatch_model_keys=_as_tuple(tools.get("dispatchModelKeys")),

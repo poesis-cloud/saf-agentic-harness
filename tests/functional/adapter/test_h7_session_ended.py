@@ -50,7 +50,7 @@ class TestSessionEndedHook:
     ) -> None:
         """Adapter spec H7, Harness invocation 1: the adapter pops the tracker stack,
         restoring the dispatching orchestrator session — without this, the orchestrator's
-        next harness request (H4) would misattribute to the now-closed step session.
+        next harness request (H4) would misattribute to the now-closed worker session.
         """
         open_turn()
         dispatch("SubagentStart", subagent_start())

@@ -4,6 +4,52 @@ All notable changes to this project are documented here. Versions follow
 [SemVer](https://semver.org/); pre-release tags (`-alpha`, `-beta`, `-rc`) are published as
 GitHub pre-releases.
 
+## Unreleased
+
+### Step transactions (core spec, PR #18)
+
+- **The step instance is the unit of acceptance.** Function 0 creates the worker session's
+  step ref `refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>` without any
+  checkout; a retry on an unchanged base continues the previous step instance's ref tip.
+- **Artifact locks.** Function 8 claims `refs/harness/locks/<artifactPath>` create-only
+  before a step instance's first write to a path, re-points it on a retry, treats a promoted
+  holder's lock as released, and denies a lock another step instance holds, naming its
+  workflow instance and step. A write from outside an in-flight step instance with its own
+  step ref is denied ("no step in flight"). The clean-baseline check applies to unclaimed
+  paths only.
+- **Commit gate onto the step ref.** Function 9 commits each validated set onto the step ref
+  with a temporary index plus `git commit-tree`; `HEAD`, the working tree, and the workspace's
+  index never move. A revert restores from the step ref when the step ref changed the path,
+  else from `HEAD`, else deletes it.
+- **Promotion.** Function 10 rebases the step ref in memory with `git merge-tree` (a path
+  changed on both sides is `step-rebase-conflict`), checks delivery over the step state and
+  the worker session's own commits, evaluates the postconditions on the step state, and on
+  pass fast-forwards the workspace branch by one compare-and-swap, then syncs the promoted
+  paths' index entries and releases the locks. Its report gains `promotion`
+  (`{outcome: promoted | withheld, workspaceCommit}`).
+- **Function 3** refuses a workflow instance another live orchestrator session drives
+  (`workflow-instance-busy`).
+- **The internal sweep** (`ArtifactStore.sweep_workspace`) reports step refs, every held
+  artifact lock (stale ones included) with its holder, and unlocked working-tree changes.
+- **Renames:** `step-session-bound` → `worker-session-bound`; `hostStepSessionKeys` →
+  `hostWorkerSessionKeys` (both adapters' `tools.yaml` and the tools contract);
+  `find_step_session_ids` → `find_worker_session_ids`; `host_step_session_keys` →
+  `host_worker_session_keys`.
+- **Requirements:** Git ≥ 2.38, and a Git identity in the governed workspace.
+
+### The condition language (core spec, PR #19)
+
+- `setQuery` / `setPredicate` read `workspace` (artifact instances: `kind`, `path`, `data`),
+  `workflows` and `steps` (workflow and step instances from this machine's logs), `workflow`
+  and `step` (the current ones), and `selected`. The `artifacts['<kind>']` map and the
+  `artifact` constant are removed: a configuration using them fails to load.
+- The configuration load type-checks every condition: an `a.data` read needs a kind guard in
+  the same macro (`a.kind == '<literal>'`, or a path join with a step instance of a literal
+  step of a known workflow). An unguarded read, an unknown kind, step, or workflow slug, an
+  undeclared property and, in a precondition, a current-workflow step that is not a declared
+  predecessor or a path join with `step` are configuration load errors. Only the kinds the
+  guards fix are read from the evaluated state.
+
 ## v1.0.0-alpha.1
 
 The first pinnable pre-release of the SAFe agentic orchestration harness. It **supersedes

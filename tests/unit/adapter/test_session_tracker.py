@@ -55,7 +55,7 @@ class TestSessionTracker:
     def test_pushes_the_step_session_over_its_dispatching_session(
         self, tracker: SessionTracker
     ) -> None:
-        """Adapter spec H1 / correlation scenario 2: H1 pushes the new step session on
+        """Adapter spec H1 / correlation scenario 2: H1 pushes the new worker session on
         top; the previous top (the dispatching turn session) stays below as its parent.
         """
         tracker.reset_current("chat-session-guid", "chat-session-guid-t1")
@@ -67,9 +67,9 @@ class TestSessionTracker:
     def test_pops_the_step_session_back_to_the_dispatching_session(
         self, tracker: SessionTracker
     ) -> None:
-        """Adapter spec H7 / correlation scenario 2: `SubagentStop` pops the step session
+        """Adapter spec H7 / correlation scenario 2: `SubagentStop` pops the worker session
         back off — without it the orchestrator's next mediated call would misattribute to
-        the already-ended step session.
+        the already-ended worker session.
         """
         tracker.reset_current("chat-session-guid", "chat-session-guid-t1")
         tracker.push_current("chat-session-guid", "subagent-invocation-id")

@@ -421,8 +421,10 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         ""revert_artifact"" discards an invalid one - function
         9's deliberate Git actions. The Git operations of
         functions 0, 8, and 10 (create the step ref, claim
-        locks, rebase, promote, sync the index) join the
-        class model with their implementation. Finding is
+        locks, rebase, promote, sync the index) and the
+        sweep are implemented on this store too (#20),
+        beside the step transactions and the condition
+        language they serve. Finding is
         homed here and stays internal to this store: it is
         what ""validate_artifact"" and ""revert_artifact""
         produce, and function 9 renders it into

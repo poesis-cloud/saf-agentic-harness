@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from checking_fixtures import build_instance_view, run_git
+from checking_fixtures import build_instance_view, build_scope, run_git
 from config import StateCondition, WorkspaceLayout
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
@@ -75,7 +75,7 @@ def _evaluate(store: ArtifactStore, set_query: str, set_predicate: str) -> str:
         set_selector={"setQuery": set_query}, set_predicate=set_predicate,
     )
     [check] = ConditionEvaluator(store).evaluate_conditions(
-        (condition,), build_instance_view([]), "portfolio-manifest"
+        (condition,), build_instance_view([]), build_scope()
     )
     return check.outcome
 
@@ -87,9 +87,9 @@ def test_a_yaml_artifacts_unquoted_dates_reach_cel_as_strings(
             "slug: acme\ndate: 2026-11-04\nstepOutcomes:\n  - step: sync\n    date: 2026-11-04 10:00:00\n")
 
     assert _evaluate(
-        store, "artifacts['portfolio-manifest']",
-        "selected.size() == 1 && selected[0].date == '2026-11-04'"
-        " && selected[0].stepOutcomes[0].date == '2026-11-04 10:00:00'",
+        store, "workspace.filter(a, a.kind == 'portfolio-manifest')",
+        "selected.size() == 1 && selected[0].data.date == '2026-11-04'"
+        " && selected[0].data.stepOutcomes[0].date == '2026-11-04 10:00:00'",
     ) == "pass"
 
 
@@ -99,7 +99,9 @@ def test_a_markdown_artifacts_frontmatter_dates_reach_cel_as_strings(
     _commit(workspace, EPIC_REF, "---\nslug: probe\ndate: 2026-11-04\n---\n\n# Probe\n")
 
     assert _evaluate(
-        store, "artifacts['epic']", "selected.size() == 1 && selected[0].date == '2026-11-04'"
+        store,
+        "workspace.filter(a, a.kind == 'epic')",
+        "selected.size() == 1 && selected[0].data.date == '2026-11-04'",
     ) == "pass"
 
 

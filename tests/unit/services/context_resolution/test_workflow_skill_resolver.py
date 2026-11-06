@@ -84,7 +84,7 @@ class TestWorkflowSkillResolver:
     def test_resolve_workflow_skills_refuses_a_step_session(
         self, resolver: WorkflowSkillResolver, step_session: str, read_journal
     ) -> None:
-        """Spec function 2, Preconditions (function 1's apply identically): a step session
+        """Spec function 2, Preconditions (function 1's apply identically): a worker session
         is `state-error` (`session-kind-mismatch`), journaled."""
         report = resolver.resolve_workflow_skills(
             session_id=step_session, parent_session_id="sess-orch"

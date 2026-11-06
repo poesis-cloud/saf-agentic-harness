@@ -122,9 +122,9 @@ class TestHooksMap:
 
     def test_session_identity_binding_keys_match_spec(self, tools_yaml):
         """Adapter spec (Session identity binding): which host payload keys carry the session,
-        the step session and the step actor. `hostParentSessionKeys` is empty — this host
+        the worker session and the step actor. `hostParentSessionKeys` is empty — this host
         publishes no parent-session payload, the fact H1's correlation is written against."""
         assert tools_yaml["hostSessionKeys"] == ["session_id"]
         assert tools_yaml["hostParentSessionKeys"] == []
-        assert tools_yaml["hostStepSessionKeys"] == ["agent_id"]
+        assert tools_yaml["hostWorkerSessionKeys"] == ["agent_id"]
         assert tools_yaml["hostStepActorKeys"] == ["agent_type"]

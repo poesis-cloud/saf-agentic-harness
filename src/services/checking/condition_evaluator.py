@@ -1,9 +1,7 @@
-"""The CEL machinery functions 5 and 10 share, over persisted workspace state."""
+"""The CEL machinery functions 5 and 10 share: the condition language."""
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import celpy
@@ -12,16 +10,16 @@ from celpy import celtypes
 from config import StateCondition, StepCondition
 from errors import StateError
 from services.checking.condition_check import ConditionCheck
-from stores.artifact_store import ArtifactStore
+from services.checking.condition_scope import ConditionScope
+from stores.artifact_store import Artifact, ArtifactStore
 from stores.session_log_store import WorkflowInstanceView
 
-_ARTIFACTS_REFERENCE = re.compile(r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]")
 _PASS = "pass"
 _FAIL = "fail"
 
 
 def _thaw(value: Any) -> Any:
-    """Convert frozen artifact data into the plain containers `json_to_cel` admits."""
+    """Convert frozen data into the plain containers `json_to_cel` admits."""
     if isinstance(value, Mapping):
         return {key: _thaw(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
@@ -29,12 +27,19 @@ def _thaw(value: Any) -> Any:
     return value
 
 
-class ConditionEvaluator:
-    """Evaluate a step's declared conditions against persisted workspace state.
+def _render_artifact(artifact: Artifact) -> dict[str, Any]:
+    """Render one artifact instance as a `workspace` element: kind, path, data."""
+    return {"kind": artifact.kind, "path": artifact.ref, "data": _thaw(artifact.data)}
 
-    Spec (C1, C2): conditions are evaluated strictly against persisted workspace
-    state — committed artifacts and the instance view of the logs — never against
-    anything an agent merely remembers.
+
+class ConditionEvaluator:
+    """Evaluate a step's declared conditions against persisted state.
+
+    Spec (function 5, invariant 2; C1, C2): `setQuery` and `setPredicate` read the
+    evaluated state through `workspace` (its artifact instances), `workflows` and
+    `steps` (the instances the logs record), `workflow` and `step` (the current
+    ones), and, in `setPredicate`, `selected` — never anything an agent merely
+    remembers, and never the working tree.
     """
 
     def __init__(self, artifact_store: ArtifactStore) -> None:
@@ -46,15 +51,18 @@ class ConditionEvaluator:
         self,
         conditions: Sequence[StepCondition | StateCondition],
         view: WorkflowInstanceView,
-        artifact: str,
+        scope: ConditionScope,
     ) -> tuple[ConditionCheck, ...]:
-        """Evaluate every condition in order, one check per declared condition.
-
-        `artifact` is the step's declared artifact ref, in scope as a CEL runtime
-        constant (function 5, invariant 2).
-        """
+        """Evaluate every condition in order, one check per declared condition."""
+        workspace_cache: dict[frozenset[str] | None, celtypes.Value] = {}
+        log_plane = {
+            "workflows": celpy.json_to_cel(_thaw(list(scope.workflows))),
+            "steps": celpy.json_to_cel(_thaw(list(scope.steps))),
+            "workflow": celpy.json_to_cel(_thaw(scope.workflow)),
+            "step": celpy.json_to_cel(_thaw(scope.step)),
+        }
         return tuple(
-            self._evaluate_condition(condition, view, artifact)
+            self._evaluate_condition(condition, view, scope, log_plane, workspace_cache)
             for condition in conditions
         )
 
@@ -62,12 +70,18 @@ class ConditionEvaluator:
         self,
         condition: StepCondition | StateCondition,
         view: WorkflowInstanceView,
-        artifact: str,
+        scope: ConditionScope,
+        log_plane: Mapping[str, Any],
+        workspace_cache: dict[frozenset[str] | None, celtypes.Value],
     ) -> ConditionCheck:
         """Evaluate one condition into its check."""
         if isinstance(condition, StepCondition):
             return self._evaluate_step_condition(condition, view)
-        return self._evaluate_state_condition(condition, artifact)
+        kinds = condition.workspace_kinds
+        if kinds not in workspace_cache:
+            workspace_cache[kinds] = self._load_workspace(kinds, scope.revision)
+        activation = {**log_plane, "workspace": workspace_cache[kinds]}
+        return self._evaluate_state_condition(condition, activation)
 
     def _evaluate_step_condition(
         self, condition: StepCondition, view: WorkflowInstanceView
@@ -92,14 +106,10 @@ class ConditionEvaluator:
         )
 
     def _evaluate_state_condition(
-        self, condition: StateCondition, artifact: str
+        self, condition: StateCondition, activation: Mapping[str, Any]
     ) -> ConditionCheck:
-        """Select persisted artifacts, then decide the predicate over `selected`."""
+        """Select with `setQuery`, then decide `setPredicate` over `selected`."""
         set_query = condition.set_selector["setQuery"]
-        activation: dict[str, Any] = {
-            "artifacts": self._load_artifacts(set_query),
-            "artifact": celtypes.StringType(artifact),
-        }
         selected = self._evaluate_expression(condition, set_query, activation)
         decided = self._evaluate_expression(
             condition, condition.set_predicate, {**activation, "selected": selected}
@@ -122,21 +132,21 @@ class ConditionEvaluator:
             ),
         )
 
-    def _load_artifacts(self, set_query: str) -> celtypes.Value:
-        """Load the committed instances of every artifact kind the query references.
+    def _load_workspace(
+        self, kinds: frozenset[str] | None, revision: str
+    ) -> celtypes.Value:
+        """Load `workspace`: the evaluated state's artifact instances.
 
-        Function 5, invariant 2: `artifacts` maps an artifact (schema) slug to its
-        instances — resolved by kind through the workspace layout, never by path.
+        Only the kinds the condition's guards reference are read when the
+        configuration load could fix them; every kind otherwise.
         """
-        slugs = sorted(set(_ARTIFACTS_REFERENCE.findall(set_query)))
         return celpy.json_to_cel(
-            {
-                slug: [
-                    _thaw(entry.data)
-                    for entry in self._artifact_store.discover_artifacts_by_kind(slug)
-                ]
-                for slug in slugs
-            }
+            [
+                _render_artifact(artifact)
+                for artifact in self._artifact_store.discover_workspace_artifacts(
+                    kinds, revision
+                )
+            ]
         )
 
     def _evaluate_expression(

@@ -9,6 +9,7 @@ from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.outcome import Outcome
 from stores.session_log_store.report import Report
 from stores.session_log_store.session_log_store import SessionLogStore
+from stores.session_log_store.step_instance import StepInstance
 from stores.session_log_store.workflow_instance_view import WorkflowInstanceView
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "Outcome",
     "Report",
     "SessionLogStore",
+    "StepInstance",
     "WorkflowInstanceView",
 ]

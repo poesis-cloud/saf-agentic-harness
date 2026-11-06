@@ -31,8 +31,8 @@ def derive_turn_session_id(raw_host_session_id: str, timestamp: str) -> str:
     )
 
 
-def derive_step_session_id(raw_agent_id: str) -> str:
-    """Derive a step session's id from the subagent invocation id.
+def derive_worker_session_id(raw_agent_id: str) -> str:
+    """Derive a worker session's id from the subagent invocation id.
 
     Spec (adapter, H1, invariant 1): `agent_id` is unique per dispatch, so 1 step = 1
     session holds even across retries of the same step.
@@ -41,7 +41,7 @@ def derive_step_session_id(raw_agent_id: str) -> str:
 
 
 __all__ = [
-    "derive_step_session_id",
+    "derive_worker_session_id",
     "derive_turn_session_id",
     "sanitize_identifier",
 ]

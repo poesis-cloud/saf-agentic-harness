@@ -208,7 +208,11 @@ def journal_postconditions(session_log_store: SessionLogStore):
                 "pass",
                 session_id,
                 workflow_instance_id=workflow_instance_id,
-                payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
+                payload={
+                    "conditionChecks": [],
+                    "artifactDelivery": DELIVERED,
+                    "promotion": {"outcome": "promoted", "workspaceCommit": "0" * 40},
+                },
             ),
         )
 
@@ -249,7 +253,7 @@ def orchestrator_session(register_session) -> str:
 
 @pytest.fixture
 def step_session(register_session, journal_resolution) -> str:
-    """Provide a registered step session correlated to its parent's resolution."""
+    """Provide a registered worker session correlated to its parent's resolution."""
     register_session("sess-orch", "orchestrator")
     journal_resolution("sess-orch", actor="reviewer")
     register_session("sess-step", "reviewer", parent_session_id="sess-orch")

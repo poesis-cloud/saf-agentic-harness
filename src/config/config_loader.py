@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterator, Mapping, Sequence
@@ -12,6 +11,7 @@ from typing import Any, Iterator, Mapping, Sequence
 import celpy
 
 from config.access_control_list import AccessControlList
+from config.condition_type_checker import ConditionTypeChecker
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.framework_layout import FrameworkLayout
@@ -54,13 +54,9 @@ _REQUIRED_LAYOUT_KEYS = (
 )
 _PRECONDITION_KIND = "precondition"
 _ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
-_ARTIFACTS_SLUG = re.compile(r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]")
-_ARTIFACTS_PROPERTY = re.compile(
-    r"artifacts\[\s*['\"]([a-z0-9-]+)['\"]\s*\]\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)"
-)
-# CEL macros and list members read like a property but bind no artifact field.
-_CEL_MEMBERS = frozenset(
-    {"all", "exists", "exists_one", "filter", "map", "size"}
+_BASE_ARTIFACT_CONTRACT = Path(__file__).resolve().parents[2] / "contracts" / "artifact.schema.json"
+_BASE_ARTIFACT_PROPERTIES = tuple(
+    json.loads(_BASE_ARTIFACT_CONTRACT.read_text(encoding="utf-8")).get("properties", {})
 )
 
 
@@ -85,6 +81,38 @@ def _normalize_slug_refs(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     return tuple(str(item) for item in value)
+
+
+def _map_transitive_predecessors(
+    steps: Sequence[Mapping[str, Any]],
+) -> dict[str, frozenset[str]]:
+    """Map each step to its declared predecessors, directly or through theirs.
+
+    The predecessors are a step's `kind: precondition` `stepCondition`s; the step
+    graph is acyclic by the time this runs.
+    """
+    direct = {
+        step["slug"]: tuple(
+            condition["step"]
+            for condition in step.get("conditions", ())
+            if "step" in condition and condition["kind"] == _PRECONDITION_KIND
+        )
+        for step in steps
+    }
+    closure: dict[str, frozenset[str]] = {}
+
+    def collect(slug: str) -> frozenset[str]:
+        if slug not in closure:
+            found: set[str] = set()
+            for predecessor in direct.get(slug, ()):
+                found.add(predecessor)
+                found.update(collect(predecessor))
+            closure[slug] = frozenset(found)
+        return closure[slug]
+
+    for slug in direct:
+        collect(slug)
+    return closure
 
 
 def _has_cycle(edges: Mapping[str, tuple[str, ...]]) -> bool:
@@ -272,8 +300,12 @@ class ConfigLoader:
             sources[slug] = data
         self._require_catalog_rules(sources)
         self._require_orchestrators_are_framework_agents(sources, framework_root)
+        workspace_kinds = self._require_typed_conditions(sources, artifact_schemas)
 
-        workflows = {slug: self._build_workflow(data) for slug, data in sources.items()}
+        workflows = {
+            slug: self._build_workflow(data, workspace_kinds)
+            for slug, data in sources.items()
+        }
         return WorkflowCatalog(workflows=MappingProxyType(workflows))
 
     def _resolve_conf_dir(self, framework_root: str | Path) -> Path:
@@ -425,13 +457,10 @@ class ConfigLoader:
         steps: Sequence[Mapping[str, Any]],
         artifact_schemas: Mapping[str, Mapping[str, Any]],
     ) -> None:
-        """Spec (function 5, invariant 2): statically invalid expressions never reach runtime.
+        """Spec (function 5, invariant 2): an expression that does not compile never runs.
 
-        Static reach is the direct `artifacts['<slug>'].<property>` form: the expression
-        must compile, its artifact slugs must resolve to a declared schema, and a property
-        read straight off the slug must be declared there. A property reached through a
-        macro-bound variable is left to runtime — resolving it needs a scope-tracking AST
-        walk, and guessing would reject valid configurations.
+        The typing check (`_require_typed_conditions`) runs once the whole catalog
+        is loaded, since a guard may name another workflow's step.
         """
         environment = celpy.Environment()
         for step in steps:
@@ -442,9 +471,6 @@ class ConfigLoader:
                 for expression in (selector["setQuery"], condition["setPredicate"]):
                     self._require_compilable_expression(
                         environment, slug, step["slug"], condition["slug"], expression
-                    )
-                    self._require_declared_artifact_references(
-                        slug, step["slug"], condition["slug"], expression, artifact_schemas
                     )
 
     def _require_compilable_expression(
@@ -466,37 +492,38 @@ class ConfigLoader:
                 False,
             ) from error
 
-    def _require_declared_artifact_references(
+    def _require_typed_conditions(
         self,
-        slug: str,
-        step_slug: str,
-        condition_slug: str,
-        expression: str,
+        sources: Mapping[str, Mapping[str, Any]],
         artifact_schemas: Mapping[str, Mapping[str, Any]],
-    ) -> None:
-        """Resolve every artifact slug the expression names, then its direct properties."""
-        for artifact_slug in sorted(set(_ARTIFACTS_SLUG.findall(expression))):
-            if artifact_slug not in artifact_schemas:
-                raise ConfigurationError(
-                    "unresolvable-artifact-slug",
-                    f"Workflow '{slug}' step '{step_slug}' condition '{condition_slug}' "
-                    f"references the artifact slug '{artifact_slug}', which the framework "
-                    f"declares no schema for.",
-                    False,
-                )
+    ) -> dict[tuple[str, str, str], frozenset[str] | None]:
+        """Spec (function 5, invariant 2, Typing): check every condition at load.
 
-        for artifact_slug, member in _ARTIFACTS_PROPERTY.findall(expression):
-            if member in _CEL_MEMBERS:
-                continue
-            declared = artifact_schemas[artifact_slug].get("properties", {})
-            if member not in declared:
-                raise ConfigurationError(
-                    "undeclared-artifact-property",
-                    f"Workflow '{slug}' step '{step_slug}' condition '{condition_slug}' "
-                    f"reads the property '{member}' off artifact '{artifact_slug}', which "
-                    f"its schema does not declare.",
-                    False,
-                )
+        Runs over the whole catalog — a guard may name another workflow's step —
+        and answers, per `(workflow, step, condition)`, the only artifact kinds
+        the condition can read from `workspace` (`None`: every kind).
+        """
+        checker = ConditionTypeChecker(
+            artifact_schemas,
+            {
+                slug: {step["slug"]: step["artifact"] for step in data["steps"]}
+                for slug, data in sources.items()
+            },
+            _BASE_ARTIFACT_PROPERTIES,
+        )
+        kinds: dict[tuple[str, str, str], frozenset[str] | None] = {}
+        for slug, data in sources.items():
+            predecessors = _map_transitive_predecessors(data["steps"])
+            for step in data["steps"]:
+                for condition in step.get("conditions", ()):
+                    if "setSelector" not in condition:
+                        continue
+                    kinds[(slug, step["slug"], condition["slug"])] = (
+                        checker.check_condition(
+                            slug, step["slug"], condition, predecessors[step["slug"]]
+                        )
+                    )
+        return kinds
 
     def _require_orchestrators_are_framework_agents(
         self,
@@ -596,19 +623,31 @@ class ConfigLoader:
             template=data["template"],
         )
 
-    def _build_workflow(self, data: Mapping[str, Any]) -> Workflow:
+    def _build_workflow(
+        self,
+        data: Mapping[str, Any],
+        workspace_kinds: Mapping[tuple[str, str, str], frozenset[str] | None],
+    ) -> Workflow:
         """Build one workflow view, mapping the schema's names to the prescribed ones."""
         return Workflow(
             slug=data["slug"],
             facilitator=data["orchestrator"],
-            steps=tuple(self._build_step(step) for step in data["steps"]),
+            steps=tuple(
+                self._build_step(step, data["slug"], workspace_kinds)
+                for step in data["steps"]
+            ),
             after=_normalize_slug_refs(data.get("predecessors")),
             skills=_normalize_slug_refs(data.get("skills")),
             instructions=_normalize_slug_refs(data.get("instructions")),
             description=data.get("description"),
         )
 
-    def _build_step(self, data: Mapping[str, Any]) -> Step:
+    def _build_step(
+        self,
+        data: Mapping[str, Any],
+        workflow_slug: str,
+        workspace_kinds: Mapping[tuple[str, str, str], frozenset[str] | None],
+    ) -> Step:
         """Build one step view with read-only capability weights."""
         return Step(
             slug=data["slug"],
@@ -620,13 +659,19 @@ class ConfigLoader:
             ),
             skills=_normalize_slug_refs(data.get("skills")),
             conditions=tuple(
-                self._build_condition(condition) for condition in data.get("conditions", ())
+                self._build_condition(
+                    condition,
+                    workspace_kinds.get((workflow_slug, data["slug"], condition["slug"])),
+                )
+                for condition in data.get("conditions", ())
             ),
             description=data.get("description"),
         )
 
-    def _build_condition(self, data: Mapping[str, Any]) -> StepCondition | StateCondition:
-        """Build one condition: a step binding, or an artifact-backed state assertion."""
+    def _build_condition(
+        self, data: Mapping[str, Any], workspace_kinds: frozenset[str] | None
+    ) -> StepCondition | StateCondition:
+        """Build one condition: a step binding, or a state assertion."""
         if "step" in data:
             return StepCondition(kind=data["kind"], slug=data["slug"], step=data["step"])
         return StateCondition(
@@ -634,6 +679,7 @@ class ConfigLoader:
             slug=data["slug"],
             set_selector=MappingProxyType(dict(data["setSelector"])),
             set_predicate=data["setPredicate"],
+            workspace_kinds=workspace_kinds,
         )
 
 

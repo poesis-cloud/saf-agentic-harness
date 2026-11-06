@@ -40,7 +40,7 @@ nestedPathKeys: []
 # their sessionId is the dispatcher only at the first level (nested: an unrelated id).
 hostSessionKeys: [sessionId]
 hostParentSessionKeys: [parentAgentId]
-hostStepSessionKeys: [agentId]
+hostWorkerSessionKeys: [agentId]
 hostStepActorKeys: [agentType, agentName]
 # Plugin-delivered agents are namespaced by the runtime: agentType / agentName (and the `task`
 # agent_type) read '<plugin-name>:<agent>' (observed live, standalone CLI 1.0.105). The acting

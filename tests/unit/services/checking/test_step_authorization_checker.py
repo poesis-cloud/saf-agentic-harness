@@ -5,7 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from checking_fixtures import (
+    INSTANCE_ID,
+    ORCHESTRATOR_SESSION,
     build_ending_entry,
+    build_entry,
     build_registration_entry,
     build_step,
     build_step_resolution_entry,
@@ -51,14 +54,68 @@ def _open_session(
     log_store: SessionLogStore,
     agent: str = ACTOR,
     *,
-    with_step: bool = False,
-) -> None:
-    """Register the acting session — the registration function 8 reads its actor from."""
-    log_store.create_session_log(build_registration_entry(SESSION, agent))
-    if with_step:
-        log_store.append_log_entry(
-            SESSION, build_step_resolution_entry(SESSION, build_step())
+    with_step: bool = True,
+    session_id: str = SESSION,
+    step_slug: str = "review",
+    orchestrator: str = ORCHESTRATOR_SESSION,
+    registered_at: str = "2026-01-01T00:01:30Z",
+) -> str | None:
+    """Register the acting session — the registration function 8 reads its actor from.
+
+    By default it is the WORKER session of an in-flight step instance: its
+    orchestrator session resolved the step, and its step ref exists (function 8,
+    invariant 7). Answers that step ref's name. `with_step=False` opens a root
+    session instead — no step in flight.
+    """
+    if not with_step:
+        log_store.create_session_log(build_registration_entry(session_id, agent))
+        return None
+    workspace = log_store._workspace_dir
+    if not (workspace / "logs" / f"{orchestrator}.log.jsonl").exists():
+        log_store.create_session_log(
+            build_registration_entry(orchestrator, "orchestrator")
         )
+    log_store.append_log_entry(
+        orchestrator,
+        build_step_resolution_entry(
+            orchestrator, build_step(step_slug, actor=agent), timestamp="2026-01-01T00:01:00Z"
+        ),
+    )
+    log_store.create_session_log(
+        build_registration_entry(
+            session_id,
+            agent,
+            parent_session_id=orchestrator,
+            timestamp=registered_at,
+        )
+    )
+    name = f"refs/harness/steps/{INSTANCE_ID}/{step_slug}/{session_id}"
+    run_git(workspace, "update-ref", name, "HEAD", "")
+    return name
+
+
+def _conclude_step(log_store: SessionLogStore, orchestrator: str = ORCHESTRATOR_SESSION) -> None:
+    """Journal the in-flight step's function-10 outcome in its orchestrator session."""
+    log_store.append_log_entry(
+        orchestrator,
+        build_entry(
+            "check-step-postconditions",
+            "fail",
+            session_id=orchestrator,
+            workflow_instance_id=INSTANCE_ID,
+            payload={
+                "conditionChecks": [],
+                "artifactDelivery": {
+                    "artifact": ARTIFACT_KIND,
+                    "artifactPath": None,
+                    "outcome": "fail",
+                    "failureMessage": "nothing delivered",
+                },
+                "promotion": {"outcome": "withheld", "workspaceCommit": "0" * 40},
+            },
+            timestamp="2026-01-01T00:05:00Z",
+        ),
+    )
 
 
 def _build_checker(
@@ -690,3 +747,204 @@ class TestStepAuthorizationChecker:
 
         assert isinstance(report, AuthorizationReport)
         assert report.context.function == "check-step-authorization"
+
+
+def _authorize(
+    log_store: SessionLogStore,
+    access_control_list: AccessControlList,
+    workspace_layout: WorkspaceLayout,
+    artifact_store: ArtifactStore,
+    *,
+    session_id: str = SESSION,
+    ref: str = ARTIFACT_REF,
+    action: str = "create",
+) -> AuthorizationReport:
+    checker = _build_checker(log_store, access_control_list, workspace_layout, artifact_store)
+    return checker.check_step_authorization(
+        session_id=session_id,
+        parent_session_id=None,
+        artifact_path=Path(ref),
+        action=action,
+    )
+
+
+def _lock_holder(workspace: Path, ref: str) -> str | None:
+    """Read the step ref name an artifact lock names, or none when unlocked."""
+    try:
+        oid = run_git(workspace, "rev-parse", "--verify", "--quiet", f"refs/harness/locks/{ref}")
+    except Exception:
+        return None
+    return run_git(workspace, "cat-file", "blob", oid.strip()).strip()
+
+
+class TestStepInstanceGate:
+    """Function 8, invariant 7: every artifact write happens inside a governed step instance."""
+
+    def test_a_root_session_write_is_denied_as_no_step_in_flight(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A write from an orchestrator (root) session is denied, naming "no step in
+        flight" — and no lock is claimed."""
+        _open_session(log_store, with_step=False)
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "denied"
+        assert "no step in flight" in report.authorization.failure_message
+        assert _lock_holder(workspace, ARTIFACT_REF) is None
+
+    def test_a_worker_session_without_its_step_ref_is_denied(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A worker session whose ref function 0 could not create is denied."""
+        name = _open_session(log_store)
+        run_git(workspace, "update-ref", "-d", name)
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "denied"
+        assert "no step in flight" in report.authorization.failure_message
+
+    def test_a_write_after_the_step_instances_outcome_is_denied(
+        self, log_store, access_control_list, workspace_layout, artifact_store
+    ) -> None:
+        """A write after its step instance's function-10 outcome is denied."""
+        _open_session(log_store)
+        _conclude_step(log_store)
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "denied"
+        assert "no step in flight" in report.authorization.failure_message
+
+
+class TestArtifactLockClaim:
+    """Function 8, invariant 8: writes are exclusive per artifact instance until promotion."""
+
+    def test_an_allow_claims_the_paths_lock_for_the_acting_step_ref(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A create-only claim to a blob naming the acting step ref."""
+        name = _open_session(log_store)
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "allowed"
+        assert _lock_holder(workspace, ARTIFACT_REF) == name
+
+    def test_a_lock_another_step_instance_holds_denies_naming_its_holder(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A lock held by any other step instance denies, the `failureMessage` naming
+        the holder's workflow instance and step — and the lock is untouched."""
+        holder = _open_session(log_store, session_id="01jholder", step_slug="draft")
+        _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, session_id="01jholder"
+        )
+        _open_session(log_store, orchestrator="01jother")
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "denied"
+        assert "draft" in report.authorization.failure_message
+        assert INSTANCE_ID in report.authorization.failure_message
+        assert _lock_holder(workspace, ARTIFACT_REF) == holder
+
+    def test_a_retry_inherits_and_re_points_the_previous_step_instances_lock(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A lock held by an unpromoted earlier step instance of the same step in the
+        same workflow instance is re-pointed to the retry by compare-and-swap — even
+        though the path is dirty: for a held path the lock replaces the baseline check."""
+        _open_session(log_store, session_id="01jprevious", registered_at="2026-01-01T00:01:10Z")
+        _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, session_id="01jprevious"
+        )
+        stage_artifact(workspace, ARTIFACT_REF, VALID_DOCUMENT)
+        retry = _open_session(log_store, orchestrator="01jresumed")
+
+        report = _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, action="update"
+        )
+
+        assert report.outcome.status == "allowed"
+        assert _lock_holder(workspace, ARTIFACT_REF) == retry
+
+    def test_a_held_path_skips_the_baseline_check(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """Invariant 5: for a path the step instance holds, the lock replaces the
+        baseline check — its working tree legitimately carries unpromoted bytes."""
+        _open_session(log_store)
+        _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+        stage_artifact(workspace, ARTIFACT_REF, VALID_DOCUMENT)
+
+        report = _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, action="update"
+        )
+
+        assert report.outcome.status == "allowed"
+
+    def test_a_promoted_holders_lock_counts_as_released(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """A lock whose holder's tip is its own commit reachable from the workspace
+        branch counts as released and is replaced by compare-and-swap."""
+        _open_session(log_store, session_id="01jholder", step_slug="draft")
+        _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, session_id="01jholder"
+        )
+        holder = artifact_store.find_step_ref("01jholder")
+        stage_artifact(workspace, ARTIFACT_REF, VALID_DOCUMENT)
+        artifact_store.commit_artifacts((Path(ARTIFACT_REF),), session_id="01jholder", step_ref=holder)
+        promoted = artifact_store.promote_step_ref(
+            artifact_store.find_step_ref("01jholder"), run_git(workspace, "rev-parse", "HEAD").strip()
+        )
+        artifact_store.sync_index((ARTIFACT_REF,), promoted)
+        mine = _open_session(log_store, orchestrator="01jother")
+
+        report = _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, action="update"
+        )
+
+        assert report.outcome.status == "allowed"
+        assert _lock_holder(workspace, ARTIFACT_REF) == mine
+
+    def test_a_deny_claims_no_lock(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """Postconditions: on a deny no lock is claimed or re-pointed."""
+        _open_session(log_store, "product-owner")
+
+        report = _authorize(log_store, access_control_list, workspace_layout, artifact_store)
+
+        assert report.outcome.status == "denied"
+        assert _lock_holder(workspace, ARTIFACT_REF) is None
+
+    def test_a_superseded_step_instance_never_reclaims_its_retrys_lock(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """Re-pointing runs from an EARLIER step instance to the one that continues it,
+        never back: once a retry holds the lock, the orphaned step instance it
+        continues — still without a function-10 outcome — is denied, naming the
+        holder, and the retry's lock and bytes are untouched."""
+        _open_session(log_store, session_id="01jprevious", registered_at="2026-01-01T00:01:10Z")
+        _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, session_id="01jprevious"
+        )
+        retry = _open_session(log_store, orchestrator="01jresumed")
+        _authorize(log_store, access_control_list, workspace_layout, artifact_store, action="update")
+        assert _lock_holder(workspace, ARTIFACT_REF) == retry
+
+        report = _authorize(
+            log_store,
+            access_control_list,
+            workspace_layout,
+            artifact_store,
+            session_id="01jprevious",
+            action="update",
+        )
+
+        assert report.outcome.status == "denied"
+        assert "artifact lock" in report.authorization.failure_message
+        assert _lock_holder(workspace, ARTIFACT_REF) == retry

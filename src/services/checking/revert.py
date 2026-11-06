@@ -10,9 +10,10 @@ from typing import Any
 class Revert:
     """Carry one discarded path's revert action and, when restored, its source.
 
-    Spec (function 9, invariant 2): the discard restores tracked paths from
-    `HEAD` and deletes newly created ones — a deletion restores from nothing, so
-    the source is absent.
+    Spec (function 9, invariant 2): the discard restores a path from the step
+    ref tip when the step ref changed it, otherwise from `HEAD` when tracked
+    there, and deletes a new one — a deletion restores from nothing, so the
+    source is absent.
     """
 
     action: str

@@ -25,7 +25,7 @@ from hook_classifier import HookClassifier
 from hook_event import HookDecision, HookEvent
 from hook_renderer import HookRenderer
 from session_identity import (
-    derive_step_session_id,
+    derive_worker_session_id,
     derive_turn_session_id,
     sanitize_identifier,
 )
@@ -177,18 +177,18 @@ class Adapter:
             return self._renderer.render_system_message(str(failure))
 
     def _handle_step_started(self, event: HookEvent) -> HookDecision:
-        """H1 — register the step session under its dispatcher and inject its context."""
+        """H1 — register the worker session under its dispatcher and inject its context."""
         host_id = sanitize_identifier(event.raw_host_session_id)
         parent_session_id = self._tracker.resolve_current(host_id)
         agent_id = self._binding.probe_payload_value(
-            event.payload, self._binding.host_step_session_keys
+            event.payload, self._binding.host_worker_session_keys
         )
         actor = self._binding.probe_payload_value(
             event.payload, self._binding.host_step_actor_keys
         )
         if parent_session_id is None or agent_id is None or actor is None:
             return self._renderer.render_pass_through()
-        session_id = derive_step_session_id(str(agent_id))
+        session_id = derive_worker_session_id(str(agent_id))
         if is_unregistered(parent_session_id):
             self._tracker.push_unregistered(host_id, session_id)
             return self._renderer.render_pass_through()
@@ -208,11 +208,11 @@ class Adapter:
         if status == _NOT_APPLICABLE_STATUS:
             return self._renderer.render_pass_through()
         if status != _STARTED_STATUS:
-            # `step-session-bound` and every other error: the step is pushed UNREGISTERED,
+            # `worker-session-bound` and every other error: the step is pushed UNREGISTERED,
             # so its writes and dispatches are denied rather than attributed or passed.
             self._tracker.push_unregistered(host_id, session_id)
             return self._renderer.render_system_message(
-                f"the harness could not register this step session: {_describe(registration)}"
+                f"the harness could not register this worker session: {_describe(registration)}"
             )
         try:
             self._tracker.push_current(host_id, session_id)
@@ -415,11 +415,11 @@ class Adapter:
         host_id = sanitize_identifier(event.raw_host_session_id)
         if event.hook_event_name == _SUBAGENT_STOP:
             agent_id = self._binding.probe_payload_value(
-                event.payload, self._binding.host_step_session_keys
+                event.payload, self._binding.host_worker_session_keys
             )
             if agent_id is None:
                 return self._renderer.render_pass_through()
-            ending_session_id = derive_step_session_id(str(agent_id))
+            ending_session_id = derive_worker_session_id(str(agent_id))
             current = self._tracker.resolve_current(host_id)
             if current == f"{UNREGISTERED_PREFIX}{ending_session_id}":
                 self._tracker.pop_current(host_id)

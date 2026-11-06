@@ -79,7 +79,7 @@ class TestResolveStepInstructions:
     ) -> None:
         """Spec (function 6, Postconditions + invariant 1): the session context contains
         exactly its step's declared refs — nothing more, nothing chosen by the agent —
-        and the invocation appends its own entry to the step session's log."""
+        and the invocation appends its own entry to the worker session's log."""
         step_session = _open_step_session(harness, orchestrator_session)
 
         run = harness.invoke(
@@ -103,7 +103,7 @@ class TestResolveStepInstructions:
     ) -> None:
         """Spec (function 6, invariant 1): instruction refs are declared PER STEP —
         the workflow-level refs belong to the orchestrator's session (function 1), never
-        to a step session's."""
+        to a worker session's."""
         step_session = _open_step_session(harness, orchestrator_session)
 
         run = harness.invoke(

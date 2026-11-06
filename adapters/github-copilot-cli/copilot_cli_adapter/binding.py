@@ -69,7 +69,7 @@ class ToolBinding:
     tool_call_id_keys: tuple[str, ...]
     host_session_keys: tuple[str, ...]
     host_parent_session_keys: tuple[str, ...]
-    host_step_session_keys: tuple[str, ...]
+    host_worker_session_keys: tuple[str, ...]
     host_step_actor_keys: tuple[str, ...]
     host_timestamp_keys: tuple[str, ...]
     host_cwd_keys: tuple[str, ...]
@@ -257,7 +257,7 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
         tool_call_id_keys=_strings(raw, "toolCallIdKeys"),
         host_session_keys=_strings(raw, "hostSessionKeys"),
         host_parent_session_keys=_strings(raw, "hostParentSessionKeys"),
-        host_step_session_keys=_strings(raw, "hostStepSessionKeys"),
+        host_worker_session_keys=_strings(raw, "hostWorkerSessionKeys"),
         host_step_actor_keys=_strings(raw, "hostStepActorKeys"),
         host_timestamp_keys=_strings(raw, "hostTimestampKeys"),
         host_cwd_keys=_strings(raw, "hostCwdKeys"),

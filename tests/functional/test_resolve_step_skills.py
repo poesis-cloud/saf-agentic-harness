@@ -3,7 +3,7 @@
 The correlation and determinism of function 6, for skills: a session's capabilities are
 step-scoped by construction. Each test drives the real command entry point, validates
 the round trip against the function's own contracts, and asserts the journal left in the
-step session's log — alongside function 6's entry.
+worker session's log — alongside function 6's entry.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ class TestResolveStepSkills:
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 7, Postconditions): the invocation appends its own entry to the
-        step session's log, ALONGSIDE function 6's — one entry per invocation."""
+        worker session's log, ALONGSIDE function 6's — one entry per invocation."""
         step_session = _open_step_session(harness, orchestrator_session)
 
         harness.invoke(
@@ -190,7 +190,7 @@ class TestResolveStepSkills:
     def test_resolution_writes_nothing_beyond_its_own_entry(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
-        """Spec (function 7, Postconditions): the step session's own entry is the only
+        """Spec (function 7, Postconditions): the worker session's own entry is the only
         write — the artifact plane and the dispatching session's log are untouched."""
         step_session = _open_step_session(harness, orchestrator_session)
         commits_before = harness.count_commits()

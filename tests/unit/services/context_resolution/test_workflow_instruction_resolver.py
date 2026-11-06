@@ -135,7 +135,7 @@ class TestWorkflowInstructionResolver:
         self, resolver: WorkflowInstructionResolver, step_session: str, read_journal
     ) -> None:
         """Spec function 1, precondition (E): a session with an unresolved `resolve-step`
-        entry correlating to it is a step session and loads functions 6–7 instead —
+        entry correlating to it is a worker session and loads functions 6–7 instead —
         `state-error` (`session-kind-mismatch`), journaled."""
         report = resolver.resolve_workflow_instructions(
             session_id=step_session, parent_session_id="sess-orch"

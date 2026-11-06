@@ -59,7 +59,7 @@ class TestHookBinding:
             path_keys=("filePath",),
             nested_path_keys=(),
             host_session_keys=("session_id",),
-            host_step_session_keys=("agent_id",),
+            host_worker_session_keys=("agent_id",),
             host_step_actor_keys=("agent_type",),
             dispatch_agent_keys=(),
             dispatch_model_keys=(),
@@ -123,7 +123,7 @@ class TestHookBinding:
         """
         payload = {"agent_id": "sub-1", "agent_type": "qa-engineer"}
 
-        assert binding.probe_payload_value(payload, binding.host_step_session_keys) == "sub-1"
+        assert binding.probe_payload_value(payload, binding.host_worker_session_keys) == "sub-1"
         assert binding.probe_payload_value(payload, binding.host_step_actor_keys) == "qa-engineer"
         assert binding.probe_payload_value(payload, ("missing",)) is None
 
