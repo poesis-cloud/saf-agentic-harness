@@ -1090,9 +1090,25 @@ state, and re-resolution recovers. Residual cleanup is C6's detect-and-remediate
      s.outcome  'pass' | 'fail' | 'in-flight'
      s.artifact { kind, path } | null  the artifact instance it delivered (its function-10 artifactDelivery; joins workspace by path)
    workflow     the current workflow instance (an element of workflows)
-   step         the current step instance (an element of steps); in its own postconditions, step.artifact is the artifact instance about to be promoted
+   step         the current step instance: in its own postconditions, an element of steps; in a precondition, the step instance about to start (below)
    selected     in setPredicate: the result of setQuery
    ```
+
+   **Step instance fields.** `s.outcome` is `'pass'` when the step instance's function-10
+   outcome passed; `'fail'` when function 10 concluded it otherwise, by a `fail` or an error
+   outcome (the step instance concludes not executed); and `'in-flight'` while no function-10
+   outcome concludes it (a crashed or abandoned step instance stays `'in-flight'`).
+   `s.artifact` is `{kind, path}` from that outcome's `artifactDelivery` when it names an
+   `artifactPath`, else `null`; an error outcome carries none. For the current step,
+   `step.artifact` is always `{kind: <declared kind>, path}`, with `path` `null` when no
+   single artifact instance was delivered; `step.artifact.kind` thus always gives the step's
+   declared kind.
+
+   **`step` in preconditions.** In a precondition, `step` is the step instance about to
+   start. It is not yet an element of `steps`: `step.slug`, `step.workflow` and `step.actor`
+   are set, `step.id` is `null`, `step.outcome` is `'in-flight'`, and `step.artifact` is
+   `{kind: <declared kind>, path: null}`. A path join with `step` in a precondition is a
+   configuration load error.
 
    Everything else is plain CEL: `filter`, `exists`, `exists_one`, `all`, `map`, `size`,
    `has`, `in`, `==`, `&&`, `||`. There is no per-kind artifact map and no step-artifact
@@ -1111,7 +1127,7 @@ state, and re-resolution recovers. Residual cleanup is C6's detect-and-remediate
    **Scope.** The current `workflow` and its step instances are always complete. `workflows`
    and `steps` cover only this machine's logs, which are local-only (C0), so a condition
    about another workflow instance should rely on artifact content, which syncs. In a step's
-   own postconditions, `steps` includes the current step instance with `outcome:
+   own postconditions, `steps` includes the current step instance, `step`, with `outcome:
    'in-flight'` and its `artifact` set to the delivery being evaluated.
 
    **Typing, checked at configuration load.** A read of `a.data.<p>` is valid only where the
@@ -1134,7 +1150,8 @@ state, and re-resolution recovers. Residual cleanup is C6's detect-and-remediate
    - an unknown step or workflow slug;
    - in a precondition, a reference to a current-workflow step that has not necessarily run
      yet — one that is not a declared predecessor of the step (its `kind: precondition`
-     `stepCondition`s, directly or through theirs).
+     `stepCondition`s, directly or through theirs);
+   - in a precondition, a path join with `step`.
 
    **Runtime.** An empty `selected` is a normal value: the predicate decides whether it
    passes or fails. A CEL expression failing **at runtime** (an evaluation error, not a
@@ -1962,7 +1979,8 @@ artifact schemas, ACL grants, and the model catalog.
 
 Every artifact is schema-bound to one of the framework's artifact schemas; every log entry is
 bound to the log-entry contract. The selector model has one selector type: selecting persisted
-artifacts. Where a
+state, either artifact instances (`workspace`) or the workflow and step instances the logs
+record (`workflows`, `steps`; function 5, invariant 2). Where a
 condition depends on log evidence, that evidence is read from the logs (part of workspace
 state) and asserted as state. Artifacts are the framework's content; logs are the harness's
 record — one workspace, two authors, no overlap.

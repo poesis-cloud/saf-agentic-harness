@@ -408,14 +408,18 @@ owes, each with its red tests first:
 - `ConditionEvaluator` — the CEL activation: `workspace` from the evaluated state (the
   workspace branch for function 5, the step state for function 10); `workflows` and `steps`
   from the logs, `steps` oldest first, with `s.outcome` and `s.artifact` from each step
-  instance's function-10 outcome and `artifactDelivery`; in a step's own postconditions, the
-  current step instance `in-flight`, its `artifact` the delivery being evaluated;
+  instance's function-10 outcome and `artifactDelivery` (`'fail'` for a `fail` or an error
+  outcome, `'in-flight'` with no concluding outcome, `s.artifact` null without a delivered
+  `artifactPath`); in a step's own postconditions, the current step instance `in-flight`, its
+  `artifact` the delivery being evaluated; in a precondition, `step` the step instance about
+  to start, outside `steps`, with a null `id` and `artifact` `{kind: <declared kind>, path:
+  null}`;
 - `ConfigLoader` — the typing check, by an AST walk with scope tracking: an `a.data.<p>` read
   is valid only under a kind guard in the same macro (`a.kind == '<literal>'`, or a path join
   with a step instance of a literal step of a known workflow), `<p>` is checked against that
   kind's schema, and an unguarded read, an unknown kind, an unknown step or workflow slug, or
   — in a precondition — a reference to a current-workflow step that is not a declared
-  predecessor is a configuration load error;
+  predecessor or a path join with `step` is a configuration load error;
 - loading only the kinds the guards reference, where possible;
 - runtime CEL errors stay `state-error` (`condition-evaluation-failed`); a false predicate
   stays a normal `fail`;
