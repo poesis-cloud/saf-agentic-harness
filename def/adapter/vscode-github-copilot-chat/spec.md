@@ -303,7 +303,8 @@ The agent's command never runs and is never edited.
 ```
 
 **H5 `PostToolUse` — write class — write-ended.** The commit gate (function 9) — validates
-the just-landed staged write, commits or reverts it.
+the just-landed staged write, commits it onto the step instance's step ref (never the
+workspace branch) or reverts it.
 
 **In** (stdin):
 
@@ -939,7 +940,9 @@ silent allow (deny is the enforcement; erring open would unmake it).
 ### H3 `PreToolUse` — write class — write-starting
 
 Live authorization (function 8) of every structured write tool call whose target resolves
-into the workspace artifact layout. Same physical registration as H2; classified by
+into the workspace artifact layout — the same boundary that claims each written path's
+artifact lock for the acting step instance and denies any write made outside an in-flight
+step instance (function 8, invariants 7–8). Same physical registration as H2; classified by
 `tool_name ∈ writeTools ∪ deleteTools` (`tools.yaml`).
 
 **In** (stdin) — as H2, with a write tool:
@@ -995,8 +998,10 @@ the call:
   directory is **denied**, never passed through — logs are harness-authored, single-writer
   (core function 8, invariant 6); no agent write there is ever legitimate.
 - `session_id` at this hook resolves (host-session → current-agent-session rule) to the
-  session the tool call runs in — the step (subagent) session for step writes. C7: an
-  unregistered session's write passes through.
+  session the tool call runs in — the worker (subagent) session for step writes. C7: an
+  unregistered session's write passes through. A registered session that is not the worker
+  session of an in-flight step instance (an orchestrator session) is denied by function 8
+  ("no step in flight", invariant 7), never passed through.
 
 **Out** (stdout, exit 0)
 
@@ -1006,7 +1011,8 @@ the call:
 { "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow" } }
 ```
 
-- Any path denied (missing privilege — or unclean staging baseline, function 8 invariant 5):
+- Any path denied (missing privilege; an unclaimed path's unclean staging baseline; no step
+  in flight; or an artifact lock another step instance holds — function 8, invariants 4–8):
 
 ```json
 {
@@ -1028,7 +1034,13 @@ mapped).
 **Postconditions**
 
 - One log entry per authorization decision (per path), in the acting session's log.
-- On deny, the write never lands: the workspace never sees unauthorized bytes.
+- On allow, the acting step instance holds each allowed path's artifact lock
+  (`refs/harness/locks/<artifactPath>`, function 8, invariant 8).
+- On deny, the write never lands: the workspace never sees unauthorized bytes, and no lock
+  is claimed or re-pointed for a denied path. Claims are per path: in a multi-path call
+  denied as a whole (invariant 2), the locks claimed for its allowed paths persist — a
+  claimed lock is held until its step instance is promoted (function 8, invariant 8) — and
+  the retried write finds them already held by its step instance.
 
 **Invariants**
 
@@ -1153,7 +1165,9 @@ the decision). Both channels reach the model in the same turn, with the report i
 ### H5 `PostToolUse` — write class — write-ended
 
 The commit gate (function 9): validates the just-landed staged write and either commits it
-into workspace state or reverts it, feeding the failure back to the writing agent.
+onto the acting step instance's step ref — never onto the workspace branch: it enters
+workspace state only when function 10 promotes the step instance (H6) — or reverts it,
+feeding the failure back to the writing agent.
 
 **Registration** (shared by H5/H6 — ONE `PostToolUse` entry):
 
@@ -1209,7 +1223,8 @@ mirroring H3's fail-closed denial.
 
 **Out** (stdout, exit 0)
 
-- Valid (validated and committed):
+- Valid (validated; committed onto the step ref, or — every path byte-identical to the step
+  ref tip — nothing to commit, `commitId: null`, function 9, invariant 4):
 
 ```json
 { "continue": true }
@@ -1228,8 +1243,8 @@ mirroring H3's fail-closed denial.
 }
 ```
 
-**Output construction** — `outcome: valid` → plain success (the whole set's commit already
-happened
+**Output construction** — `outcome: valid` → plain success (the whole set's commit, if any,
+already happened
 harness-side; nothing to tell the model). `outcome: reverted` → `decision: "block"` with
 `reason` concatenating each `artifactChecks[]` entry's path and `failureMessage` verbatim
 plus its revert record — the host
@@ -1241,28 +1256,33 @@ Harness errors →
 `decision: "block"` + error detail.
 
 **Preconditions** — function 9's own: the path resolves to an artifact schema; function 8
-established the clean staging baseline at H3.
+admitted every path at H3 — each held by the acting step instance's artifact lock, a newly
+claimed path on a clean staging baseline — and the step instance has its own step ref.
 
 **Postconditions**
 
-- C6 holds: state advanced by the validated commit, or the staged write was discarded — one
-  log entry per write validation carrying the outcome (and the revert record when reverted).
+- C6 holds: the step ref advanced by the validated commit — workspace state does not advance
+  here, only at H6's promotion — or the staged write was discarded; one log entry per write
+  validation carrying the outcome (and the revert record when reverted).
 
 **Invariants**
 
-1. The revert is the HARNESS's git action (restore from `HEAD` / delete the new path) — the
+1. The revert is the HARNESS's git action (restore from the step ref tip or `HEAD` / delete
+   the new path) — the
    host cannot undo a tool call and is never asked to; `decision: block` only carries the
    message.
 2. ONE function-9 invocation per tool call, carrying the whole path set — unlike H3's per-path
    function-8 fan-out: authorization is per-path, the commit gate is per-call (the set is the
    transaction).
-3. The hook never returns `valid` without the commit having succeeded — commit failure is a
-   `system-error` → block.
+3. The hook never returns `valid` while a needed commit failed — commit failure is a
+   `system-error` → block; a `valid` with `commitId: null` committed nothing because nothing
+   changed (function 9, invariant 4).
 
 ### H6 `PostToolUse` — dispatch class — step-ended
 
 THE evaluation point (function 10): the dispatch returned, the worker session has ended, the
-state it left is final. Same physical registration as H5; classified by
+state it left is final. It is also the acceptance point: a passing step instance is promoted
+into workspace state, a failing one withheld. Same physical registration as H5; classified by
 `tool_name ∈ dispatchTools`.
 
 **In** (stdin)
@@ -1333,8 +1353,11 @@ block + error detail.
 
 **Postconditions**
 
-- One `check-step-postconditions` entry — the exact input of function 3's cursor — in the
-  dispatching session's log. No artifact is touched.
+- One `check-step-postconditions` entry — the exact input of function 3's cursor, with its
+  `promotion` — in the dispatching session's log. No artifact content is authored: on `pass`,
+  function 10 promotes the step instance (the workspace branch fast-forwards to the evaluated
+  step state and its artifact locks are released); on `fail`, workspace state and the locks
+  are untouched.
 
 **Invariants**
 
@@ -1811,9 +1834,12 @@ verifications only live experimentation can close).
 - **I6 — RESOLVED: enforcement claims are scoped per plane.** The core's functions 5 and 8
   each carry an explicit **Enforcement scope** paragraph: "THE enforcement point" holds while
   the boundary fires; a fail-open host (timeout, spawn failure — this host's documented
-  behavior) can bypass the function, and the bypass is bounded — unmediated writes never
-  commit (fn 8) and an ungated step never journals executed (fn 5) — with C6's
-  detect-and-remediate plane owning residual cleanup, exactly as C6's own graded guarantee.
+  behavior) can bypass the function, and the bypass is bounded — no harness commit carries
+  unmediated bytes, and the harness advances workspace state only by promotion (fn 8,
+  fn 10); a foreign Git commit can still carry them into the local workspace branch, outside
+  the harness's guarantee (C6) — and an ungated step never journals executed (fn 5) — with
+  C6's detect-and-remediate plane owning residual cleanup, exactly as C6's own graded
+  guarantee.
 - **I7 — RESOLVED: the core names the correlation reliance.** Function 10's In now states
   that step-ended correlation **normatively relies on function 3, invariant 9** (one
   in-flight step per orchestrator session): a host payload need not echo the worker session's
@@ -1822,8 +1848,8 @@ verifications only live experimentation can close).
 - **I8 — RESOLVED: one write ≠ one path, modeled end to end.** Function 8 takes exactly one
   `artifactPath` (authorization is per-path — the adapter fans out one invocation per distinct
   path, 1 invocation = 1 entry preserved); function 9 is **set-based** (`artifactPaths`):
-  ONE invocation per tool call carries the whole set, which validates and commits (or is
-  discarded) atomically. The adapter-binding contract (`tools.conf.schema.json`) now carries
+  ONE invocation per tool call carries the whole set, which validates and commits onto the
+  step ref (or is discarded) atomically. The adapter-binding contract (`tools.conf.schema.json`) now carries
   `nestedPathKeys` — dotted path expressions with `[]` array fan-out
   (`replacements[].filePath`) — plus the previously undeclared binding keys
   (`hostWorkerSessionKeys`, `hostStepActorKeys`, `mediatedCommandTools`, `mediatedCommandKeys`),
