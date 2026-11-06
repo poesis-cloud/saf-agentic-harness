@@ -232,7 +232,9 @@ own permission flow still applies to what the harness lets through.
    case-insensitive). Any `denied` → deny. Function 8 claims each allowed path's artifact
    lock for the acting step instance, and denies a write made outside an in-flight step
    instance — from a turn (orchestrator) session — or to a path another step instance's lock
-   holds (core function 8, invariants 7–8).
+   holds (core function 8, invariants 7–8). Claims are per path: when the batch is denied as
+   a whole, the locks claimed for its allowed paths persist until the step instance is
+   promoted, and the retried write finds them already held by its step instance.
 
    **Host adaptation (missing folders).** `create` refuses a missing parent folder and no
    tool every model gets creates one, so an actor would fall back to a shell `mkdir`, which
@@ -413,7 +415,7 @@ committed.
 | Boundary / guarantee | Limitation in this runtime | Fallback |
 | --- | --- | --- |
 | Hook timeout | A timed-out `preToolUse` **fails open**. | Generous `timeoutSec` (120 s) on gating events. Every harness call of a firing is bounded by a deadline inside the event's registered `timeoutSec` (by 25 %, at least 5 s): a call that would start or run past it is stopped, its whole process tree killed (git children included: a process group on POSIX, `taskkill /T` on Windows) so no commit or revert outlives it, and is a harness failure, so the boundary DENIES while the host still honors the answer. Only a stall before the adapter runs (interpreter start) can still reach the host timeout. H5 still validates and reverts after the fact. |
-| Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core bounds them: their bytes land only in the working tree, never in a commit or in workspace state (only promotion advances it), and a dirtied unclaimed path fails function 8's staging-baseline check; C6's detect-and-remediate plane owns cleanup. Document "write through `create`/`edit`" in the agents. |
+| Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core bounds them: no harness commit carries their bytes, the harness advances workspace state only by promotion, and a dirtied unclaimed path fails function 8's staging-baseline check. A foreign Git commit can still carry them into the local workspace branch, outside the harness's guarantee (C6); C6's detect-and-remediate plane owns cleanup. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a worker session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
 | H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 detect-and-remediate plane. |

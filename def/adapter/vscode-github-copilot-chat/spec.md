@@ -1037,7 +1037,10 @@ mapped).
 - On allow, the acting step instance holds each allowed path's artifact lock
   (`refs/harness/locks/<artifactPath>`, function 8, invariant 8).
 - On deny, the write never lands: the workspace never sees unauthorized bytes, and no lock
-  is claimed or re-pointed.
+  is claimed or re-pointed for a denied path. Claims are per path: in a multi-path call
+  denied as a whole (invariant 2), the locks claimed for its allowed paths persist — a
+  claimed lock is held until its step instance is promoted (function 8, invariant 8) — and
+  the retried write finds them already held by its step instance.
 
 **Invariants**
 
@@ -1829,10 +1832,12 @@ verifications only live experimentation can close).
 - **I6 — RESOLVED: enforcement claims are scoped per plane.** The core's functions 5 and 8
   each carry an explicit **Enforcement scope** paragraph: "THE enforcement point" holds while
   the boundary fires; a fail-open host (timeout, spawn failure — this host's documented
-  behavior) can bypass the function, and the bypass is bounded — unmediated writes never
-  commit and never reach workspace state, which only promotion advances (fn 8, fn 10), and
-  an ungated step never journals executed (fn 5) — with C6's
-  detect-and-remediate plane owning residual cleanup, exactly as C6's own graded guarantee.
+  behavior) can bypass the function, and the bypass is bounded — no harness commit carries
+  unmediated bytes, and the harness advances workspace state only by promotion (fn 8,
+  fn 10); a foreign Git commit can still carry them into the local workspace branch, outside
+  the harness's guarantee (C6) — and an ungated step never journals executed (fn 5) — with
+  C6's detect-and-remediate plane owning residual cleanup, exactly as C6's own graded
+  guarantee.
 - **I7 — RESOLVED: the core names the correlation reliance.** Function 10's In now states
   that step-ended correlation **normatively relies on function 3, invariant 9** (one
   in-flight step per orchestrator session): a host payload need not echo the worker session's
