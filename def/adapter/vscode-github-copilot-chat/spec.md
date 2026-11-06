@@ -234,7 +234,7 @@ session per chat request and injects its workflow context (functions 0–2).
 { "hookSpecificOutput": { "hookEventName": "UserPromptSubmit", "additionalContext": "<rendered workflow context>" } }
 ```
 
-**H1 `SubagentStart` — step-started.** Registers the step session and injects its declared
+**H1 `SubagentStart` — step-started.** Registers the worker session and injects its declared
 instructions and skills (functions 0, 6, 7).
 
 **In** (stdin):
@@ -396,10 +396,18 @@ session-started from step-started by log correlation (unresolved `step-resolutio
 Here the host discriminates for us: a subagent session never fires the top-level events — it
 fires `SubagentStart` — and H0 fires only while the scoping orchestrator agent is active. The
 step-resolution correlation (validated inside start-session itself, see [Session identity
-binding](#session-identity-binding)) remains necessary to resolve **which step** a step
+binding](#session-identity-binding)) remains necessary to resolve **which step** a worker
 session serves — but not to classify the boundary (see I1).
 
 ## Agent-session semantics
+
+**Mapping to the core's sessions.** The core defines its two session kinds host-agnostically —
+an **orchestrator session** drives at most one workflow instance, a **worker session**
+executes exactly one step instance — and leaves the mapping from host signals to each
+adapter. On this host: an orchestrator session opens at each user prompt to a framework
+orchestrator (H0) and lasts until that orchestrator returns to the user; a worker session
+opens at each subagent dispatch (H1) and lasts until the subagent returns to the
+orchestrator. The rest of this section is that mapping's detail.
 
 The harness noun this adapter binds is the **agent session**: ONE execution of ONE agent
 until it **returns** — to the user when the agent is an orchestrator, to the orchestrator
@@ -483,13 +491,13 @@ harness log (which the adapter has no access to at all):
 
 - **H0** resets the stack for this `session_id` fresh — a new turn discards whatever a prior
   turn left, and pushes the orchestrator's new turn session as its base.
-- **H1** pushes the new step session on top when a dispatch opens — the previous top (the
+- **H1** pushes the new worker session on top when a dispatch opens — the previous top (the
   dispatching orchestrator's turn session) becomes the new step's `parentSessionId` before
   the push.
-- **H7** (the step-closing case) pops the step session back off, restoring the dispatching
+- **H7** (the step-closing case) pops the worker session back off, restoring the dispatching
   session as current — see Session closure just below. Without this pop, the
   orchestrator's NEXT mediated call (H4) after a step closes would misattribute to the
-  already-ended step session instead of its own. H7's `Stop` case instead **clears** the
+  already-ended worker session instead of its own. H7's `Stop` case instead **clears** the
   whole stack for this `session_id` — the turn is over, and forgetting immediately is what
   makes a LATER firing from a non-framework agent in the same conversation resolve to
   `None` (the correct C7 pass-through) instead of a stale session.
@@ -498,7 +506,7 @@ harness log (which the adapter has no access to at all):
   tool calls — including any non-framework subagent it spawns (H1 registers and pushes
   nothing for those) — are the orchestrator acting, and resolve to its session. That is
   attribution semantics, not a leak: a dispatch is the dispatcher's action unless the
-  framework carved it into its own step session.
+  framework carved it into its own worker session.
 
 Deterministic: a conversation processes one request at a time, and only one step is in flight
 per orchestrator session (function 3, invariant 9), so the stack never holds more than one
@@ -528,7 +536,7 @@ the terminal run a harness function with no attributable session at all.
 
 **Failed registration (fail closed).** Only an explicit `not-applicable` from function 0
 leaves a session ungoverned (core failure-mode rule 2). Any other answer from `start-session`
-— an error report, `step-session-bound` included, or no report at all — opens no harness
+— an error report, `worker-session-bound` included, or no report at all — opens no harness
 session, yet must not let the session's tool calls bypass the boundaries. So H0 resets the
 stack to an **unregistered** entry (`!unregistered:<sessionId>`, never a valid slug), and H1
 pushes one for the step (also when its dispatcher's own entry is unregistered); both answer
@@ -547,7 +555,7 @@ one bounded case, not. "Registered" means `SessionTracker` holds an entry for th
 | # | Scenario | Resolution | Why |
 | --- | --- | --- | --- |
 | 1 | Two different conversations (concurrent chats/tabs) | Each resolves only its own | `SessionTracker` is keyed by the host's own `session_id` — distinct, host-assigned, unforgeable per conversation (see [Session identity binding](#session-identity-binding)) |
-| 2 | Same conversation, step nested under its dispatching turn | Step session while open, dispatching turn once it closes | H1 pushes, H7's `SubagentStop` pops — the stack IS the nesting |
+| 2 | Same conversation, step nested under its dispatching turn | Worker session while open, dispatching turn once it closes | H1 pushes, H7's `SubagentStop` pops — the stack IS the nesting |
 | 3 | Same conversation, later turn, previous turn's `Stop` ran normally | New turn's session | H0 resets the stack fresh on every firing, independent of whether `Stop` ran |
 | 4 | Same conversation, `Stop` never ran (crash/timeout), NEXT activity is a framework agent | New turn's session — self-heals | `UserPromptSubmit` fires before any tool call in the turn (host-ordered); H0 resets the stack unconditionally, so the stale entry cannot survive to be read |
 | 5 | Same conversation, `Stop` never ran, NEXT activity is a non-framework agent (no H0 fires for it) | **Stale session — the bounded residual gap** | Nothing resets a stack that only H0 clears/resets; C7's "unregistered → pass through" does not fire because the entry IS registered, just stale. Severity is real: the foreign agent's writes are misattributed to the stale framework session and evaluated against ITS grants — a privilege leak, not just wrong journaling (C8 narrows it only if the stale session's own log did receive an ending entry). Closes only at this conversation's next framework H0 |
@@ -699,7 +707,7 @@ recorded unregistered, so it cannot pass any later boundary (see *Failed registr
 
 ### H1 `SubagentStart` — step-started
 
-Registers the step session (function 0, with parent) and injects the step's declared context
+Registers the worker session (function 0, with parent) and injects the step's declared context
 (functions 6–7) through `additionalContext` — the host's native context-injection surface.
 
 **Registration**
@@ -743,7 +751,7 @@ Registers the step session (function 0, with parent) and injects the step's decl
    `{ "in": { "agent": "<agent_type>", "sessionId": "<sanitized agent_id>", "parentSessionId": "<current agent session of session_id>" } }`
    (parent per the host-session → current-agent-session resolution — the dispatching
    orchestrator's turn session, not the raw conversation id, from the adapter's own
-   `SessionTracker`). After resolving the parent, the adapter **pushes** this new step
+   `SessionTracker`). After resolving the parent, the adapter **pushes** this new worker
    session (`sanitized(agent_id)`) as current for this `session_id` — see
    [Session identity binding](#session-identity-binding) — so any write hooks (H3/H5) firing
    during the step resolve to it, not to the dispatching orchestrator session; H7 pops it
@@ -795,13 +803,13 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
   parent session's log — the adapter has no log access of its own to pre-check this.
 - A `SubagentStart` with **no** correlatable unresolved
   `step-resolution` entry gets `not-applicable` from function 0 (core failure-mode rule 2 —
-  foreign and framework dispatches alike: for a step session the correlation IS the gate, so
+  foreign and framework dispatches alike: for a worker session the correlation IS the gate, so
   the two cases converge on the same outcome even though the core could now tell them apart
   via its own membership lookup, I15): rendered as pass-through, exit 0, empty
   output, optionally a stderr diagnostic. An uninstructed framework subagent is bounded: its
   step never journals executed (function 10 finds no in-flight step either), so the workflow
   makes no progress and re-resolution recovers.
-- Any OTHER answer — `step-session-bound` (a second session for an already-bound step
+- Any OTHER answer — `worker-session-bound` (a second session for an already-bound step
   resolution), another error report, or no report — pushes an unregistered entry for the
   step and answers `systemMessage`: its writes and dispatches are denied until its
   `SubagentStop` pops it (see *Failed registration* under
@@ -809,7 +817,7 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
 
 **Postconditions**
 
-- The step session's log exists; its first three entries are the registration and the two
+- The worker session's log exists; its first three entries are the registration and the two
   context resolutions.
 - The subagent's context contains exactly the rendered step refs.
 
@@ -824,7 +832,7 @@ two reports, respecting the [context-injection semantics](#context-injection-sem
 ### H2 `PreToolUse` — dispatch class — step-starting
 
 THE enforcement point for step preconditions (function 5): a failing precondition denies the
-dispatch before the step session ever opens. Fires on `PreToolUse` when `tool_name` is a
+dispatch before the worker session ever opens. Fires on `PreToolUse` when `tool_name` is a
 declared dispatch tool (`tools.yaml` → `dispatchTools: [runSubagent]`).
 
 **Registration** (shared by H2/H3/H4 — the host has no matcher; ONE `PreToolUse` entry, the
@@ -918,7 +926,7 @@ silent allow (deny is the enforcement; erring open would unmake it).
 **Postconditions**
 
 - One `check-step-preconditions` entry in the dispatching (orchestrator) session's log.
-- On deny, the dispatch never executes — the step session never opens (host guarantee for a
+- On deny, the dispatch never executes — the worker session never opens (host guarantee for a
   completed hook returning `deny`).
 
 **Invariants**
@@ -954,7 +962,7 @@ the call:
 {
   "in": {
     "sessionId": "<current agent session of session_id>",
-    "parentSessionId": "<parent, when the writer is a step session>",
+    "parentSessionId": "<parent, when the writer is a worker session>",
     "artifactPath": "portfolio/epics/epic-payments.md",
     "action": "create"
   }
@@ -1089,7 +1097,7 @@ model-authored command is stamped or rewritten.
    `sessionId: <the resolved current session>` and
    `parentSessionId: SessionTracker.resolve_parent(sanitized(session_id))`, the session
    whose dispatch opened it (`null` for a turn session). The core's mediated attribution rule
-   takes both ids from host-observed state, so a step session's request is journaled under
+   takes both ids from host-observed state, so a worker session's request is journaled under
    its parent.
 6. Answer with a **deny** whose `permissionDecisionReason` is
    `SAFe agentic harness RESULT (<function>): <directive>` followed by a blank line and the
@@ -1132,7 +1140,7 @@ the decision). Both channels reach the model in the same turn, with the report i
    resolved-but-already-closed session is refused by the harness core itself (C8, the
    [mediated-invocation backstop](../../core/spec.md#invocation-surfaces-one-command-system)).
 5. Inside a dispatched subagent the envelope `session_id` is the PARENT conversation's id
-   (I13), so attribution is the tracker's top-of-stack — the step session H1 pushed — not a
+   (I13), so attribution is the tracker's top-of-stack — the worker session H1 pushed — not a
    per-subagent id from the payload; this is the same caveat every hook of this host carries.
 6. If the hook times out or fails, VS Code fails open (I6) and the terminal runs the line
    itself. The agent's terminal carries no hook environment (`FRAMEWORK_DIR` and the
@@ -1253,7 +1261,7 @@ established the clean staging baseline at H3.
 
 ### H6 `PostToolUse` — dispatch class — step-ended
 
-THE evaluation point (function 10): the dispatch returned, the step session has ended, the
+THE evaluation point (function 10): the dispatch returned, the worker session has ended, the
 state it left is final. Same physical registration as H5; classified by
 `tool_name ∈ dispatchTools`.
 
@@ -1281,7 +1289,7 @@ ended relies on function 3, invariant 9 (one in-flight step per orchestrator ses
 { "in": { "sessionId": "<current agent session of session_id>", "parentSessionId": null } }
 ```
 
-Runs in the dispatching (orchestrator) session — the step session is already closed. Same
+Runs in the dispatching (orchestrator) session — the worker session is already closed. Same
 in-flight-step deduction as H2 (function 3, invariant 9) — no ACL check, no extra field: a
 target with no matching in-flight step is already not-applicable, rendered as pass-through.
 The host fires `SubagentStop` (H7 — the step's `end-session` + tracker pop)
@@ -1377,12 +1385,12 @@ H6's, and retry is re-resolution through the orchestrator, never a forced extra 
 
 **Harness invocation** — function 11 `end-session`, once the ending session resolves:
 
-1. `SubagentStop` — the ending session is `sanitized(agent_id)` directly: the step session
+1. `SubagentStop` — the ending session is `sanitized(agent_id)` directly: the worker session
    that just ended is exactly this event's own id, no resolution needed. The adapter then
    calls `SessionTracker.pop_current(sanitized(session_id))`, restoring the dispatching
    orchestrator session as current for this `session_id` (see
    [Session identity binding](#session-identity-binding)) — without this, the orchestrator's
-   next mediated call (H4) would misattribute to the now-closed step session.
+   next mediated call (H4) would misattribute to the now-closed worker session.
 2. `Stop` — resolve the ending orchestrator session via
    `SessionTracker.resolve_current(sanitized(session_id))` first, then close THAT id — never
    the raw `session_id` itself (the conversation may still open later agent sessions; only
@@ -1808,7 +1816,7 @@ verifications only live experimentation can close).
   detect-and-remediate plane owning residual cleanup, exactly as C6's own graded guarantee.
 - **I7 — RESOLVED: the core names the correlation reliance.** Function 10's In now states
   that step-ended correlation **normatively relies on function 3, invariant 9** (one
-  in-flight step per orchestrator session): a host payload need not echo the step session's
+  in-flight step per orchestrator session): a host payload need not echo the worker session's
   id — this host's `PostToolUse` (no `agent_id` echo) is fully supported without a
   `tool_use_id → agent_id` pairing.
 - **I8 — RESOLVED: one write ≠ one path, modeled end to end.** Function 8 takes exactly one
@@ -1818,7 +1826,7 @@ verifications only live experimentation can close).
   discarded) atomically. The adapter-binding contract (`tools.conf.schema.json`) now carries
   `nestedPathKeys` — dotted path expressions with `[]` array fan-out
   (`replacements[].filePath`) — plus the previously undeclared binding keys
-  (`hostStepSessionKeys`, `hostStepActorKeys`, `mediatedCommandTools`, `mediatedCommandKeys`),
+  (`hostWorkerSessionKeys`, `hostStepActorKeys`, `mediatedCommandTools`, `mediatedCommandKeys`),
   and the shipped `tools.yaml` validates against it. `patchKeys` (optional) closes the
   `apply_patch` gap: that tool names its paths only inside its patch document, so each file
   header is a path (H3); a declared write yielding no path at all fails closed (H3 deny / H5
@@ -1912,7 +1920,7 @@ verifications only live experimentation can close).
   framework-agent gating (C7) needs no `AccessControlList` dependency **adapter-side**:
   the CORE owns it — `SessionLifecycle` checks a root session's `agent` against the ACL's
   declared actors (function 0's membership gate, the session plane's one ACL lookup), and a
-  step session's gate is its step-resolution correlation (only a configured, ACL-validated
+  worker session's gate is its step-resolution correlation (only a configured, ACL-validated
   workflow actor is ever
   resolved there in the first place). The adapter itself never touches the access control
   list; core-side, the ACL serves two distinct purposes in two services — membership at

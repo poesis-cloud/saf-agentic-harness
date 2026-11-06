@@ -58,7 +58,7 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       +mediated_command_tools / guarded_shell_tools
       +powershell_command_tools
       +tool_calls_keys / tool_keys / input_keys ...
-      +host_session_keys / host_step_session_keys ...
+      +host_session_keys / host_worker_session_keys ...
       +agent_namespace_separator : str | None
       +probe(payload, keys) : Any
       +agent_name(host_agent) : str
@@ -151,7 +151,7 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
       One JSON record per host id, outside every repository
       (SAF_HARNESS_STATE_DIR | %LOCALAPPDATA% | XDG_STATE_HOME).
       A subagent's events carry sessionId = its agentId, so a
-      step session is keyed by its own id - no stack, no
+      worker session is keyed by its own id - no stack, no
       correlation. A corrupt record raises: preToolUse denies.
     end note
   }

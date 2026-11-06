@@ -348,6 +348,55 @@ time of this refresh; `make verify` is authoritative):
 
 Recorded honestly — every item below is real and currently open unless marked resolved.
 
+**Spec ahead of implementation — step transactionality.** The core spec now makes the
+**step instance** (one execution of a step, identified by its worker session id) the unit of
+acceptance, without any checkout — the working tree stays on the workspace branch and
+workspace state stays its committed `HEAD`: function 8 claims a create-only **artifact lock**
+(`refs/harness/locks/<artifactPath>`) per written path, function 9 commits each validated set
+onto the step instance's local-only **step ref**
+(`refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>`, created by function 0)
+without moving `HEAD`, and function 10 rebases in memory, evaluates the **step state**, and on
+pass **promotes** it by one compare-and-swap fast-forward of the workspace branch — so
+workspace state only ever holds the output of step instances that passed function 10 (core
+spec: Terminology, C0, C1, C6, functions 0, 3, 5, 8, 9, 10, Outcomes rule 1, Internal
+validation, Workspace Git plane, Isolation level, Logging). Nothing below is implemented yet;
+the implementation change follows the spec's approval and owes, each with its red tests
+first:
+
+- contracts — `promotion` (`{outcome: promoted | withheld, workspaceCommit}`) on
+  `check-step-postconditions.output.schema.json`; the two new normative codes
+  `workflow-instance-busy` and `step-rebase-conflict` in `report.schema.json`'s code list;
+- requirements — Git ≥ 2.38 (`git merge-tree --write-tree`);
+- function 0 — step-ref creation at worker-session registration, no checkout (from the
+  previous step instance's ref tip for a retry on an unchanged base, else from the workspace
+  branch tip; no second ref on replay; a failed creation is `system-error`) — invariant 6;
+- function 3 — the `workflow-instance-busy` precondition and invariant 10 (single driver);
+- function 8 — invariant 5 (clean baseline against `HEAD` for unclaimed paths only),
+  invariant 7 (no step instance in flight → `denied`), and invariant 8 (create-only lock
+  claim, retry re-pointing, promoted holders count as released, `denied` naming the holder);
+- function 9 — commit onto the step ref from the validated working-tree bytes with `HEAD`,
+  the working tree, and the workspace's index unmoved; revert from the step ref tip, `HEAD`,
+  or by deletion; vacuous validity against the step ref tip;
+- function 10 — in-memory rebase (`merge-tree`), delivery over the whole step state plus the
+  worker session's own commits (invariant 5), evaluation on the step state, promotion as one
+  compare-and-swap fast-forward (the acceptance point; a failed compare-and-swap is
+  `step-rebase-conflict`), then the best-effort index sync and lock deletion, or withholding;
+  step refs kept (invariants 6–7);
+- `ArtifactStore` — the step-ref and lock Git operations, reads of the step state, the logs
+  path in `.git/info/exclude`, and the sweep reporting step refs as step instances plus stale
+  locks; the class diagram (`harness-src-classes.puml`, note already updated) gains them and
+  `CheckStepPostconditionsReport.promotion`, and its PNG is re-rendered then (the committed
+  PNG is a crop that does not show `artifact_store`);
+- the **worker session** rename — the spec now pairs "orchestrator session" with "worker
+  session" (formerly "step session"): the normative code `step-session-bound` becomes
+  `worker-session-bound` (`report.schema.json`, `src/`, tests), the tools-configuration key
+  `hostStepSessionKeys` becomes `hostWorkerSessionKeys` (`tools.conf.schema.json`, both
+  adapters), and the identifiers `find_step_session_ids` / `host_step_session_keys` become
+  `find_worker_session_ids` / `host_worker_session_keys`, as the class diagrams already show;
+- adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
+  "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
+  with the core when the adapters are.
+
 **Resolved since 2026-08-21.** The `Makefile` is no longer stale: `verify` runs the whole
 pytest suite, `unit` / `functional` / `adapter` run one plane each, `test` aliases `verify`, and
 the `check-catalog` / `tests/integration/` references are gone.

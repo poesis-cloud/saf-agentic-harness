@@ -184,9 +184,9 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         ""start_session"" holds the session plane's one
         ACL lookup: a ROOT session's agent is checked
         against the declared actors (is_framework_agent);
-        a STEP session's gate is its correlation, which
-        admits one step session per resolution
-        (""step-session-bound"" - 1 step = 1 session).
+        a WORKER session's gate is its correlation, which
+        admits one worker session per resolution
+        (""worker-session-bound"" - 1 step = 1 session).
       end note
     }
 
@@ -408,17 +408,21 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       }
       note bottom of ArtifactStore
         Owns the artifact side (C6): workspace state is
-        committed state (HEAD), the working tree is the
-        write staging area. ""discover_artifacts"" reads
-        committed state and raises on an invalid artifact;
+        the workspace branch's committed state, the working
+        tree is the write staging area. ""discover_artifacts""
+        reads committed state (workspace or step state) and
+        raises on an invalid artifact;
         ""scan_raw_paths"" enumerates the raw universe for
         sweeps; ""is_staging_clean"" backs function 8's
         invariant 5 (target absent, or tracked and clean
-        against HEAD); ""commit_artifacts"" promotes a
-        validated staged SET into state as ONE commit
+        against HEAD); ""commit_artifacts"" commits a
+        validated staged SET onto the step ref as ONE commit
         (function 9's call-level atomicity) and
-        ""revert_artifact"" discards an invalid one - the
-        harness's only deliberate Git actions. Finding is
+        ""revert_artifact"" discards an invalid one - function
+        9's deliberate Git actions. The Git operations of
+        functions 0, 8, and 10 (create the step ref, claim
+        locks, rebase, promote, sync the index) join the
+        class model with their implementation. Finding is
         homed here and stays internal to this store: it is
         what ""validate_artifact"" and ""revert_artifact""
         produce, and function 9 renders it into
@@ -434,7 +438,7 @@ package "CD - Harness core classes (src/)" <<Frame>> {
         +mint_workflow_instance_id(workflow_slug: str) : str
         +find_latest_open_instance(workflow_slug: str) : str | None
         +load_session_log(session_id: str) : Log
-        +find_step_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
+        +find_worker_session_ids(parent_session_id: str, agent: str, since: str) : tuple[str, ...]
         +load_workflow_instance_view(workflow_instance_id: str) : WorkflowInstanceView
         +append_log_entry(session_id: str, entry: LogEntry) : None
       }
