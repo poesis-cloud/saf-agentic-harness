@@ -215,16 +215,28 @@ class StepAuthorizationChecker(CheckingService):
         lock = self._artifact_store.find_artifact_lock(ref)
         return self._describe_held_lock(ref, lock)
 
-    @staticmethod
-    def _continues(step_ref: StepRef, lock: ArtifactLock | None) -> bool:
-        """Tell whether the lock's holder is a step instance this one continues (a retry)."""
+    def _continues(self, step_ref: StepRef, lock: ArtifactLock | None) -> bool:
+        """Tell whether the lock's holder is a step instance this one continues (a retry).
+
+        Function 8, invariant 8: the holder must be an EARLIER step instance of the
+        same step in the same workflow instance — ordered by the worker sessions'
+        registrations — so a superseded step instance never reclaims its retry's lock.
+        """
         holder = None if lock is None else lock.holder_step_ref
-        return (
-            holder is not None
-            and holder.workflow_instance_id == step_ref.workflow_instance_id
-            and holder.step_slug == step_ref.step_slug
-            and holder.session_id != step_ref.session_id
+        if (
+            holder is None
+            or holder.workflow_instance_id != step_ref.workflow_instance_id
+            or holder.step_slug != step_ref.step_slug
+            or holder.session_id == step_ref.session_id
+        ):
+            return False
+        held_since = self._session_log_store.find_registration_timestamp(holder.session_id)
+        acting_since = self._session_log_store.find_registration_timestamp(
+            step_ref.session_id
         )
+        if held_since is None or acting_since is None:
+            return False
+        return (held_since, holder.session_id) < (acting_since, step_ref.session_id)
 
     @staticmethod
     def _describe_held_lock(ref: str, lock: ArtifactLock | None) -> str:

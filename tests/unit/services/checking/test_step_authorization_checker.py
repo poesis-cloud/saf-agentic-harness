@@ -58,6 +58,7 @@ def _open_session(
     session_id: str = SESSION,
     step_slug: str = "review",
     orchestrator: str = ORCHESTRATOR_SESSION,
+    registered_at: str = "2026-01-01T00:01:30Z",
 ) -> str | None:
     """Register the acting session — the registration function 8 reads its actor from.
 
@@ -85,7 +86,7 @@ def _open_session(
             session_id,
             agent,
             parent_session_id=orchestrator,
-            timestamp="2026-01-01T00:01:30Z",
+            timestamp=registered_at,
         )
     )
     name = f"refs/harness/steps/{INSTANCE_ID}/{step_slug}/{session_id}"
@@ -855,7 +856,7 @@ class TestArtifactLockClaim:
         """A lock held by an unpromoted earlier step instance of the same step in the
         same workflow instance is re-pointed to the retry by compare-and-swap — even
         though the path is dirty: for a held path the lock replaces the baseline check."""
-        _open_session(log_store, session_id="01jprevious")
+        _open_session(log_store, session_id="01jprevious", registered_at="2026-01-01T00:01:10Z")
         _authorize(
             log_store, access_control_list, workspace_layout, artifact_store, session_id="01jprevious"
         )
@@ -919,3 +920,31 @@ class TestArtifactLockClaim:
 
         assert report.outcome.status == "denied"
         assert _lock_holder(workspace, ARTIFACT_REF) is None
+
+    def test_a_superseded_step_instance_never_reclaims_its_retrys_lock(
+        self, log_store, access_control_list, workspace_layout, artifact_store, workspace
+    ) -> None:
+        """Re-pointing runs from an EARLIER step instance to the one that continues it,
+        never back: once a retry holds the lock, the orphaned step instance it
+        continues — still without a function-10 outcome — is denied, naming the
+        holder, and the retry's lock and bytes are untouched."""
+        _open_session(log_store, session_id="01jprevious", registered_at="2026-01-01T00:01:10Z")
+        _authorize(
+            log_store, access_control_list, workspace_layout, artifact_store, session_id="01jprevious"
+        )
+        retry = _open_session(log_store, orchestrator="01jresumed")
+        _authorize(log_store, access_control_list, workspace_layout, artifact_store, action="update")
+        assert _lock_holder(workspace, ARTIFACT_REF) == retry
+
+        report = _authorize(
+            log_store,
+            access_control_list,
+            workspace_layout,
+            artifact_store,
+            session_id="01jprevious",
+            action="update",
+        )
+
+        assert report.outcome.status == "denied"
+        assert "artifact lock" in report.authorization.failure_message
+        assert _lock_holder(workspace, ARTIFACT_REF) == retry
