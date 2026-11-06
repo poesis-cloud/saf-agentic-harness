@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import ClassVar
+from typing import Any, ClassVar, Mapping
 
 from config import Step, WorkflowCatalog
 from errors import ConfigurationError, StateError
@@ -12,7 +12,16 @@ from services.checking.checking_service import CheckingService
 from services.checking.condition_check import ConditionCheck
 from services.checking.condition_check_report import ConditionCheckReport
 from services.checking.condition_evaluator import ConditionEvaluator
-from stores.session_log_store import Log, LogEntry, Outcome, Report, SessionLogStore
+from services.checking.condition_scope import ConditionScope
+from stores.artifact_store import ArtifactStore
+from stores.session_log_store import (
+    Log,
+    LogEntry,
+    Outcome,
+    Report,
+    SessionLogStore,
+    StepInstance,
+)
 from utils.clock import Clock
 
 _RESOLVE_STEP_FUNCTION = "resolve-step"
@@ -21,6 +30,29 @@ _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 _NOT_APPLICABLE = "not-applicable"
 _PASS = "pass"
 _FAIL = "fail"
+_IN_FLIGHT = "in-flight"
+
+
+def render_step_instance(instance: StepInstance) -> dict[str, Any]:
+    """Render one step instance as a `steps` element (function 5, invariant 2)."""
+    artifact = (
+        None
+        if instance.artifact_path is None
+        else {"kind": instance.artifact_kind, "path": instance.artifact_path}
+    )
+    return {
+        "slug": instance.step_slug,
+        "id": instance.session_id,
+        "workflow": instance.workflow_instance_id,
+        "actor": instance.actor,
+        "outcome": instance.outcome,
+        "artifact": artifact,
+    }
+
+
+def render_workflow_instance(workflow_instance_id: str) -> dict[str, Any]:
+    """Render one workflow instance as a `workflows` element: its slug and id."""
+    return {"slug": workflow_instance_id.rpartition("-")[0], "id": workflow_instance_id}
 
 
 class StepConditionChecker(CheckingService, ABC):
@@ -40,12 +72,14 @@ class StepConditionChecker(CheckingService, ABC):
         evaluator: ConditionEvaluator,
         session_log_store: SessionLogStore,
         catalog: WorkflowCatalog,
+        artifact_store: ArtifactStore,
         clock: Clock | None = None,
     ) -> None:
-        """Create the checker over its evaluator, its log store, and the catalog."""
+        """Create the checker over its evaluator, its stores, and the catalog."""
         super().__init__(session_log_store, clock)
         self._evaluator = evaluator
         self._catalog = catalog
+        self._artifact_store = artifact_store
 
     def _check_open_session(
         self,
@@ -71,25 +105,97 @@ class StepConditionChecker(CheckingService, ABC):
 
         instance_id = resolution.report.context.workflow_instance_id
         step = self._find_step(instance_id, resolution)
-        conditions = tuple(
-            condition
-            for condition in step.conditions
-            if condition.kind == self.CONDITION_KIND
+        return self._evaluate_step(
+            session_id, parent_session_id, resolution, step, instance_id
         )
+
+    def _evaluate_step(
+        self,
+        session_id: str,
+        parent_session_id: str | None,
+        resolution: LogEntry,
+        step: Step,
+        instance_id: str | None,
+    ) -> Report:
+        """Evaluate the declared conditions over workspace state and journal the report.
+
+        Function 5 / C1: preconditions are evaluated against workspace state —
+        the workspace branch — with `step` the step instance about to start.
+        """
+        conditions = self._select_conditions(step)
         view = self._session_log_store.load_workflow_instance_view(instance_id)
-        checks = self._evaluator.evaluate_conditions(conditions, view, step.artifact)
-        delivery = self._check_artifact_delivery(session_id, resolution, step)
+        scope = self._build_condition_scope(
+            self._artifact_store.read_workspace_commit(),
+            instance_id,
+            self._render_starting_step(step, instance_id),
+        )
+        checks = self._evaluator.evaluate_conditions(conditions, view, scope)
         report = self._build_condition_report(
-            session_id, parent_session_id, instance_id, checks, delivery
+            session_id, parent_session_id, instance_id, checks
         )
         self._journal_report(session_id, report)
         return report
 
-    def _check_artifact_delivery(
-        self, session_id: str, resolution: LogEntry, step: Step
-    ) -> ArtifactDelivery | None:
-        """Judge the step's artifact delivery — function 10 only; none for function 5."""
-        return None
+    def _select_conditions(self, step: Step) -> tuple[Any, ...]:
+        """Select the step's declared conditions of this checker's kind."""
+        return tuple(
+            condition
+            for condition in step.conditions
+            if condition.kind == self.CONDITION_KIND
+        )
+
+    @staticmethod
+    def _render_starting_step(step: Step, workflow_instance_id: str | None) -> dict[str, Any]:
+        """Render `step` in a precondition: the step instance about to start.
+
+        Function 5, invariant 2: not yet an element of `steps` — `slug`,
+        `workflow`, and `actor` set, `id` null, `outcome` `in-flight`, and
+        `artifact` `{kind: <declared kind>, path: null}`.
+        """
+        return {
+            "slug": step.slug,
+            "id": None,
+            "workflow": workflow_instance_id,
+            "actor": step.actor,
+            "outcome": _IN_FLIGHT,
+            "artifact": {"kind": step.artifact, "path": None},
+        }
+
+    def _build_condition_scope(
+        self,
+        revision: str,
+        workflow_instance_id: str | None,
+        current_step: Mapping[str, Any],
+    ) -> ConditionScope:
+        """Assemble the condition language's variables over one evaluated state.
+
+        `steps` and `workflows` come from this machine's logs; when the current
+        step instance is one of `steps` (its own postconditions), its element is
+        replaced by `current_step`, carrying the delivery being evaluated.
+        """
+        steps = tuple(
+            current_step
+            if current_step.get("id") is not None
+            and instance.session_id == current_step["id"]
+            else render_step_instance(instance)
+            for instance in self._session_log_store.list_step_instances()
+        )
+        workflows = tuple(
+            render_workflow_instance(workflow_instance_id_)
+            for workflow_instance_id_ in self._session_log_store.list_workflow_instance_ids()
+        )
+        workflow = (
+            {"slug": None, "id": None}
+            if workflow_instance_id is None
+            else render_workflow_instance(workflow_instance_id)
+        )
+        return ConditionScope(
+            revision=revision,
+            workflow=workflow,
+            step=current_step,
+            steps=steps,
+            workflows=workflows,
+        )
 
     def _build_condition_report(
         self,
@@ -98,12 +204,14 @@ class StepConditionChecker(CheckingService, ABC):
         workflow_instance_id: str | None,
         checks: tuple[ConditionCheck, ...],
         delivery: ArtifactDelivery | None = None,
+        **extra: Any,
     ) -> ConditionCheckReport:
         """Aggregate the per-condition checks, and any delivery, into this report."""
         failed = any(check.outcome == _FAIL for check in checks) or (
             delivery is not None and delivery.outcome == _FAIL
         )
-        extra = {} if delivery is None else {"artifact_delivery": delivery}
+        if delivery is not None:
+            extra["artifact_delivery"] = delivery
         return self.REPORT_TYPE(
             context=self._build_context(
                 self.FUNCTION, session_id, parent_session_id, workflow_instance_id

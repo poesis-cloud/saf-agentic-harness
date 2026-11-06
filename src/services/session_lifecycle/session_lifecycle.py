@@ -17,6 +17,8 @@ from stores.session_log_store.log_entry import LogEntry
 from stores.session_log_store.outcome import Outcome
 from stores.session_log_store.report import Report
 from stores.session_log_store.session_log_store import SessionLogStore
+from stores.artifact_store.artifact_store import ArtifactStore
+from stores.artifact_store.step_ref import StepRef
 from utils.clock import Clock
 
 _START_FUNCTION = "start-session"
@@ -25,7 +27,7 @@ _RESOLVE_STEP_FUNCTION = "resolve-step"
 _STEP_RESOLUTION_STATUS = "step-resolution"
 _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 _SESSION_UNREGISTERED = "session-unregistered"
-_STEP_SESSION_BOUND = "step-session-bound"
+_WORKER_SESSION_BOUND = "worker-session-bound"
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -100,11 +102,17 @@ class SessionLifecycle:
         self,
         session_log_store: SessionLogStore,
         access_control_list: AccessControlList,
+        artifact_store: ArtifactStore,
         clock: Clock | None = None,
     ) -> None:
-        """Create the service over its injected log store, access control list, and clock."""
+        """Create the service over its stores, access control list, and clock.
+
+        The artifact store carries function 0's one Git action: creating a
+        worker session's step ref.
+        """
         self._session_log_store = session_log_store
         self._acl = access_control_list
+        self._artifact_store = artifact_store
         self._clock = clock or Clock()
 
     def start_session(
@@ -126,13 +134,17 @@ class SessionLifecycle:
             log = self._find_session_log(session_id)
             if log is not None:
                 return self._replay_registration(context, log, agent)
-            if not self._admits_session(agent, parent_session_id):
+            admitted, resolution = self._admits_session(agent, parent_session_id)
+            if not admitted:
                 return SessionStartReport(
                     context=context, outcome=Outcome(status="not-applicable")
                 )
         except HarnessError as error:
             return SessionStartReport(context=context, outcome=_error_outcome(error))
-        return self._register_session(context, agent)
+        report = self._register_session(context, agent)
+        if resolution is None or report.outcome.status != "started":
+            return report
+        return self._create_step_ref(report, resolution)
 
     def end_session(self, session_id: str) -> SessionEndReport:
         """Close the session's log with its final entry, idempotently (C8-exempt)."""
@@ -222,31 +234,93 @@ class SessionLifecycle:
             ),
         )
 
-    def _admits_session(self, agent: str, parent_session_id: str | None) -> bool:
+    def _admits_session(
+        self, agent: str, parent_session_id: str | None
+    ) -> tuple[bool, LogEntry | None]:
         """Tell whether persisted state names a target for this start (rule 2).
 
-        Spec (function 0, invariant 5): 1 step = 1 session — a resolution that already
-        registered its step session admits no second one (`step-session-bound`).
+        Answers the correlated step resolution for a worker session. Spec
+        (function 0, invariant 5): 1 step instance = 1 session — a resolution
+        that already registered its worker session admits no second one
+        (`worker-session-bound`).
         """
         if parent_session_id is None:
-            return self._acl.is_framework_agent(agent)
+            return self._acl.is_framework_agent(agent), None
         parent_log = self._find_session_log(parent_session_id)
         if parent_log is None:
-            return False
+            return False, None
         resolution = _find_correlated_resolution(parent_log, agent)
         if resolution is None:
-            return False
-        bound = self._session_log_store.find_step_session_ids(
+            return False, None
+        bound = self._session_log_store.find_worker_session_ids(
             parent_session_id, agent, resolution.timestamp
         )
         if bound:
             raise StateError(
-                _STEP_SESSION_BOUND,
+                _WORKER_SESSION_BOUND,
                 f"The step resolution for '{agent}' under session '{parent_session_id}' "
-                f"already registered its step session '{bound[0]}'.",
+                f"already registered its worker session '{bound[0]}'.",
                 False,
             )
-        return True
+        return True, resolution
+
+    def _create_step_ref(
+        self, report: SessionStartReport, resolution: LogEntry
+    ) -> SessionStartReport:
+        """Create the registered worker session's step ref — its step instance exists.
+
+        Spec (function 0, invariant 6): without any checkout, from the previous
+        step instance's ref tip on a retry whose base is unchanged, else from the
+        workspace branch tip. A failed creation is the uniform `system-error`,
+        journaled to the now-registered session's log; that step instance has no
+        step ref, so function 8 denies its writes and function 10 withholds it.
+        """
+        session_id = report.context.session_id
+        workflow_instance_id = resolution.report.context.workflow_instance_id
+        step_slug = str(resolution.report.payload["step"]["slug"])
+        try:
+            if workflow_instance_id is None:
+                raise StateError(
+                    "step-correlation-missing",
+                    "The correlated step resolution names no workflow instance.",
+                    False,
+                )
+            previous = self._find_previous_step_ref(
+                workflow_instance_id, step_slug, session_id
+            )
+            self._artifact_store.create_step_ref(
+                workflow_instance_id, step_slug, session_id, previous
+            )
+        except HarnessError as error:
+            failed = SessionStartReport(
+                context=report.context, outcome=_error_outcome(error)
+            )
+            self._append_entry(session_id, failed)
+            return failed
+        return report
+
+    def _find_previous_step_ref(
+        self, workflow_instance_id: str, step_slug: str, session_id: str
+    ) -> StepRef | None:
+        """Find the step's latest earlier step instance in the workflow instance, if any.
+
+        Step instances are ordered by their worker sessions' registrations.
+        """
+        candidates = [
+            (
+                self._session_log_store.find_registration_timestamp(step_ref.session_id)
+                or "",
+                step_ref,
+            )
+            for step_ref in self._artifact_store.list_step_refs(
+                workflow_instance_id, step_slug
+            )
+            if step_ref.session_id != session_id
+        ]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda candidate: (candidate[0], candidate[1].session_id))
+        return candidates[-1][1]
 
     def _register_session(self, context: Context, agent: str) -> SessionStartReport:
         """Write the registration entry as the new log's first line."""

@@ -27,7 +27,7 @@ from services.checking import (
 from stores.artifact_store import ArtifactStore
 from stores.session_log_store import SessionLogStore
 
-SELECT_DECLARED_ARTIFACT = "artifacts['review-report'].filter(a, a.slug == artifact)"
+SELECT_DECLARED_ARTIFACT = "workspace.filter(a, a.kind == step.artifact.kind)"
 
 
 class _FailingSessionLogStore(SessionLogStore):
@@ -57,7 +57,7 @@ def _build_checker(
 ) -> StepPreconditionChecker:
     """Wire the checker with its three constructor-injected collaborators."""
     return StepPreconditionChecker(
-        ConditionEvaluator(artifact_store), log_store, catalog
+        ConditionEvaluator(artifact_store), log_store, catalog, artifact_store
     )
 
 
@@ -300,7 +300,7 @@ class TestStepPreconditionChecker:
                     kind="precondition",
                     slug="report-exists",
                     set_selector={"setQuery": SELECT_DECLARED_ARTIFACT},
-                    set_predicate="selected[7].slug == 'x'",
+                    set_predicate="selected[7].path == 'x'",
                 ),
             )
         )
@@ -345,3 +345,66 @@ class TestStepPreconditionChecker:
 
         assert isinstance(report, CheckStepPreconditionsReport)
         assert report.context.function == "check-step-preconditions"
+
+    def test_binds_step_to_the_step_instance_about_to_start(
+        self,
+        artifact_store: ArtifactStore,
+        log_store: SessionLogStore,
+    ) -> None:
+        """Function 5, invariant 2 (`step` in preconditions): the step instance about
+        to start — `slug`, `workflow`, and `actor` set, `id` null, `outcome`
+        `in-flight`, `artifact` `{kind: <declared kind>, path: null}` — and not yet an
+        element of `steps`."""
+        _open_session(log_store)
+        catalog = build_catalog(
+            conditions=(
+                StateCondition(
+                    kind="precondition",
+                    slug="starting-step",
+                    set_selector={"setQuery": "steps.filter(s, s.slug == step.slug)"},
+                    set_predicate=(
+                        "selected.size() == 0 && step.id == null"
+                        " && step.outcome == 'in-flight' && step.actor == 'qa-engineer'"
+                        f" && step.workflow == '{INSTANCE_ID}' && workflow.id == step.workflow"
+                        " && step.artifact.kind == 'review-report' && step.artifact.path == null"
+                    ),
+                ),
+            )
+        )
+        checker = _build_checker(artifact_store, log_store, catalog)
+
+        report = checker.check_step_preconditions(ORCHESTRATOR_SESSION, None)
+
+        assert report.outcome.status == "pass", report.condition_checks
+
+    def test_reads_workspace_state_at_the_workspace_branch(
+        self,
+        artifact_store: ArtifactStore,
+        log_store: SessionLogStore,
+        workspace: Path,
+    ) -> None:
+        """C1: preconditions are evaluated against workspace state — the workspace
+        branch's committed state — never against the working tree."""
+        _open_session(log_store)
+        write_artifact(
+            workspace,
+            "review-report/r1.json",
+            {"slug": "review-report", "status": "draft"},
+            commit=False,
+        )
+        catalog = build_catalog(
+            conditions=(
+                StateCondition(
+                    kind="precondition",
+                    slug="report-exists",
+                    set_selector={"setQuery": SELECT_DECLARED_ARTIFACT},
+                    set_predicate="selected.size() == 0",
+                ),
+            )
+        )
+
+        report = _build_checker(artifact_store, log_store, catalog).check_step_preconditions(
+            ORCHESTRATOR_SESSION, None
+        )
+
+        assert report.outcome.status == "pass"

@@ -150,7 +150,7 @@ class TestWriteStartingHook:
         framework: Framework,
     ) -> None:
         """Adapter spec H3, Harness invocation: `session_id` resolves to the session the
-        tool call RUNS IN — the step session once H1 pushed it — with the dispatching turn
+        tool call RUNS IN — the worker session once H1 pushed it — with the dispatching turn
         session as `parentSessionId`.
         """
         open_turn()

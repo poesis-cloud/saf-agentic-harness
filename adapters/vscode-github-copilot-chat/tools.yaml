@@ -22,12 +22,12 @@ nestedPathKeys: ["replacements[].filePath"]
 patchKeys: [input]
 # Session identity (host-observed, never model-authored):
 # - top-level session: session_id (the chat session id) — SessionStart / PreToolUse / PostToolUse
-# - step session: agent_id (SubagentStart) with session_id as its parent
+# - worker session: agent_id (SubagentStart) with session_id as its parent
 hostSessionKeys: [session_id]
 hostParentSessionKeys: []
-hostStepSessionKeys: [agent_id]
+hostWorkerSessionKeys: [agent_id]
 hostStepActorKeys: [agent_type]
-# Subagent dispatch (runSubagent): the tool that opens a step session. Step-starting (function 5)
+# Subagent dispatch (runSubagent): the tool that opens a worker session. Step-starting (function 5)
 # gates it at PreToolUse; step-ended (function 10) evaluates it at PostToolUse.
 dispatchTools: [runSubagent]
 dispatchAgentKeys: [agentName]

@@ -24,7 +24,7 @@ FUNCTION = "check-step-postconditions"
 REPORT_DELIVERED_CONDITION: Mapping[str, Any] = {
     "kind": "postcondition",
     "slug": "report-delivered",
-    "setSelector": {"setQuery": "artifacts['report']"},
+    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
     "setPredicate": "size(selected) > 0",
 }
 UNBLOCKS_VERIFY_CONDITION: Mapping[str, Any] = {
@@ -79,7 +79,7 @@ UNEVALUABLE_DELIVERY_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "postcondition",
                     "slug": "unevaluable",
-                    "setSelector": {"setQuery": "artifacts['report']"},
+                    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
                     "setPredicate": "selected",
                 }
             ],
@@ -441,7 +441,7 @@ class TestArtifactDelivery:
     def test_two_instances_of_the_kind_do_not_deliver(
         self, build_harness: Callable[..., FunctionalHarness]
     ) -> None:
-        """Spec (function 10, invariant 5): exactly one instance — a step session that
+        """Spec (function 10, invariant 5): exactly one instance — a worker session that
         changed two instances of its kind fails, and the message says why."""
         harness, session = _open_delivery_session(build_harness)
         step_session = harness.deliver_step(session, "builder", "report/alpha.json", ALPHA)

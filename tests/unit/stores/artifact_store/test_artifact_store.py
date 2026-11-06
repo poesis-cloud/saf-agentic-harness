@@ -12,7 +12,7 @@ from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.workspace_layout import WorkspaceLayout
 from errors import StateError
-from stores.artifact_store import Artifact, ArtifactStore, Commit, Finding
+from stores.artifact_store import Artifact, ArtifactStore, Commit, Finding, StepRef
 from stores.session_log_store import Context, LogEntry, Outcome, Report, SessionLogStore
 
 
@@ -78,6 +78,15 @@ def store(workspace: Path, artifact_schema: Path) -> ArtifactStore:
     )
 
 
+def _step_ref(store: ArtifactStore, session_id: str = "sess-1") -> StepRef:
+    """Create a step instance's step ref from the workspace branch tip."""
+    return store.create_step_ref("flow-01AB", "draft", session_id)
+
+
+def _tip(workspace: Path, step_ref: StepRef) -> str:
+    return _run_git(workspace, "rev-parse", step_ref.name)
+
+
 class TestArtifact:
     def test_exposes_frozen_artifact_fields(self) -> None:
         artifact = Artifact(ref="sample/a.json", kind="sample", data={"slug": "a"})
@@ -130,18 +139,25 @@ class TestArtifactStore:
         (workspace / "sample" / "b.json").write_text(
             '{"slug":"b","kind":"sample"}\n', encoding="utf-8"
         )
-        before = int(_run_git(workspace, "rev-list", "--count", "HEAD"))
+        head = _run_git(workspace, "rev-parse", "HEAD")
+        step_ref = _step_ref(store)
 
         commit = store.commit_artifacts(
-            (Path("sample/a.json"), Path("sample/b.json")), session_id="sess-1"
+            (Path("sample/a.json"), Path("sample/b.json")),
+            session_id="sess-1",
+            step_ref=step_ref,
         )
 
-        assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before + 1
-        assert "sess-1" in _run_git(workspace, "log", "-1", "--pretty=%B")
         assert commit == Commit(
-            commit_id=_run_git(workspace, "rev-parse", "HEAD").strip(),
+            commit_id=_tip(workspace, step_ref),
             paths=("sample/a.json", "sample/b.json"),
         )
+        assert _run_git(workspace, "rev-list", "--count", f"HEAD..{step_ref.name}") == "1"
+        assert "session-id: sess-1" in _run_git(
+            workspace, "log", "-1", "--pretty=%B", step_ref.name
+        )
+        assert _run_git(workspace, "rev-parse", "HEAD") == head
+        assert _run_git(workspace, "diff", "--cached", "--name-only") == ""
 
     def test_commit_artifacts_commits_only_the_validated_set_not_foreign_staged_content(
         self, workspace: Path, store: ArtifactStore
@@ -156,29 +172,33 @@ class TestArtifactStore:
             '{"slug":"a","kind":"sample"}\n', encoding="utf-8"
         )
 
-        store.commit_artifacts((Path("sample/a.json"),), session_id="sess-1")
+        step_ref = _step_ref(store)
 
-        committed = _run_git(workspace, "show", "--name-only", "--pretty=", "HEAD")
+        store.commit_artifacts((Path("sample/a.json"),), session_id="sess-1", step_ref=step_ref)
+
+        committed = _run_git(workspace, "show", "--name-only", "--pretty=", step_ref.name)
         assert committed.splitlines() == ["sample/a.json"]
         assert _run_git(workspace, "diff", "--cached", "--name-only") == "foreign.txt"
 
     def test_commit_artifacts_creates_no_commit_for_a_byte_identical_set(
         self, workspace: Path, store: ArtifactStore
     ) -> None:
-        """Function 9, invariant 4: a staged path byte-identical to `HEAD` "validates
-        vacuously and stages nothing: a set of only such paths reports `valid` and
-        creates no commit"."""
+        """Function 9, invariant 4: a staged path byte-identical to the step ref tip
+        "validates vacuously and stages nothing: a set of only such paths reports
+        `valid` and creates no commit"."""
         same = workspace / "sample" / "same.json"
         same.parent.mkdir()
         same.write_text('{"slug":"same","kind":"sample"}\n', encoding="utf-8")
         _run_git(workspace, "add", "sample/same.json")
         _run_git(workspace, "commit", "-m", "add same")
-        before = int(_run_git(workspace, "rev-list", "--count", "HEAD"))
+        step_ref = _step_ref(store, "sess-2")
 
-        commit = store.commit_artifacts((Path("sample/same.json"),), session_id="sess-2")
+        commit = store.commit_artifacts(
+            (Path("sample/same.json"),), session_id="sess-2", step_ref=step_ref
+        )
 
-        assert int(_run_git(workspace, "rev-list", "--count", "HEAD")) == before
         assert commit is None
+        assert _tip(workspace, step_ref) == _run_git(workspace, "rev-parse", "HEAD")
 
     def test_a_session_log_never_enters_the_committed_workspace_state(
         self, workspace: Path, store: ArtifactStore
@@ -211,12 +231,18 @@ class TestArtifactStore:
             '{"slug":"a","kind":"sample"}\n', encoding="utf-8"
         )
 
-        store.commit_artifacts((Path("sample/a.json"),), session_id="sess-log")
+        step_ref = _step_ref(store, "sess-log")
+        store.commit_artifacts(
+            (Path("sample/a.json"),), session_id="sess-log", step_ref=step_ref
+        )
 
         assert (workspace / "logs" / "sess-log.log.jsonl").is_file()
-        committed = _run_git(workspace, "ls-tree", "-r", "--name-only", "HEAD").splitlines()
+        committed = _run_git(
+            workspace, "ls-tree", "-r", "--name-only", step_ref.name
+        ).splitlines()
         assert "sample/a.json" in committed
         assert not [path for path in committed if path.startswith("logs/")]
+        assert "logs/" not in _run_git(workspace, "status", "--porcelain", "--untracked-files=all")
 
     def test_revert_artifact_restores_tracked_path(
         self, workspace: Path, store: ArtifactStore

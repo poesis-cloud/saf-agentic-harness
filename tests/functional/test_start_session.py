@@ -106,7 +106,7 @@ class TestStartSession:
     def test_step_session_without_a_correlated_resolution_passes_through(
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
-        """Spec (function 0, precondition E + rule 2): for a step session the
+        """Spec (function 0, precondition E + rule 2): for a worker session the
         correlation IS the check — a dispatch no step resolution correlates to finds
         no target and is `not-applicable`, unjournaled."""
         run = harness.invoke(
@@ -124,7 +124,7 @@ class TestStartSession:
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 0, invariant 3): the parent chain is unbounded — each start
-        records one parent, and a step session correlating to its parent's unresolved
+        records one parent, and a worker session correlating to its parent's unresolved
         step resolution registers with that parent recorded."""
         harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
 
@@ -148,8 +148,8 @@ class TestStartSession:
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 0, invariant 5 + rule 4): 1 step = 1 session — once the
-        in-flight resolution registered its step session, a second start for it is
-        `state-error` (`step-session-bound`), returned and never journaled."""
+        in-flight resolution registered its worker session, a second start for it is
+        `state-error` (`worker-session-bound`), returned and never journaled."""
         harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
         harness.invoke(
             FUNCTION,
@@ -168,7 +168,7 @@ class TestStartSession:
 
         report = assert_contract_round_trip(harness, run)
         assert report["outcome"]["status"] == "state-error"
-        assert run.error_code == "step-session-bound"
+        assert run.error_code == "worker-session-bound"
         assert not harness.is_session_logged("second-session")
         assert harness.read_log_lines(orchestrator_session) == parent_before
         assert len(harness.read_log("step-session")) == 1
@@ -178,7 +178,7 @@ class TestStartSession:
     ) -> None:
         """Spec (function 0, invariant 5): function 10 concludes the step at dispatch
         return; the orchestrator re-resolves the failed step, and that new resolution
-        admits a new step session."""
+        admits a new worker session."""
         harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
         harness.invoke(
             FUNCTION,

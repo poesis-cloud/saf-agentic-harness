@@ -16,6 +16,8 @@ from services.checking.check_step_preconditions_report import (
 from services.checking.condition_check import ConditionCheck
 from services.checking.condition_check_report import ConditionCheckReport
 from services.checking.condition_evaluator import ConditionEvaluator
+from services.checking.condition_scope import ConditionScope
+from services.checking.promotion import Promotion
 from services.checking.revert import Revert
 from services.checking.step_artifact_checker import StepArtifactChecker
 from services.checking.step_authorization_checker import StepAuthorizationChecker
@@ -33,6 +35,8 @@ __all__ = [
     "ConditionCheck",
     "ConditionCheckReport",
     "ConditionEvaluator",
+    "ConditionScope",
+    "Promotion",
     "Revert",
     "StepArtifactChecker",
     "StepAuthorizationChecker",

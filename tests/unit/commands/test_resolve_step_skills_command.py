@@ -12,7 +12,7 @@ from utils import SchemaValidator
 
 
 class TestResolveStepSkillsCommand:
-    """Function 7's command: the step session's skill context binding."""
+    """Function 7's command: the worker session's skill context binding."""
 
     def test_parses_its_in_object_against_its_own_input_contract(
         self, schema_validator: SchemaValidator

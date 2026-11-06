@@ -197,7 +197,7 @@ def workflow_yaml(
     second_step_condition: str = "draft",
     positive_capabilities: bool = True,
     orchestrator: str = "facilitator",
-    set_query: str = "artifacts['epic']",
+    set_query: str = "workspace.filter(a, a.kind == 'epic')",
     set_predicate: str = "size(selected) > 0",
     description: str | None = None,
     step_description: str | None = None,

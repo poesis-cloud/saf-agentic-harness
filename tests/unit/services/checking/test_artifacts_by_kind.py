@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from checking_fixtures import build_instance_view, run_git
+from checking_fixtures import build_instance_view, build_scope, run_git
 from config import StateCondition, WorkspaceLayout
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
@@ -99,7 +99,7 @@ def _evaluate(
         set_predicate=set_predicate,
     )
     [check] = ConditionEvaluator(store).evaluate_conditions(
-        (condition,), build_instance_view([]), artifact
+        (condition,), build_instance_view([]), build_scope()
     )
     return check.outcome
 
@@ -108,35 +108,36 @@ class TestArtifactsByKind:
     def test_resolves_instances_by_kind_through_the_workspace_layout(
         self, workspace: Path, portfolio_store: ArtifactStore
     ) -> None:
-        """Function 5, invariant 2: `artifacts` maps an artifact (schema) slug to its
-        instances — an Epic committed under `portfolio/portfolio-backlog/...` IS in
-        `artifacts['epic']`, though no folder is named `epic`."""
+        """Function 5, invariant 2: `a.kind` is the schema slug, from the workspace
+        layout — an Epic committed under `portfolio/portfolio-backlog/...` IS of kind
+        `epic`, though no folder is named `epic`."""
         _commit(workspace, EPIC_REF, _epic("probe-epic"))
         _commit(workspace, FEATURE_REF, json.dumps({"slug": "refunds"}))
 
         assert _evaluate(
             portfolio_store,
-            "artifacts['epic']",
-            "selected.size() == 1 && selected[0].slug == 'probe-epic'",
+            "workspace.filter(a, a.kind == 'epic')",
+            "selected.size() == 1 && selected[0].data.slug == 'probe-epic'"
+            f" && selected[0].path == '{EPIC_REF}'",
         ) == "pass"
         assert _evaluate(
-            portfolio_store, "artifacts['feature']", "selected.size() == 1"
+            portfolio_store, "workspace.filter(a, a.kind == 'feature')", "selected.size() == 1"
         ) == "pass"
 
     def test_a_content_check_reads_instances_outside_a_slug_named_folder(
         self, workspace: Path, portfolio_store: ArtifactStore
     ) -> None:
-        """Function 5, invariant 2: a content postcondition over `artifacts['epic']`
-        sees the committed Epic's properties though no folder is named `epic`."""
+        """Function 5, invariant 2: a content postcondition guarded on kind `epic`
+        sees the committed Epic's `data` though no folder is named `epic`."""
         _commit(workspace, EPIC_REF, _epic("probe-epic", status="approved"))
 
         assert _evaluate(
             portfolio_store,
-            "artifacts['epic'].filter(a, a.status == 'approved')",
+            "workspace.filter(a, a.kind == 'epic' && a.data.status == 'approved')",
             "selected.size() > 0",
         ) == "pass"
         assert _evaluate(
             portfolio_store,
-            "artifacts['epic'].filter(a, a.status == 'draft')",
+            "workspace.filter(a, a.kind == 'epic' && a.data.status == 'draft')",
             "selected.size() > 0",
         ) == "fail"

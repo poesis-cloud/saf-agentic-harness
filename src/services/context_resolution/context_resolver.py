@@ -191,13 +191,13 @@ class ContextResolver(ABC):
             )
         return session_ref
 
-    def _refuse_step_session(self, session_ref: Mapping[str, Any]) -> None:
+    def _refuse_worker_session(self, session_ref: Mapping[str, Any]) -> None:
         """Refuse a session an unresolved step resolution correlates to (functions 1–2)."""
         if self._find_parent_correlation(session_ref) is not None:
             raise StateError(
                 "session-kind-mismatch",
                 (
-                    f"Session '{session_ref['sessionId']}' is a step session and loads "
+                    f"Session '{session_ref['sessionId']}' is a worker session and loads "
                     "the step context functions instead."
                 ),
                 False,

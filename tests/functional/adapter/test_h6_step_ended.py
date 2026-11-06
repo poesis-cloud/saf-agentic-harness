@@ -84,6 +84,7 @@ class TestStepEndedHook:
                     "artifactPath": "reviews/r1.json",
                     "outcome": "pass",
                 },
+                promotion={"outcome": "withheld", "workspaceCommit": "0" * 40},
             ),
         )
 

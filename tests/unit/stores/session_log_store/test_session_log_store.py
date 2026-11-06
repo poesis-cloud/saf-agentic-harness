@@ -124,7 +124,11 @@ def _postconditions(
         status,
         session_id=session_id,
         workflow_instance_id=workflow_instance_id,
-        payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
+        payload={
+            "conditionChecks": [],
+            "artifactDelivery": DELIVERED,
+            "promotion": {"outcome": "promoted" if status == "pass" else "withheld", "workspaceCommit": "0" * 40},
+        },
     )
 
 
@@ -258,7 +262,7 @@ class TestSessionLogStore:
     def test_load_workflow_instance_view_orders_entries_across_logs_by_timestamp(self, tmp_path: Path) -> None:
         """Spec (function 3, invariant 1 / the instance view): the view is assembled ACROSS
         session logs in timestamp order — one instance spans the orchestrator's log and every
-        step session's log, and is derived, never persisted."""
+        worker session's log, and is derived, never persisted."""
         store = SessionLogStore(tmp_path)
         store.create_session_log(_start_entry("sess-1", "2026-08-17T13:00:00Z"))
         store.create_session_log(_start_entry("sess-2", "2026-08-17T13:00:00Z"))

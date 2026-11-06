@@ -84,7 +84,7 @@ def post_tool_use(
 def subagent_stop(
     agent_id: str = STEP_AGENT_ID, session_id: str = HOST_SESSION_ID
 ) -> dict[str, Any]:
-    """H7 in — the step session that just ended names itself through `agent_id`."""
+    """H7 in — the worker session that just ended names itself through `agent_id`."""
     return _envelope(
         "SubagentStop", session_id, agent_id=agent_id, stop_hook_active=False
     )

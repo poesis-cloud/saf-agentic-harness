@@ -47,7 +47,7 @@ class TestStepSkillResolver:
         self, resolver: StepSkillResolver, step_session: str, read_journal
     ) -> None:
         """Spec function 7, Postconditions: the invocation appends its own entry to the
-        step session's log, alongside function 6's."""
+        worker session's log, alongside function 6's."""
         resolver.resolve_step_skills(session_id=step_session, parent_session_id="sess-orch")
 
         entries = read_journal(step_session)

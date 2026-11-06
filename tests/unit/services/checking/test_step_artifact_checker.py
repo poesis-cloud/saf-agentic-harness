@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from checking_fixtures import (
+    INSTANCE_ID,
+    ORCHESTRATOR_SESSION,
     build_ending_entry,
     build_registration_entry,
     read_entries,
@@ -45,14 +47,21 @@ class _FailingSessionLogStore(SessionLogStore):
 class _FailingCommitArtifactStore(ArtifactStore):
     """A fake store whose commit fails the way a locked Git index does."""
 
-    def commit_artifacts(self, artifact_paths, *, session_id: str):
+    def commit_artifacts(self, artifact_paths, *, session_id: str, step_ref):
         """Fail mid-commit exactly as the Git plane does (function 9, invariant 5)."""
         raise SystemFailureError("git-failed", "git commit failed: index.lock", True)
 
 
-def _open_session(log_store: SessionLogStore) -> None:
-    """Register the acting session whose log the validation entry belongs to."""
-    log_store.create_session_log(build_registration_entry(SESSION, ACTOR))
+STEP_REF = f"refs/harness/steps/{INSTANCE_ID}/review/{SESSION}"
+
+
+def _open_session(log_store: SessionLogStore, *, step_ref: bool = True) -> None:
+    """Register the acting worker session and its step ref, as function 0 does."""
+    log_store.create_session_log(
+        build_registration_entry(SESSION, ACTOR, parent_session_id=ORCHESTRATOR_SESSION)
+    )
+    if step_ref:
+        run_git(log_store._workspace_dir, "update-ref", STEP_REF, "HEAD", "")
 
 
 def _count_commits(workspace: Path) -> int:
@@ -68,8 +77,9 @@ class TestStepArtifactChecker:
         workspace: Path,
     ) -> None:
         """Function 9, invariant 3: a fully valid set is COMMITTED in the same act —
-        1 validated set = 1 commit, attributed to the acting session (its `sessionId`
-        in the commit message) so Git history and the session log correlate."""
+        1 validated set = 1 commit, onto the acting step instance's own step ref,
+        attributed to the acting session (its `sessionId` in the commit message) —
+        never moving `HEAD`, the working tree, or the workspace's index."""
         _open_session(log_store)
         stage_artifact(workspace, ARTIFACT_REF, VALID)
         stage_artifact(workspace, SIBLING_REF, SIBLING_VALID)
@@ -85,12 +95,14 @@ class TestStepArtifactChecker:
         assert report.outcome.status == "valid"
         assert report.artifact_checks == ()
         assert report.commit is not None
-        assert report.commit.commit_id == run_git(workspace, "rev-parse", "HEAD").strip()
+        assert report.commit.commit_id == run_git(workspace, "rev-parse", STEP_REF).strip()
         assert report.commit.paths == tuple(sorted((ARTIFACT_REF, SIBLING_REF)))
-        assert _count_commits(workspace) == commits_before + 1
-        assert SESSION in run_git(workspace, "log", "-1", "--format=%B")
-        committed = run_git(workspace, "ls-tree", "-r", "--name-only", "HEAD")
+        assert _count_commits(workspace) == commits_before
+        assert SESSION in run_git(workspace, "log", "-1", "--format=%B", STEP_REF)
+        committed = run_git(workspace, "ls-tree", "-r", "--name-only", STEP_REF)
         assert ARTIFACT_REF in committed and SIBLING_REF in committed
+        assert run_git(workspace, "diff", "--cached", "--name-only") == ""
+        assert read_document(workspace, ARTIFACT_REF) == VALID
         assert list_contract_violations(report) == ()
 
     def test_reverts_the_whole_set_when_any_path_is_invalid(
@@ -208,11 +220,12 @@ class TestStepArtifactChecker:
         artifact_store: ArtifactStore,
         workspace: Path,
     ) -> None:
-        """Function 9, invariant 4: a staged path byte-identical to `HEAD` validates
-        vacuously and stages nothing — a set of only such paths reports `valid` and
-        creates NO commit: `valid` asserts validity, not that a commit occurred."""
-        _open_session(log_store)
+        """Function 9, invariant 4: a staged path byte-identical to the step ref tip
+        validates vacuously and stages nothing — a set of only such paths reports
+        `valid` and creates NO commit: `valid` asserts validity, not that a commit
+        occurred."""
         write_artifact(workspace, ARTIFACT_REF, dict(VALID))
+        _open_session(log_store)
         commits_before = _count_commits(workspace)
         stage_artifact(workspace, ARTIFACT_REF, VALID)
         checker = StepArtifactChecker(log_store, artifact_store)
@@ -224,7 +237,9 @@ class TestStepArtifactChecker:
         )
 
         assert report.outcome.status == "valid"
+        assert report.commit is None
         assert _count_commits(workspace) == commits_before
+        assert run_git(workspace, "rev-parse", STEP_REF) == run_git(workspace, "rev-parse", "HEAD")
         assert run_git(workspace, "diff", "--cached", "--name-only") == ""
 
     def test_discards_the_whole_set_when_a_path_resolves_to_no_artifact_schema(
@@ -422,3 +437,49 @@ class TestStepArtifactChecker:
 
         assert isinstance(report, ArtifactCheckReport)
         assert report.context.function == "check-step-artifact"
+
+
+class TestStepRefCommitGate:
+    """Function 9 over the step ref: commits land on it, reverts restore from it."""
+
+    def test_a_valid_set_without_a_step_ref_is_discarded_defensively(
+        self, log_store: SessionLogStore, artifact_store: ArtifactStore, workspace: Path
+    ) -> None:
+        """Function 9, precondition (C): function 8 admits writes only from a step
+        instance with its own step ref (invariant 7); reaching the commit gate without
+        one is abnormal — the set is discarded and nothing is committed anywhere."""
+        _open_session(log_store, step_ref=False)
+        stage_artifact(workspace, ARTIFACT_REF, VALID)
+        head = run_git(workspace, "rev-parse", "HEAD")
+
+        report = StepArtifactChecker(log_store, artifact_store).check_step_artifact(
+            session_id=SESSION, parent_session_id=None, artifact_paths=(Path(ARTIFACT_REF),)
+        )
+
+        assert report.outcome.status == "state-error"
+        assert report.outcome.error.code == "step-ref-missing"
+        assert read_document(workspace, ARTIFACT_REF) is None
+        assert run_git(workspace, "rev-parse", "HEAD") == head
+
+    def test_a_path_the_step_ref_changed_is_restored_from_the_step_ref(
+        self, log_store: SessionLogStore, artifact_store: ArtifactStore, workspace: Path
+    ) -> None:
+        """Function 9, invariant 2: restored from the step ref tip when the step ref
+        changed the path since its merge base — the revert record names the step ref."""
+        _open_session(log_store)
+        checker = StepArtifactChecker(log_store, artifact_store)
+        stage_artifact(workspace, ARTIFACT_REF, VALID)
+        checker.check_step_artifact(
+            session_id=SESSION, parent_session_id=None, artifact_paths=(Path(ARTIFACT_REF),)
+        )
+        stage_artifact(workspace, ARTIFACT_REF, INVALID)
+
+        report = checker.check_step_artifact(
+            session_id=SESSION, parent_session_id=None, artifact_paths=(Path(ARTIFACT_REF),)
+        )
+
+        assert report.outcome.status == "reverted"
+        assert report.artifact_checks[0].revert.action == "restored"
+        assert report.artifact_checks[0].revert.from_ref == STEP_REF
+        assert read_document(workspace, ARTIFACT_REF) == VALID
+        assert list_contract_violations(report) == ()

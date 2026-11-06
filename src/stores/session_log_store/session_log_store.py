@@ -10,6 +10,7 @@ from typing import Iterator, Sequence
 from errors import InquiryError, StateError, SystemFailureError
 from stores.session_log_store.log import Log
 from stores.session_log_store.log_entry import LogEntry
+from stores.session_log_store.step_instance import StepInstance
 from stores.session_log_store.workflow_instance_view import WorkflowInstanceView
 from utils.jsonl_store import JsonlStore
 from utils.schema_validator import SchemaValidator
@@ -23,6 +24,12 @@ _SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _INSTANCE_MINT_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4,}$")
 _START_FUNCTION = "start-session"
 _STARTED_STATUS = "started"
+_RESOLVE_STEP_FUNCTION = "resolve-step"
+_STEP_RESOLUTION_STATUS = "step-resolution"
+_POSTCONDITIONS_FUNCTION = "check-step-postconditions"
+_PASS = "pass"
+_FAIL = "fail"
+_IN_FLIGHT = "in-flight"
 
 _default_validator: SchemaValidator | None = None
 
@@ -177,12 +184,12 @@ class SessionLogStore:
         open_candidates.sort(key=lambda candidate: candidate[0], reverse=True)
         return open_candidates[0][1]
 
-    def find_step_session_ids(
+    def find_worker_session_ids(
         self, parent_session_id: str, agent: str, since: str
     ) -> tuple[str, ...]:
-        """Find the step sessions registered under one step resolution.
+        """Find the worker sessions registered under one step resolution.
 
-        Spec (function 0, invariant 5): a step session belongs to the resolution its
+        Spec (function 0, invariant 5): a worker session belongs to the resolution its
         registration correlated to — same parent session, the step's actor as `agent`,
         registered at or after the resolution's `timestamp` (the cross-log ordering
         key). Function 3, invariant 9 leaves at most one such resolution in flight.
@@ -201,6 +208,87 @@ class SessionLogStore:
             ):
                 found.append(str(session["sessionId"]))
         return tuple(sorted(set(found)))
+
+    def list_workflow_instance_ids(self) -> tuple[str, ...]:
+        """List every workflow instance this machine's logs record, oldest first.
+
+        Function 5, invariant 2: `workflows` — the workflow instances from the
+        logs; ordered by each instance's first entry `timestamp`.
+        """
+        first_seen: dict[str, str] = {}
+        for entry in self._iter_all_entries():
+            instance_id = entry.report.context.workflow_instance_id
+            if instance_id is None:
+                continue
+            seen = first_seen.get(instance_id)
+            if seen is None or entry.timestamp < seen:
+                first_seen[instance_id] = entry.timestamp
+        return tuple(sorted(first_seen, key=lambda key: (first_seen[key], key)))
+
+    def list_step_instances(self) -> tuple[StepInstance, ...]:
+        """List every step instance this machine's logs record, oldest first.
+
+        A step instance IS a worker session (function 0, invariant 5): a
+        registration correlated to an unresolved step resolution of its parent
+        orchestrator session — same actor, registered at or after it. Its
+        outcome is the first function-10 entry the parent journals after that
+        resolution; the function 5, invariant 2 mapping turns it into
+        `pass` / `fail` / `in-flight`.
+        """
+        logs = self._load_all_logs()
+        instances: list[StepInstance] = []
+        for session_id, entries in logs.items():
+            registration = _find_worker_registration(entries)
+            if registration is None:
+                continue
+            session = registration.report.payload["session"]
+            parent_entries = logs.get(str(session["parentSessionId"]))
+            if parent_entries is None:
+                continue
+            resolution, conclusion = _correlate_resolution(
+                parent_entries, str(session["agent"]), registration.timestamp
+            )
+            if resolution is None:
+                continue
+            instance_id = resolution.report.context.workflow_instance_id
+            if instance_id is None:
+                continue
+            outcome, kind, path = _map_step_outcome(conclusion)
+            instances.append(
+                StepInstance(
+                    step_slug=str(resolution.report.payload["step"]["slug"]),
+                    session_id=session_id,
+                    workflow_instance_id=instance_id,
+                    actor=str(session["agent"]),
+                    outcome=outcome,
+                    registered_at=registration.timestamp,
+                    artifact_kind=kind,
+                    artifact_path=path,
+                )
+            )
+        instances.sort(key=lambda instance: (instance.registered_at, instance.session_id))
+        return tuple(instances)
+
+    def find_registration_timestamp(self, session_id: str) -> str | None:
+        """Read when a session was registered — its start entry's `timestamp`."""
+        try:
+            log = self.load_session_log(session_id)
+        except StateError:
+            return None
+        for entry in log.entries:
+            if entry.report.context.function == _START_FUNCTION:
+                return entry.timestamp
+        return None
+
+    def _load_all_logs(self) -> dict[str, tuple[LogEntry, ...]]:
+        """Load every session log, keyed by its session id."""
+        logs_dir = self._workspace_dir / "logs"
+        if not logs_dir.is_dir():
+            return {}
+        return {
+            path.name[: -len(_LOG_FILE_SUFFIX)]: self._read_log_entries(path)
+            for path in sorted(logs_dir.glob(f"*{_LOG_FILE_SUFFIX}"))
+        }
 
     def _resolve_log_path(self, session_id: str) -> Path:
         """Resolve one session's log file path under the workspace logs dir.
@@ -262,6 +350,65 @@ class SessionLogStore:
                 f"Log entry violates the log-entry contract{location}: {first.message}",
                 False,
             )
+
+
+def _find_worker_registration(entries: Sequence[LogEntry]) -> LogEntry | None:
+    """Find a log's start entry when it registers a worker (parented) session."""
+    for entry in entries:
+        report = entry.report
+        if report.context.function != _START_FUNCTION:
+            continue
+        session = report.payload.get("session") or {}
+        if report.outcome.status == _STARTED_STATUS and session.get("parentSessionId"):
+            return entry
+        return None
+    return None
+
+
+def _correlate_resolution(
+    parent_entries: Sequence[LogEntry], agent: str, registered_at: str
+) -> tuple[LogEntry | None, LogEntry | None]:
+    """Find the resolution a worker registration correlates to, and what concluded it.
+
+    The correlated resolution is the parent's latest step resolution at or
+    before the registration, unresolved at that moment, naming the agent as its
+    actor; its conclusion is the first function-10 entry journaled after it.
+    """
+    resolution: LogEntry | None = None
+    for entry in parent_entries:
+        if entry.timestamp > registered_at:
+            break
+        function = entry.report.context.function
+        if (
+            function == _RESOLVE_STEP_FUNCTION
+            and entry.report.outcome.status == _STEP_RESOLUTION_STATUS
+        ):
+            resolution = entry
+        elif function == _POSTCONDITIONS_FUNCTION:
+            resolution = None
+    if resolution is None or resolution.report.payload["step"].get("actor") != agent:
+        return None, None
+    seen = False
+    for entry in parent_entries:
+        if entry is resolution:
+            seen = True
+            continue
+        if seen and entry.report.context.function == _POSTCONDITIONS_FUNCTION:
+            return resolution, entry
+    return resolution, None
+
+
+def _map_step_outcome(
+    conclusion: LogEntry | None,
+) -> tuple[str, str | None, str | None]:
+    """Map a step instance's concluding function-10 entry to its outcome and artifact."""
+    if conclusion is None:
+        return _IN_FLIGHT, None, None
+    status = conclusion.report.outcome.status
+    delivery = conclusion.report.payload.get("artifactDelivery") or {}
+    path = delivery.get("artifactPath")
+    kind = delivery.get("artifact") if path else None
+    return (_PASS if status == _PASS else _FAIL), kind, path
 
 
 __all__ = ["SessionLogStore"]

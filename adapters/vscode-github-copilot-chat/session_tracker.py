@@ -46,7 +46,7 @@ class SessionTracker:
         self.push_current(raw_host_id, f"{UNREGISTERED_PREFIX}{session_id}")
 
     def push_current(self, raw_host_id: str, session_id: str) -> None:
-        """Push a newly opened step session as the current one."""
+        """Push a newly opened worker session as the current one."""
         stacks = self._read_stacks()
         stacks.setdefault(raw_host_id, []).append(session_id)
         self._write_stacks(stacks)

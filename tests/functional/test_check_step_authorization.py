@@ -22,10 +22,12 @@ from write_boundary_rig import (
     EPIC_REF,
     FEATURE_REF,
     LOGS_REF,
+    OTHER_EPIC_REF,
     UNBOUND_REF,
     build_write_boundary_harness,
     commit_write,
     epic_markdown,
+    find_artifact_lock_holder,
     open_session,
     stage_write,
 )
@@ -110,19 +112,8 @@ class TestCheckStepAuthorization:
         """Spec (function 8, invariant 3): authorization is whole-resource — a
         `#property` suffix is ignored when resolving, when deciding, AND when judging the
         staging baseline of invariant 5, while the report echoes the path the host
-        actually asked about."""
-        run = harness.invoke(
-            FUNCTION,
-            sessionId=builder_session,
-            artifactPath=f"{EPIC_REF}#status",
-            action="update",
-        )
-
-        report = assert_contract_round_trip(harness, run)
-        assert report["outcome"] == {"status": "allowed"}
-        assert report["authorization"]["resource"] == "epic"
-        assert report["authorization"]["artifactPath"] == f"{EPIC_REF}#status"
-
+        actually asked about. The dirty case runs first: once this step instance
+        claims the path's lock, the lock replaces the baseline check."""
         commit_write(harness, EPIC_REF, epic_markdown("checkout", "draft"))
         stage_write(harness, EPIC_REF, epic_markdown("checkout", "approved"))
 
@@ -136,6 +127,19 @@ class TestCheckStepAuthorization:
         dirty_report = assert_contract_round_trip(harness, on_dirty_resource)
         assert dirty_report["outcome"] == {"status": "denied"}
         assert "unclean staging baseline" in dirty_report["authorization"]["failureMessage"]
+
+        run = harness.invoke(
+            FUNCTION,
+            sessionId=builder_session,
+            artifactPath=f"{OTHER_EPIC_REF}#status",
+            action="update",
+        )
+
+        report = assert_contract_round_trip(harness, run)
+        assert report["outcome"] == {"status": "allowed"}
+        assert report["authorization"]["resource"] == "epic"
+        assert report["authorization"]["artifactPath"] == f"{OTHER_EPIC_REF}#status"
+        assert find_artifact_lock_holder(harness, OTHER_EPIC_REF) is not None
 
     def test_a_write_nobody_granted_is_denied_naming_the_missing_privilege(
         self, harness: FunctionalHarness

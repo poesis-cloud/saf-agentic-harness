@@ -1,4 +1,4 @@
-"""H1 `SubagentStart` end to end — the step session opens under its dispatcher."""
+"""H1 `SubagentStart` end to end — the worker session opens under its dispatcher."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class TestStepStartedHook:
         harness_stub: HarnessStub,
     ) -> None:
         """Adapter spec H1, Harness invocations 1-3: registration first, with `agent_type`
-        as the actor, `sanitized(agent_id)` as the step session id, and the dispatching
+        as the actor, `sanitized(agent_id)` as the worker session id, and the dispatching
         turn session — resolved from the adapter's own tracker — as its parent.
         """
         open_turn()

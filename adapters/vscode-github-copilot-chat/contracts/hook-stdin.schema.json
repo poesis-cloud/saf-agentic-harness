@@ -88,7 +88,7 @@
                 },
                 "agent_id": {
                     "type": "string",
-                    "description": "The subagent invocation id — unique per dispatch; becomes the step session id (sanitized)."
+                    "description": "The subagent invocation id — unique per dispatch; becomes the worker session id (sanitized)."
                 },
                 "agent_type": {
                     "type": "string",

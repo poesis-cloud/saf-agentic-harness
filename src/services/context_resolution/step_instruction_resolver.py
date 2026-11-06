@@ -21,7 +21,7 @@ class StepInstructionResolver(ContextResolver):
         session_id: str,
         parent_session_id: str | None = None,
     ) -> StepInstructionsReport:
-        """Resolve the instruction refs injected at the step session's open."""
+        """Resolve the instruction refs injected at the worker session's open."""
         return self._resolve_session_context(session_id, parent_session_id)
 
     def _correlate_step_resolution(self, session_ref: Mapping[str, Any]) -> LogEntry:

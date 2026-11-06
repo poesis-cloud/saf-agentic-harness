@@ -209,7 +209,7 @@ def append_outcome(
 
     Spec (function 10, Postconditions): the outcome entry is "appended to the
     dispatching (orchestrator) session's log" — the same log the resolution it
-    concludes lives in, never the step session's.
+    concludes lives in, never the worker session's.
     """
     store.append_log_entry(
         session_id,
@@ -219,7 +219,11 @@ def append_outcome(
             status,
             session_id,
             workflow_instance_id,
-            payload={"conditionChecks": [], "artifactDelivery": DELIVERED},
+            payload={
+                "conditionChecks": [],
+                "artifactDelivery": DELIVERED,
+                "promotion": {"outcome": "promoted" if status == "pass" else "withheld", "workspaceCommit": "0" * 40},
+            },
         ),
     )
 

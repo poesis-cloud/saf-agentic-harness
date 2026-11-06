@@ -18,6 +18,7 @@ from config import (
     Workflow,
     WorkflowCatalog,
 )
+from services.checking.condition_scope import ConditionScope
 from stores.session_log_store import (
     Context,
     LogEntry,
@@ -185,6 +186,35 @@ def build_instance_view(entries: Sequence[LogEntry]) -> WorkflowInstanceView:
     """Assemble an instance view straight from entries, without touching disk."""
     return WorkflowInstanceView(
         workflow_instance_id=INSTANCE_ID, entries=tuple(entries)
+    )
+
+
+def build_scope(
+    revision: str = "HEAD",
+    *,
+    step: Mapping[str, Any] | None = None,
+    steps: Sequence[Mapping[str, Any]] = (),
+    workflows: Sequence[Mapping[str, Any]] = (),
+) -> ConditionScope:
+    """Build the condition language's variables over one evaluated state.
+
+    The default `step` is a precondition's: the step instance about to start —
+    null `id`, `in-flight`, `artifact` `{kind: review-report, path: null}`.
+    """
+    return ConditionScope(
+        revision=revision,
+        workflow={"slug": WORKFLOW_SLUG, "id": INSTANCE_ID},
+        step=step
+        or {
+            "slug": "review",
+            "id": None,
+            "workflow": INSTANCE_ID,
+            "actor": "qa-engineer",
+            "outcome": "in-flight",
+            "artifact": {"kind": "review-report", "path": None},
+        },
+        steps=tuple(steps),
+        workflows=tuple(workflows) or ({"slug": WORKFLOW_SLUG, "id": INSTANCE_ID},),
     )
 
 

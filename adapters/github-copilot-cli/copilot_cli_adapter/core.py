@@ -186,7 +186,7 @@ class Adapter:
         background session the app spawns (title summarizers) never reaches here with an
         agent and creates no state.
 
-        A step session is H1's, never H0's: an orchestrator agent dispatched as a step actor
+        A worker session is H1's, never H0's: an orchestrator agent dispatched as a step actor
         still fires its scoped hook, but it is neither re-registered nor given workflow
         context. Nor does H0 open a root session for an agent a GOVERNED session dispatched:
         that agent was opened by its dispatcher's action, so it is a step (H1) or, when H1
@@ -203,7 +203,7 @@ class Adapter:
             if dispatcher and dispatcher != host_id and self._tracker.read(dispatcher):
                 self._diagnostic(
                     f"[{ADAPTER_ID}] {hook.event}: '{hook.scoping_agent}' was dispatched by a "
-                    "governed session but holds no step session; it stays ungoverned"
+                    "governed session but holds no worker session; it stays ungoverned"
                 )
                 return None
         if record is None or not record.registered:
@@ -257,7 +257,7 @@ class Adapter:
         parent = self._tracker.read(parent_host) if parent_host else None
         if parent is None:
             return None
-        agent_id = self._binding.probe(hook.payload, self._binding.host_step_session_keys)
+        agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         actor = self._binding.probe(hook.payload, self._binding.host_step_actor_keys)
         if agent_id is None or actor is None:
             return None
@@ -765,7 +765,7 @@ class Adapter:
         return None
 
     def _close_subagent(self, hook: HookInput) -> Decision:
-        agent_id = self._binding.probe(hook.payload, self._binding.host_step_session_keys)
+        agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         if agent_id is not None:
             self._close(sanitize_identifier(str(agent_id)))
         return None

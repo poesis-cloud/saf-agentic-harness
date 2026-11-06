@@ -158,8 +158,8 @@ PLANNING_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "precondition",
                     "slug": "report-approved",
-                    "setSelector": {"setQuery": "artifacts['report']"},
-                    "setPredicate": "selected.exists(a, a.state == 'approved')",
+                    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
+                    "setPredicate": "selected.exists(a, a.data.state == 'approved')",
                 },
             ],
         },
@@ -200,7 +200,7 @@ UNEVALUABLE_WORKFLOW: Mapping[str, Any] = {
                 {
                     "kind": "precondition",
                     "slug": "unevaluable",
-                    "setSelector": {"setQuery": "artifacts['report']"},
+                    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
                     "setPredicate": "selected",
                 }
             ],
@@ -418,7 +418,7 @@ class FunctionalHarness:
     ) -> CommandRun:
         """Deliver the in-flight step's report, then conclude it through function 10.
 
-        The rig binds every step's `report` kind under `report/`; the step session's id
+        The rig binds every step's `report` kind under `report/`; the worker session's id
         is the report's state, so re-executing a step never writes byte-identical bytes.
         """
         step = next(
@@ -438,7 +438,7 @@ class FunctionalHarness:
         return self.invoke("check-step-postconditions", sessionId=parent_session_id)
 
     def _next_step_session_id(self, agent: str) -> str:
-        """Mint a step session id no earlier session of this rig used."""
+        """Mint a worker session id no earlier session of this rig used."""
         logged = len(list((self.workspace_dir / "logs").glob(f"*{LOG_FILE_SUFFIX}")))
         return f"{agent}-step-{logged}"
 

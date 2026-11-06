@@ -25,6 +25,7 @@ _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
 _ENDED_STATUS = "ended"
 _STEP_RESOLUTION_STATUS = "step-resolution"
+_POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 
 
 def _require_inquiry_slugs(session_id: str, parent_session_id: str | None) -> None:
@@ -75,15 +76,20 @@ def _find_session_agent(log: Log) -> str | None:
     return None
 
 
-def _find_in_flight_resolution(view: WorkflowInstanceView) -> LogEntry | None:
-    """Find the instance's resolved step whose function 10 outcome has not journaled."""
-    latest: LogEntry | None = None
+def _find_unfinished_resolution(view: WorkflowInstanceView) -> LogEntry | None:
+    """Find the instance's unfinished step resolution, if any.
+
+    An unfinished step resolution is a `step-resolution` entry with no later
+    function-10 outcome in the instance view's timestamp order (function 3,
+    invariant 10) — latest wins, so at most one is unfinished.
+    """
+    pending: LogEntry | None = None
     for entry in view.entries:
         if _is_step_resolution(entry):
-            latest = entry
-    if latest is None:
-        return None
-    return view.find_unresolved_step_resolution(latest.report.payload["step"]["actor"])
+            pending = entry
+        elif entry.report.context.function == _POSTCONDITIONS_FUNCTION:
+            pending = None
+    return pending
 
 
 def _find_eligible_step(workflow: Workflow, executed_steps: frozenset[str]) -> Step | None:
@@ -152,14 +158,19 @@ class StepResolver:
         try:
             workflow = self._find_facilitated_workflow(log, workflow_slug)
             instance_id = self._deduce_workflow_instance(log, workflow)
+            view = self._session_log_store.load_workflow_instance_view(instance_id)
+            in_flight = self._require_single_driver(view, session_id)
+        except HarnessError as failure:
+            return self._journal_report(_render_error_report(context, failure))
+
+        try:
             context = Context(
                 function=_FUNCTION,
                 session_id=session_id,
                 parent_session_id=parent_session_id,
                 workflow_instance_id=instance_id,
             )
-            view = self._session_log_store.load_workflow_instance_view(instance_id)
-            self._require_no_step_in_flight(view)
+            self._require_no_step_in_flight(view, in_flight)
             step = _find_eligible_step(workflow, view.list_executed_steps())
         except HarnessError as failure:
             return self._journal_report(_render_error_report(context, failure))
@@ -223,9 +234,41 @@ class StepResolver:
         )
         return latest_open or self._session_log_store.mint_workflow_instance_id(workflow.slug)
 
-    def _require_no_step_in_flight(self, view: WorkflowInstanceView) -> None:
+    def _require_single_driver(
+        self, view: WorkflowInstanceView, session_id: str
+    ) -> LogEntry | None:
+        """Refuse while another live orchestrator session drives the workflow instance.
+
+        Invariant 10: a call is refused (`workflow-instance-busy`) while another
+        orchestrator session that has not ended (C8) holds an unfinished step
+        resolution in the deduced workflow instance — journaled, like
+        `session-instance-bound`, with no `workflowInstanceId`. Answers this
+        session's own unfinished step resolution, if any.
+        """
+        pending = _find_unfinished_resolution(view)
+        if pending is None:
+            return None
+        holder = pending.report.context.session_id
+        if holder == session_id:
+            return pending
+        try:
+            holder_log = self._session_log_store.load_session_log(holder)
+        except StateError:
+            return None
+        if _has_ending_entry(holder_log):
+            return None
+        raise StateError(
+            "workflow-instance-busy",
+            f"Orchestrator session '{holder}' has not ended and holds the unfinished "
+            f"step resolution of step '{pending.report.payload['step']['slug']}' in "
+            f"workflow instance '{view.workflow_instance_id}'.",
+            False,
+        )
+
+    def _require_no_step_in_flight(
+        self, view: WorkflowInstanceView, in_flight: LogEntry | None
+    ) -> None:
         """Refuse a call arriving between a step's resolution and its journaled outcome."""
-        in_flight = _find_in_flight_resolution(view)
         if in_flight is not None:
             raise StateError(
                 "step-in-flight",

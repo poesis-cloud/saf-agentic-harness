@@ -65,7 +65,7 @@ class TestResolveWorkflowSkills:
         self, harness: FunctionalHarness, orchestrator_session: str
     ) -> None:
         """Spec (function 2, Preconditions): function 1's preconditions and violation
-        outcomes apply identically — a step session is `state-error`
+        outcomes apply identically — a worker session is `state-error`
         (`session-kind-mismatch`), journaled."""
         harness.invoke("resolve-step", sessionId=orchestrator_session, workflowSlug="planning")
         harness.invoke(

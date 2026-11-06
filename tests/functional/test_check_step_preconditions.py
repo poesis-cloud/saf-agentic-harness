@@ -23,8 +23,8 @@ AFTER_DRAFT_CONDITION = {"kind": "precondition", "slug": "after-draft", "step": 
 REPORT_APPROVED_CONDITION = {
     "kind": "precondition",
     "slug": "report-approved",
-    "setSelector": {"setQuery": "artifacts['report']"},
-    "setPredicate": "selected.exists(a, a.state == 'approved')",
+    "setSelector": {"setQuery": "workspace.filter(a, a.kind == 'report')"},
+    "setPredicate": "selected.exists(a, a.data.state == 'approved')",
 }
 DRAFT_REF = "report/draft.json"
 

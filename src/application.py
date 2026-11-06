@@ -260,7 +260,7 @@ class Application:
             layout.workspace_dir, artifact_schemas, workspace_layout
         )
         clock = Clock()
-        lifecycle = SessionLifecycle(session_log_store, acl, clock)
+        lifecycle = SessionLifecycle(session_log_store, acl, artifact_store, clock)
         evaluator = ConditionEvaluator(artifact_store)
 
         commands: tuple[Command, ...] = (
@@ -280,7 +280,7 @@ class Application:
             ),
             CheckStepPreconditionsCommand(
                 StepPreconditionChecker(
-                    evaluator, session_log_store, catalog, clock
+                    evaluator, session_log_store, catalog, artifact_store, clock
                 ),
                 validator,
             ),
@@ -301,7 +301,7 @@ class Application:
             ),
             CheckStepPostconditionsCommand(
                 StepPostconditionChecker(
-                    evaluator, session_log_store, catalog, workspace_layout, clock
+                    evaluator, session_log_store, catalog, artifact_store, clock
                 ),
                 validator,
             ),

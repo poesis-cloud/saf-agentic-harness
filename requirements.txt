@@ -1,5 +1,7 @@
 # Python dependencies for the deterministic orchestration harness.
 # Install (from this directory):  pip install -r requirements.txt
+# System prerequisite (not pip-installable): Git >= 2.38 (`git merge-tree --write-tree`), and a
+# Git identity (user.name / user.email) in the governed workspace repository.
 #
 # The harness is a design-time CLI invoked by the three orchestrators (VMO / RTE / SM).
 # It is check-only: CEL is the single, side-effect-free condition language (no per-orchestration

@@ -26,7 +26,7 @@ class WorkflowSkillResolver(ContextResolver):
 
     def _correlate_step_resolution(self, session_ref: Mapping[str, Any]) -> LogEntry | None:
         """Enforce the orchestrator session kind (function 1's precondition E)."""
-        return self._refuse_step_session(session_ref)
+        return self._refuse_worker_session(session_ref)
 
     def _resolve_refs(
         self,

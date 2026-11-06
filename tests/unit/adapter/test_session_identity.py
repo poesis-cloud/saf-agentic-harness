@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from session_identity import (
-    derive_step_session_id,
+    derive_worker_session_id,
     derive_turn_session_id,
     sanitize_identifier,
 )
@@ -52,18 +52,18 @@ class TestSessionIdentity:
         assert first != second
 
     def test_derives_the_step_session_id_from_the_subagent_invocation_id(self) -> None:
-        """Adapter spec H1 / Session identity binding: a step session id is the sanitized
+        """Adapter spec H1 / Session identity binding: a worker session id is the sanitized
         `agent_id` — the subagent INVOCATION id, unique per dispatch, so 1 step = 1
         session holds.
         """
-        assert derive_step_session_id("SubAgent_Invocation-ID") == "subagent-invocation-id"
+        assert derive_worker_session_id("SubAgent_Invocation-ID") == "subagent-invocation-id"
 
     def test_derives_ids_the_harness_context_contract_accepts(self) -> None:
         """Adapter spec — Session identity binding: ids are normalized to the safe slug
         form `^[a-z0-9-]+$` the harness `context` contract requires.
         """
         turn = derive_turn_session_id("6A3F…-chat", "2026-07-11T14:32:07.000Z")
-        step = derive_step_session_id("call_ABC/123")
+        step = derive_worker_session_id("call_ABC/123")
 
         assert _CONTRACT_SESSION_ID.match(turn)
         assert _CONTRACT_SESSION_ID.match(step)
