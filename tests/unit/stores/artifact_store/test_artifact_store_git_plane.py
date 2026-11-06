@@ -16,7 +16,7 @@ import pytest
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.workspace_layout import WorkspaceLayout
-from errors import StateError
+from errors import StateError, SystemFailureError
 from stores.artifact_store import ArtifactLock, ArtifactStore, StepRef
 from stores.artifact_store.artifact_lock import build_lock_ref_name, parse_lock_ref_name
 
@@ -442,3 +442,19 @@ class TestPromotionOfTheEvaluatedState:
 
         assert store.find_artifact_lock("sample/untouched.json") is None
         assert store.find_artifact_lock("sample/other.json").holder == other.name
+
+
+class TestLockClaimFailures:
+    def test_a_claim_failing_without_contention_is_a_system_error(
+        self, workspace: Path, store: ArtifactStore
+    ) -> None:
+        """Function 8, invariant 8 + rule 1: only a lost compare-and-swap is contention;
+        a ref update failing while the lock still holds its expected value is the
+        environment failing — `system-error`, never a false "held by" denial."""
+        step_ref = store.create_step_ref(INSTANCE, "draft", "worker-1")
+        _git(workspace, "update-ref", "refs/harness/locks/sample", "HEAD")
+
+        with pytest.raises(SystemFailureError):
+            store.claim_artifact_lock("sample/a.json", step_ref, None)
+
+        assert store.find_artifact_lock("sample/a.json") is None

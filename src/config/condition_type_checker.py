@@ -317,8 +317,12 @@ class _CheckContext:
             self._visit_node(receiver, scope)
         element = self.read_element(receiver, scope)
         inner = {**scope, variable: element}
-        for body in bodies:
-            self.visit_conjunction(body, inner)
+        self.visit_conjunction(bodies[0], inner)
+        if len(bodies) == 2:
+            # Three-argument `map(v, predicate, transform)`: the transform only runs on
+            # elements the predicate admits, so it reads under the predicate's guards.
+            refined = self._apply_guards(_split_conjuncts(bodies[0]), inner)
+            self.visit_conjunction(bodies[1], refined)
         if over_workspace:
             guarded = self._apply_guards(_split_conjuncts(bodies[0]), inner)[variable]
             narrows = name in _NARROWING_MACROS or (name == "map" and len(bodies) == 2)

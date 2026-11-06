@@ -771,3 +771,20 @@ class TestLogsExclusion:
         assert report.outcome.status == "started"
         assert "/logs/" in (workspace / ".git" / "info" / "exclude").read_text().splitlines()
         assert _run_git(workspace, "status", "--porcelain", "--untracked-files=all") == ""
+
+    def test_an_unwritable_exclude_file_is_a_structured_system_error(
+        self, lifecycle: SessionLifecycle, workspace: Path
+    ) -> None:
+        """Rule 1: the environment failing is the uniform `system-error` — a report,
+        never a raw exception — and the session is not registered."""
+        exclude = workspace / ".git" / "info" / "exclude"
+        exclude.unlink(missing_ok=True)
+        exclude.mkdir(parents=True)
+
+        report = lifecycle.start_session(
+            agent="orchestrator", session_id="sess-root", parent_session_id=None
+        )
+
+        assert report.outcome.status == "system-error"
+        assert report.outcome.error.code == "logs-exclude-failed"
+        assert not (workspace / "logs" / "sess-root.log.jsonl").exists()

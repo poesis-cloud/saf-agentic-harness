@@ -470,7 +470,9 @@ class ArtifactStore:
 
         Function 8, invariant 8: create-only when `expected` is none (expected old
         value: none); otherwise a re-pointing from that exact previous holder. A
-        lost race answers `False` — never a silent overwrite.
+        lost race answers `False` — never a silent overwrite. A failure that is no
+        race (the lock still holds its expected value) is the environment failing:
+        `system-error`.
         """
         value = self._run_git_input(step_ref.name, "hash-object", "-w", "--stdin")
         old = "" if expected is None else expected.value
@@ -485,7 +487,22 @@ class ArtifactStore:
             ),
             check=False,
         )
-        return claimed.returncode == 0
+        if claimed.returncode == 0:
+            return True
+        current = self.find_artifact_lock(artifact_path)
+        unchanged = (
+            current is None
+            if expected is None
+            else current is not None and current.value == expected.value
+        )
+        if unchanged:
+            raise SystemFailureError(
+                "git-failed",
+                f"git update-ref {build_lock_ref_name(artifact_path)} failed: "
+                f"{(claimed.stderr or claimed.stdout).strip()}",
+                True,
+            )
+        return False
 
     def release_artifact_locks(self, step_ref: StepRef) -> None:
         """Delete the artifact locks a promoted step instance holds, by compare-and-swap.
@@ -517,13 +534,21 @@ class ArtifactStore:
         exclude = Path(self._run_git("rev-parse", "--git-path", "info/exclude"))
         if not exclude.is_absolute():
             exclude = self._workspace_dir / exclude
-        existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
-        if _LOGS_EXCLUDE_PATTERN in existing.splitlines():
-            return
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        separator = "" if existing == "" or existing.endswith("\n") else "\n"
-        with exclude.open("a", encoding="utf-8") as handle:
-            handle.write(f"{separator}{_LOGS_EXCLUDE_PATTERN}\n")
+        try:
+            existing = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+            if _LOGS_EXCLUDE_PATTERN in existing.splitlines():
+                return
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            separator = "" if existing == "" or existing.endswith("\n") else "\n"
+            with exclude.open("a", encoding="utf-8") as handle:
+                handle.write(f"{separator}{_LOGS_EXCLUDE_PATTERN}\n")
+        except OSError as failure:
+            raise SystemFailureError(
+                "logs-exclude-failed",
+                f"The logs path cannot be excluded from Git in '{exclude}': "
+                f"{failure.strerror or failure}.",
+                True,
+            ) from failure
 
     def sweep_workspace(self) -> WorkspaceSweep:
         """Run the internal workspace sweep: it reports, never journals or mutates.

@@ -400,6 +400,12 @@ class TestConditionExpressionStaticValidation:
                 id="workflow-fixed-in-a-nested-macro",
             ),
             pytest.param(
+                "workspace.map(a, a.kind == 'epic', a.data.state)",
+                "selected.all(state, state == 'approved')",
+                frozenset({"epic"}),
+                id="map-transform-under-its-predicates-guard",
+            ),
+            pytest.param(
                 "steps.filter(s, s.workflow == workflow.id && s.slug == 'draft' && s.outcome == 'pass')",
                 "size(selected) == 1",
                 frozenset(),

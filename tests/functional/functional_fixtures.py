@@ -10,6 +10,8 @@ the process environment carrying the framework layout (Configuration plane).
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
@@ -314,8 +316,13 @@ class FunctionalHarness:
             check=False,
             cwd=REPO_ROOT,
             env={
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                # A stripped PATH, plus Git's own directory: Git is a harness
+                # prerequisite (step refs), and on Windows it lives elsewhere.
+                "PATH": os.pathsep.join(
+                    ("/usr/bin", "/bin", "/usr/local/bin", str(Path(shutil.which("git") or "git").parent))
+                ),
                 "FRAMEWORK_DIR": str(self.framework_dir),
+                **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if "SYSTEMROOT" in os.environ else {}),
             },
         )
         return CommandRun(
