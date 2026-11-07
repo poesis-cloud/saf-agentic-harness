@@ -159,6 +159,17 @@ catalogue and `models.yaml` on load, never from an install-time cache, and refus
 that names a slug `models.yaml` does not bind: the hook exits 2 and names the unbound slugs.
 The runtime gives hooks no model list, so keeping `models.yaml` current is the operator's job.
 
+**Only bind a model whose subagents can write.** On this host the runtime chooses a `task`
+subagent's tools by MODEL, not only by the agent's `tools:` list. A model is bindable only if a
+`task` subagent running on it gets a write tool (`create`/`edit`, or `apply_patch`). Without
+one, every artifact write falls back to the shell, the shell guard denies it, and the step can
+never deliver. `gpt-5.3-codex` is not bound for this reason: in the Copilot app (CLI runtime
+1.0.102) a `task` subagent on it got only `view`, `rg`, `glob`, `powershell`,
+`read_powershell`, `stop_powershell`, `list_powershell` and `skill`, although its agent
+declared `tools: [read, edit, search, execute, skill]`. A framework catalogue that still names
+it is refused at hook load. Before binding a new model, dispatch a `task` subagent on it and
+check that it gets a write tool.
+
 **Failure is closed and visible.** If a hook cannot bootstrap, it exits 2 with a stderr
 diagnostic. That happens when the framework root is gone, `.env` is malformed, the binding is
 off-contract, the model catalogue names a slug `models.yaml` does not bind (or is missing),
