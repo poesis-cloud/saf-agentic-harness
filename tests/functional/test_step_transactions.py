@@ -10,6 +10,7 @@ working tree.
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any, Callable, Mapping
 
 from functional_fixtures import (
@@ -232,6 +233,30 @@ class TestRecovery:
         report = assert_contract_round_trip(harness, run)
         assert run.error_code == "workflow-instance-busy"
         assert report["context"]["workflowInstanceId"] is None
+
+    def test_the_busy_message_gives_a_recovery_command_that_unsticks_the_instance(
+        self, harness: FunctionalHarness
+    ) -> None:
+        """The `workflow-instance-busy` message names the holder and the installed
+        recovery command; once that `end-session` runs, the next orchestrator session
+        continues the workflow instance, and the ended session's later calls are refused
+        (C8, fail closed)."""
+        planning = _drive(harness, "planner-o", PLANNING)
+        harness.invoke("start-session", sessionId="planner-o2", agent="orchestrator")
+        busy = harness.invoke("resolve-step", sessionId="planner-o2", workflowSlug=PLANNING)
+        message = busy.report["outcome"]["error"]["message"]
+
+        assert "'planner-o'" in message
+        assert "end-session --session-id planner-o" in message
+        assert "harness.py" in message and sys.executable in message
+        assert f"FRAMEWORK_DIR={harness.framework_dir}" in message
+
+        assert harness.invoke("end-session", sessionId="planner-o").status == "ended"
+        resumed = harness.invoke("resolve-step", sessionId="planner-o2", workflowSlug=PLANNING)
+        assert resumed.status == "step-resolution"
+        assert resumed.report["context"]["workflowInstanceId"] == planning["context"]["workflowInstanceId"]
+        refused = harness.invoke("resolve-step", sessionId="planner-o", workflowSlug=PLANNING)
+        assert refused.error_code == "session-ended"
 
     def test_a_failed_step_instance_is_withheld_and_its_retry_continues_its_work(
         self, build_harness: Callable[..., FunctionalHarness]

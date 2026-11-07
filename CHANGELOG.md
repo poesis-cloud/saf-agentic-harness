@@ -61,6 +61,13 @@ GitHub pre-releases.
   it is repository metadata, not workspace state, a ref, or a log entry. A second
   concurrent start is refused with `worker-session-bound`.
 
+### Recovery
+
+- **`workflow-instance-busy` now says how to recover.** The message names the holding
+  orchestrator session and prints the exact command that ends it: the installed interpreter
+  and `harness.py`, `end-session --session-id <holder>`, and the framework root to run it
+  against. The README gains "Recovering an interrupted workflow instance".
+
 ### Adapters
 
 - **A refused sub-agent's return no longer concludes the step** (live trial T1). When the

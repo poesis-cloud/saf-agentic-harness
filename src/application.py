@@ -58,6 +58,7 @@ from utils.schema_validator import SchemaValidator
 from utils.yaml_loader import YamlLoader
 
 _CONTRACTS_DIR = Path(__file__).resolve().parent.parent / "contracts"
+_HARNESS_ENTRY = Path(__file__).resolve().parent.parent / "harness.py"
 _FRAMEWORK_ANCHOR = "FRAMEWORK_DIR"
 _ARTIFACT_SCHEMA_SUFFIX = ".artifact.schema.json"
 _SKILL_SUFFIX = ".skill.md"
@@ -273,7 +274,14 @@ class Application:
                 WorkflowSkillResolver(catalog, session_log_store, clock), validator
             ),
             ResolveStepCommand(
-                StepResolver(session_log_store, catalog, clock), validator
+                StepResolver(
+                    session_log_store,
+                    catalog,
+                    clock,
+                    harness_invocation=_find_harness_invocation(),
+                    framework_dir=str(layout.framework_dir),
+                ),
+                validator,
             ),
             ResolveStepModelCommand(
                 StepModelResolver(session_log_store, catalog, profiles, clock), validator
@@ -348,6 +356,17 @@ class Application:
             )
         sys.stdout.write(rendered + "\n")
         return _EXIT_OK
+
+
+def _find_harness_invocation() -> tuple[str, str] | None:
+    """Answer the installed interpreter and `harness.py`, when this install has one.
+
+    Only the advisory recovery command of `workflow-instance-busy` uses it.
+    """
+    entry = _HARNESS_ENTRY
+    if not sys.executable or not entry.is_file():
+        return None
+    return sys.executable, str(entry)
 
 
 def _render_report(report: Mapping[str, Any]) -> str:

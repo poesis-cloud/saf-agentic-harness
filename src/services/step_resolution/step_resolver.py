@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
+import subprocess
+from typing import Sequence
 
 from config import Step, StepCondition, Workflow, WorkflowCatalog
 from errors import HarnessError, InquiryError, StateError, SystemFailureError
@@ -25,6 +29,8 @@ _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
 _ENDED_STATUS = "ended"
 _STEP_RESOLUTION_STATUS = "step-resolution"
+# The generic recovery invocation, when the composition root names no installed one.
+_GENERIC_END_SESSION_INVOCATION = ("python", "harness.py")
 _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 
 
@@ -130,11 +136,20 @@ class StepResolver:
         session_log_store: SessionLogStore,
         workflow_catalog: WorkflowCatalog,
         clock: Clock | None = None,
+        harness_invocation: Sequence[str] | None = None,
+        framework_dir: str | None = None,
     ) -> None:
-        """Create the resolver over its injected store, catalog, and entry clock."""
+        """Create the resolver over its injected store, catalog, and entry clock.
+
+        `harness_invocation` (the installed interpreter and `harness.py`) and
+        `framework_dir` only shape the advisory recovery command a
+        `workflow-instance-busy` message gives; without them it is the generic form.
+        """
         self._session_log_store = session_log_store
         self._catalog = workflow_catalog
         self._clock = clock or Clock()
+        self._harness_invocation = tuple(harness_invocation or _GENERIC_END_SESSION_INVOCATION)
+        self._framework_dir = framework_dir
 
     def resolve_step(
         self,
@@ -261,9 +276,25 @@ class StepResolver:
             "workflow-instance-busy",
             f"Orchestrator session '{holder}' has not ended and holds the unfinished "
             f"step resolution of step '{pending.report.payload['step']['slug']}' in "
-            f"workflow instance '{view.workflow_instance_id}'.",
+            f"workflow instance '{view.workflow_instance_id}'. If that session is really "
+            f"gone (its host run was interrupted, so its end was never observed), end it "
+            f"from your own terminal — only then — and retry: "
+            f"{self._render_end_session_command(holder)}",
             False,
         )
+
+    def _render_end_session_command(self, holder: str) -> str:
+        """Render the advisory recovery command that ends the holding session (C8).
+
+        Quoted for the platform's shell; the framework root it must run against is
+        named beside it, since `harness.py` reads it from `FRAMEWORK_DIR`.
+        """
+        argv = [*self._harness_invocation, _END_FUNCTION, "--session-id", holder]
+        quoted = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+        command = f"run: {quoted}"
+        if self._framework_dir is not None:
+            command += f" (with FRAMEWORK_DIR={self._framework_dir})"
+        return command
 
     def _require_no_step_in_flight(
         self, view: WorkflowInstanceView, in_flight: LogEntry | None
