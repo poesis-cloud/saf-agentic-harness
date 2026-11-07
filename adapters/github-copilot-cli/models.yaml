@@ -7,6 +7,14 @@
 # appear in the framework catalogue. This file MUST track the models the host currently offers,
 # which can change after install: every hook load refuses a framework catalogue
 # (conf/model-profiles.conf.yaml) naming a profile slug this file does not bind.
+#
+# A model is only bindable here if a `task` subagent running on it gets a WRITE tool
+# (`create`/`edit` or `apply_patch`): the runtime picks a subagent's tools by model, not only
+# by the agent's `tools:`. Without one, every artifact write falls back to the shell, which the
+# shell guard denies, so the step can never deliver. `gpt-5.3-codex` is NOT bound for that
+# reason: in the Copilot app (CLI runtime 1.0.102) a `task` subagent on it was observed with
+# only view, rg, glob, powershell, read/stop/list_powershell and skill, although its agent
+# declared `tools: [read, edit, search, execute, skill]`. Re-check before binding a new model.
 modelBindings:
   claude-fable-5:
     hostModelId: claude-fable-5
@@ -18,5 +26,3 @@ modelBindings:
     hostModelId: claude-sonnet-5
   claude-haiku-4.5:
     hostModelId: claude-haiku-4.5
-  gpt-5.3-codex:
-    hostModelId: gpt-5.3-codex

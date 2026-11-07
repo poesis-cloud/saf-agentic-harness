@@ -71,6 +71,12 @@ GitHub pre-releases.
 
 ### Adapters
 
+- **`github-copilot-cli` no longer binds `gpt-5.3-codex`.** In the Copilot app (CLI runtime
+  1.0.102), a `task` subagent on that model got no write tool (`create`, `edit` or
+  `apply_patch`), so it could never author an artifact. On this host a model is bindable only
+  if its `task` subagents get a write tool; a framework catalogue that still names
+  `gpt-5.3-codex` is refused at hook load. The VS Code binding is unchanged.
+
 - **A refused sub-agent's return no longer concludes the step** (live trial T1). When the
   orchestrator dispatched a resolved step twice, the duplicate's registration was refused
   (`worker-session-bound`). Its dispatch return still triggered `check-step-postconditions`,

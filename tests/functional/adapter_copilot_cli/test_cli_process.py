@@ -249,6 +249,17 @@ def test_a_catalogue_profile_the_binding_does_not_bind_fails_every_hook_closed(h
     assert host.stub.calls == ()
 
 
+def test_a_catalogue_naming_a_model_whose_subagents_cannot_write_fails_closed(host: Host) -> None:
+    """Host binding: a model is bindable only if a `task` subagent on it gets a write tool.
+    `gpt-5.3-codex` got none in the app (CLI runtime 1.0.102), so `models.yaml` no longer binds
+    it and a framework catalogue that still names it is refused at hook load."""
+    write_catalogue(host.root, ["claude-haiku-4.5", "gpt-5.3-codex"])
+    run = host.fire("sessionStart", {"sessionId": HOST, "source": "new", "timestamp": 1})
+    assert run.code == 2 and run.stdout == ""
+    assert "gpt-5.3-codex" in run.stderr and "models.yaml" in run.stderr
+    assert host.stub.calls == ()
+
+
 def test_an_unextractable_write_is_denied(host: Host) -> None:
     host.fire("userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1}, ORCHESTRATOR)
     run = host.fire("preToolUse", {"sessionId": HOST, "toolCalls": [
