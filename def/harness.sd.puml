@@ -12,8 +12,8 @@ skinparam BoxPadding 10
 actor "Framework user" as User
 participant "Workflow Orchestrator agent" as Orch
 participant "Step subagent" as Sub
-participant "Host\n(e.g. GitHub Copilot / VS Code)" as Host
-participant "Adapter\n(vscode-github-copilot-chat)" as Adapter
+participant "Host\n(GitHub Copilot runtime:\nCLI / app / VS Code Copilot)" as Host
+participant "Adapter\n(github-copilot)" as Adapter
 participant "Harness\n(host-agnostic core)" as Harness
 
 note over Harness
@@ -28,12 +28,12 @@ note over Adapter
   Classifies each concrete host hook into a harness
   boundary and invokes the core's ""Command"" surface
   only — no services, no stores, no config of its own
-  beyond ""HookBinding"" (see adapter-src-classes.puml).
+  beyond its own binding (see adapter-src-classes.puml).
 end note
 
 == Conversation start ==
 User -> Host : engage a facilitator agent (VMO / RTE / SM)\nwith a request — a question or an intent
-Host -> Adapter : hook ""UserPromptSubmit"" — agent-scoped\n(fires only while a framework orchestrator is the active agent)
+Host -> Adapter : hook ""userPromptSubmitted"" / ""userPromptTransformed"" — agent-scoped\n(fires only while a framework orchestrator is the active agent)
 note right of Adapter
   H0 is agent-scoped (rendered into each orchestrator's
   own .agent.md frontmatter): C7 holds structurally —
@@ -46,8 +46,8 @@ Adapter -> Harness : ""1 resolve-workflow-instructions""(sessionId, parentSessio
 Harness --> Adapter : { instructions: [selection-, step-resolution-,\nno-next-step-, reports-handling refs] }
 Adapter -> Harness : ""2 resolve-workflow-skills""(sessionId, parentSessionId: null)
 Harness --> Adapter : { skills: [selection skill,\none procedure skill per facilitated workflow] }
-Adapter -> Adapter : render ""additionalContext"" —\ninline instructions + skill load directives
-Adapter --> Host : hookSpecificOutput.additionalContext
+Adapter -> Adapter : render the context —\ninline instructions + skill load directives
+Adapter --> Host : ""modifiedTransformedPrompt"" =\nhint + context + the prompt
 Host --> Orch : session opens carrying the workflow instructions:\nthe ""*-handling"" reaction for every selection and harness return
 
 == Workflow selection (no harness call) ==
@@ -64,7 +64,7 @@ loop until ""3 resolve-step"" resolves no-next-step
 
 == Step resolution ==
 note over Host, Adapter
-  H4 (""PreToolUse"" — harness-command class) is a HOOK-EXECUTED
+  H4 (""preToolUse"" — harness-command class) is a HOOK-EXECUTED
   boundary: the adapter runs ""3 resolve-step"" /
   ""4 resolve-step-model"" itself, attributed from its own event
   payload and bookkeeping (like every other hook invocation),
@@ -74,15 +74,15 @@ note over Host, Adapter
   rejects a sessionId that is not currently open and registered.
 end note
 Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step --workflow-slug <slug>""\n— plain line, no session id
-Host -> Adapter : hook ""PreToolUse"" — harness-command class
+Host -> Adapter : hook ""preToolUse"" — harness-command class
 Adapter -> Adapter : deny if not one plain resolve-step / resolve-step-model\nrequest or if it carries session attribution; else\nresolve the current session via ""SessionTracker""
 Adapter -> Harness : ""3 resolve-step""(sessionId: resolved, parentSessionId: null, workflowSlug)
 Harness -> Harness : deduce the instance — continue the latest open one,\nor mint a new instance id (the opening is this very\nlog entry — no dedicated file, no id returned)
 Harness --> Adapter : { outcome: step-resolution,\nstep: { slug, actor, skills, instructions, artifact,\nconditions, capabilities } }\n(context.workflowInstanceId minted or continued)
-Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step)" + report\n(+ additionalContext: act on it, do not re-issue)
+Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step)" + report\n(the reason says: act on it, do not re-issue)
 Host --> Orch : tool result — the step resolution\n(the terminal never ran the line)
 Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step-model --workflow-slug <slug>""
-Host -> Adapter : hook ""PreToolUse"" — harness-command class
+Host -> Adapter : hook ""preToolUse"" — harness-command class
 Adapter -> Harness : ""4 resolve-step-model""(sessionId: resolved, parentSessionId: null)
 Harness -> Harness : deduce the session's in-flight step;\ncapabilities × catalog → model profile
 Harness --> Adapter : { outcome: resolved,\nprofile: { slug, score, costRank, reason } }
@@ -91,21 +91,21 @@ Host --> Orch : tool result — the model profile
 Orch -> Orch : per ""step-resolution-handling"" instruction —\nrelay the resolution + profile verbatim
 
 == Step dispatch (1 step instance = 1 agent = 1 session = 1 artifact instance) ==
-Orch -> Host : ""runSubagent"" (the resolution verbatim:\nactor, model profile, skills, instructions)
-Host -> Adapter : hook ""PreToolUse"" — dispatch class
+Orch -> Host : ""task"" (the resolution verbatim:\nactor, model profile, skills, instructions)
+Host -> Adapter : hook ""preToolUse"" — dispatch class
 Adapter -> Harness : ""5 check-step-preconditions""(sessionId, parentSessionId: null)
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …] }
 alt preconditions hold
-  Adapter --> Host : permissionDecision: allow
+  Adapter --> Host : pass (empty: the adapter never emits allow)
 else a precondition fails
   Adapter --> Host : permissionDecision: deny +\npermissionDecisionReason (conditionChecks[] serialized)
   Host --> Orch : dispatch blocked, reports returned
   Orch -> Orch : per ""reports-handling"" instruction — produce the missing\nstate (via a prior step or the user), dispatch again
 end
-Host -> Adapter : hook ""SubagentStart""
-alt agent_type correlates to an unresolved step-resolution entry
-  Adapter -> Harness : ""0 start-session""(agent: agent_type, sessionId,\nparentSessionId: the dispatching session)
-  Harness -> Harness : correlates to the parent's latest unresolved\nstep-resolution entry for agent_type
+Host -> Adapter : hook ""subagentStart""
+alt agentType correlates to an unresolved step-resolution entry
+  Adapter -> Harness : ""0 start-session""(agent: agentType, sessionId,\nparentSessionId: the dispatching session)
+  Harness -> Harness : correlates to the parent's latest unresolved\nstep-resolution entry for agentType
   Harness -> Harness : the step instance exists: create its step ref\n""refs/harness/steps/<workflowInstanceId>/<stepSlug>/<workerSessionId>""\n(from the previous step instance's tip when the base is\nunchanged, else the workspace branch tip) — no checkout:\nthe working tree stays on the workspace branch
   Harness --> Adapter : { session: { agent, sessionId, parentSessionId } }
   Adapter -> Harness : ""6 resolve-step-instructions""(sessionId, parentSessionId)
@@ -113,7 +113,7 @@ alt agent_type correlates to an unresolved step-resolution entry
   Adapter -> Harness : ""7 resolve-step-skills""(sessionId, parentSessionId)
   Harness --> Adapter : { skills: [the step's declared skill ids] }
   Adapter -> Adapter : render ""additionalContext"" —\ninline step refs + skill load directives
-  Adapter --> Host : hookSpecificOutput.additionalContext
+  Adapter --> Host : ""additionalContext"" = hint + step context
   Host --> Sub : session carries the step's constraints
 else foreign subagent — no correlation
   Adapter --> Host : pass through — untouched, unlogged (C7)
@@ -121,38 +121,38 @@ end
 
 == Step work — every write guarded ==
 Sub -> Host : write artifact (host write tool)
-Host -> Adapter : hook ""PreToolUse"" — write class
+Host -> Adapter : hook ""preToolUse"" — write class
 Adapter -> Harness : ""8 check-step-authorization""(sessionId, parentSessionId,\nartifactPath, action)
 Harness -> Harness : claim the artifact lock ""refs/harness/locks/<artifactPath>""\n(create-only; held by this step instance, or re-pointed from the\nstep instance a retry continues; held by another: deny)
 Harness --> Adapter : { outcome: allowed | denied,\nauthorization: { actor, artifactPath, action, resource, failureMessage? } }
 alt privilege granted
-  Adapter --> Host : permissionDecision: allow\n(step instance in flight; artifact lock held;\nan unclaimed path was clean against HEAD)
+  Adapter --> Host : pass (empty: the adapter never emits allow)\n(step instance in flight; artifact lock held;\nan unclaimed path was clean against HEAD)
   Host -> Host : execute the write — lands in the working tree\n(the staging area, not yet workspace state)
 else no grant, no step instance in flight, or lock held by another
   Adapter --> Host : permissionDecision: deny (missing privilege / no step instance in flight /\nlock held by another step instance)
   Host --> Sub : write blocked, report returned
   Sub -> Sub : per its step instructions — proceed without the write,\nor return it to the orchestrator (privileged-author route)
 end
-Host -> Adapter : hook ""PostToolUse"" — write class
+Host -> Adapter : hook ""postToolUse"" — write class
 Adapter -> Harness : ""9 check-step-artifact""(sessionId, parentSessionId, artifactPaths)
 Harness --> Adapter : { outcome: valid | reverted,\nartifactChecks?: [{ artifactPath, failureMessage, revert: { action, from } }, …] }
 alt write is schema-valid
   Harness -> Harness : commit the validated bytes onto the step ref\n(temporary index; HEAD and working tree unmoved),\nattributed to the session — workspace state\ndoes not advance (only promotion does)
-  Adapter --> Host : { ""continue"": true }
+  Adapter --> Host : pass (empty)
 else invalid write
   Harness -> Harness : discard the staged write — restore from the step\nref tip or HEAD / delete new: no commit ever held the invalid\nbytes (C6 — transactional by construction)
-  Adapter --> Host : decision: ""block"" + reason\n(additionalContext restates the retry instruction)
+  Adapter --> Host : ""modifiedResult"" (write rejected: …) +\n""additionalContext"" (the retry instruction)
   Host --> Sub : failure message returned
   Sub -> Sub : per its step instructions — rewrite per the\nfailure message and retry the write
 end
 
 == Step close ==
 Sub --> Host : worker session ends
-Host -> Adapter : hook ""SubagentStop""
-Adapter -> Harness : ""11 end-session""(sessionId: agent_id, no parentSessionId needed)
+Host -> Adapter : hook ""subagentStop""
+Adapter -> Harness : ""11 end-session""(sessionId: agentId, no parentSessionId needed)
 Harness --> Adapter : { outcome: ended }\n(never surfaced to the host)
-Adapter -> Adapter : ""SessionTracker"" pops the worker session —\nthe dispatching orchestrator session is current again
-Host -> Adapter : hook ""PostToolUse"" — dispatch class
+Adapter -> Adapter : ""SessionTracker"" deletes the worker session's record
+Host -> Adapter : hook ""postToolUse"" — dispatch class
 Adapter -> Harness : ""10 check-step-postconditions""(sessionId, parentSessionId: null)
 Harness -> Harness : rebase the step ref onto the workspace branch in memory\n(merge-tree) if it moved (conflict: state-error\nstep-rebase-conflict); evaluate\ndelivery (whole step state + own commits) + postconditions\non the step state
 alt step instance passes
@@ -162,10 +162,10 @@ else step instance fails
 end
 Harness --> Adapter : { outcome: pass | fail,\nconditionChecks: [{ condition, outcome, failureMessage? }, …],\npromotion: { outcome: promoted | withheld, workspaceCommit } }
 alt postconditions hold — step journaled executed
-  Adapter --> Host : { ""continue"": true }
+  Adapter --> Host : pass (empty)
   Host --> Orch : dispatch returns — next iteration resolves the next step
 else postconditions fail — step not journaled executed
-  Adapter --> Host : decision: ""block"" + reason\n(additionalContext restates reports-handling)
+  Adapter --> Host : ""additionalContext"" (failing conditions +\nthe re-resolve directive)
   Host --> Orch : dispatch returns with reports
   Orch -> Orch : per ""reports-handling"" instruction — retry inside the workflow,\ninvisible to the user: the next iteration re-resolves the failed step\n(the harness governs the sequencing, not the agent)
 end
@@ -174,7 +174,7 @@ end
 
 == Workflow return ==
 Orch -> Host : mediated invocation — tool call:\n""harness.py resolve-step --workflow-slug <slug>""
-Host -> Adapter : hook ""PreToolUse"" — harness-command class
+Host -> Adapter : hook ""preToolUse"" — harness-command class
 Adapter -> Harness : ""3 resolve-step""(sessionId: resolved, parentSessionId: null, workflowSlug)
 Harness --> Adapter : { outcome: no-next-step }\n(a reversible observation — never "done")
 Adapter --> Host : permissionDecision: deny +\nreason "SAFe agentic harness RESULT (resolve-step)" + report
@@ -188,12 +188,12 @@ note right of Orch
   re-resolution on negative reports (invariant 7).
 end note
 
-== Turn close (""Stop"" fires at the end of EVERY request's loop — verified) ==
-Host -> Adapter : hook ""Stop""
+== Turn close (""agentStop"" fires when the orchestrator returns to the user) ==
+Host -> Adapter : hook ""agentStop""
 Adapter -> Adapter : resolve the ending orchestrator session\nvia ""SessionTracker"" — never the raw conversation id\n(a never-registered session is a silent pass-through)
 Adapter -> Harness : ""11 end-session""(sessionId)
 Harness --> Adapter : { outcome: ended }\n(never surfaced to the host; no function runs\nfor a session whose end is never observed)
-Adapter -> Adapter : ""SessionTracker"" clears this conversation's stack —\na later firing under a non-framework agent\nresolves to None: C7 pass-through, never a stale session
+Adapter -> Adapter : ""SessionTracker"" deletes the session's record —\na later firing under a non-framework agent finds none:\nC7 pass-through, never a stale session
 
 note right of Harness
   Configuration and workspace validity are

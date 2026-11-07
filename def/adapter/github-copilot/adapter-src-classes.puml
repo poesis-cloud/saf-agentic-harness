@@ -9,7 +9,7 @@ skinparam classAttributeIconSize 0
 skinparam PackagePadding 12
 skinparam ClassPadding 4
 
-package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
+package "CD - Adapter classes (github-copilot)" <<Frame>> {
 
   package "harness core (external, see ../../core/harness-src-classes.puml)" as harness_core #eeeeee {
     interface "harness.py <function>" as CommandApi <<external>> {
@@ -20,7 +20,7 @@ package "CD - Adapter classes (github-copilot-cli)" <<Frame>> {
     }
   }
 
-  package "github-copilot-cli (outside src/, depends ONLY on the harness command API)" as adapter {
+  package "github-copilot (outside src/, depends ONLY on the harness command API)" as adapter {
     class "adapter.py" as Entry <<entry>> {
       +run_hook(argv, stdin, stdout, stderr) : int
       +build_adapter(framework_dir, workspace_dir) : (Adapter, ToolBinding)
