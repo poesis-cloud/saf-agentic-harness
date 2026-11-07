@@ -637,46 +637,70 @@ class TestSingleDriver:
         assert journaled["outcome"]["error"]["code"] == "workflow-instance-busy"
         assert journaled["context"]["workflowInstanceId"] is None
 
+    def _busy_message(self, log_store: SessionLogStore, **options) -> str:
+        self._orphan_a_resolution(log_store)
+        resolver = StepResolver(
+            session_log_store=log_store,
+            workflow_catalog=build_catalog(build_step("build")),
+            clock=SequenceClock("2026-08-17T15:00:00Z"),
+            **options,
+        )
+        return resolver.resolve_step(self.NEXT_DRIVER, None, WORKFLOW_SLUG).outcome.error.message
+
     def test_the_busy_message_names_the_holder_and_the_generic_recovery_command(
         self, log_store: SessionLogStore
     ) -> None:
         """The `workflow-instance-busy` message (advisory prose) names the holding
         orchestrator session and the exact recovery command — `end-session` for that
         session, only if it is really gone (C8). Without an installed invocation it is
-        the generic form."""
-        self._orphan_a_resolution(log_store)
-        resolver = _build_resolver(log_store, build_step("build"))
-
-        message = resolver.resolve_step(self.NEXT_DRIVER, None, WORKFLOW_SLUG).outcome.error.message
+        the generic form; the id is attached with `=`."""
+        message = self._busy_message(log_store, windows_shell=False)
 
         assert f"'{ORCHESTRATOR_SESSION}'" in message
         assert "only then" in message and "really gone" in message
         assert message.endswith(
-            f"run: python harness.py end-session --session-id {ORCHESTRATOR_SESSION}"
+            f"run: python harness.py end-session --session-id={ORCHESTRATOR_SESSION}"
         )
 
-    def test_the_busy_message_gives_the_installed_interpreter_and_harness(
+    def test_the_posix_command_sets_the_effective_layout_and_quotes_paths(
         self, log_store: SessionLogStore
     ) -> None:
-        """When the core knows its installed interpreter and `harness.py`, the recovery
-        command names them, quoted for the shell, plus the framework root it runs
-        against."""
-        self._orphan_a_resolution(log_store)
-        resolver = StepResolver(
-            session_log_store=log_store,
-            workflow_catalog=build_catalog(build_step("build")),
-            clock=SequenceClock("2026-08-17T15:00:00Z"),
+        """With the installed interpreter, `harness.py`, and the effective `FRAMEWORK_*`
+        layout known, the recovery command sets that layout — workspace override
+        included — so it targets the same session logs, quoted for a POSIX shell."""
+        message = self._busy_message(
+            log_store,
             harness_invocation=("/opt/venv/bin/python", "/opt/saf harness/harness.py"),
-            framework_dir="/srv/framework",
+            recovery_environment={
+                "FRAMEWORK_DIR": "/srv/framework",
+                "FRAMEWORK_WORKSPACE_DIR": "/srv/my workspace",
+            },
+            windows_shell=False,
         )
 
-        message = resolver.resolve_step(self.NEXT_DRIVER, None, WORKFLOW_SLUG).outcome.error.message
+        assert message.endswith(
+            "run: FRAMEWORK_DIR=/srv/framework FRAMEWORK_WORKSPACE_DIR='/srv/my workspace' "
+            "/opt/venv/bin/python '/opt/saf harness/harness.py' "
+            f"end-session --session-id={ORCHESTRATOR_SESSION}"
+        )
 
-        quoted = '"/opt/saf harness/harness.py"' if os.name == "nt" else "'/opt/saf harness/harness.py'"
-        assert (
-            f"run: /opt/venv/bin/python {quoted} end-session --session-id {ORCHESTRATOR_SESSION}"
-            " (with FRAMEWORK_DIR=/srv/framework)"
-        ) in message
+    def test_the_windows_command_is_rendered_for_powershell(
+        self, log_store: SessionLogStore
+    ) -> None:
+        """On Windows the command targets PowerShell: `$env:` assignments and the `&`
+        call operator over single-quoted literals (an apostrophe doubled)."""
+        message = self._busy_message(
+            log_store,
+            harness_invocation=(r"C:\Program Files\Python312\python.exe", r"C:\o'neil\harness.py"),
+            recovery_environment={"FRAMEWORK_DIR": r"C:\fw"},
+            windows_shell=True,
+        )
+
+        assert message.endswith(
+            r"run: $env:FRAMEWORK_DIR='C:\fw'; & 'C:\Program Files\Python312\python.exe' "
+            r"'C:\o''neil\harness.py' "
+            f"'end-session' '--session-id={ORCHESTRATOR_SESSION}'"
+        )
 
     def test_an_ended_driver_lets_the_next_session_continue_the_instance(
         self, log_store: SessionLogStore

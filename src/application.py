@@ -279,7 +279,7 @@ class Application:
                     catalog,
                     clock,
                     harness_invocation=_find_harness_invocation(),
-                    framework_dir=str(layout.framework_dir),
+                    recovery_environment=_render_layout_environment(layout),
                 ),
                 validator,
             ),
@@ -356,6 +356,25 @@ class Application:
             )
         sys.stdout.write(rendered + "\n")
         return _EXIT_OK
+
+
+def _render_layout_environment(layout: FrameworkLayout) -> Mapping[str, str]:
+    """Answer the effective `FRAMEWORK_*` layout as absolute paths.
+
+    The advisory recovery command of `workflow-instance-busy` sets them, so an
+    `end-session` run from another terminal targets the same configuration and session
+    logs as the hooks did — process overrides (e.g. an installer's workspace) included.
+    """
+    return {
+        "FRAMEWORK_DIR": str(layout.framework_dir),
+        "FRAMEWORK_AGENTS_DIR": str(layout.agents_dir),
+        "FRAMEWORK_ARTIFACTS_DIR": str(layout.artifacts_dir),
+        "FRAMEWORK_SKILLS_DIR": str(layout.skills_dir),
+        "FRAMEWORK_TEMPLATES_DIR": str(layout.templates_dir),
+        "FRAMEWORK_WORKFLOWS_DIR": str(layout.workflows_dir),
+        "FRAMEWORK_INSTRUCTIONS_DIR": str(layout.instructions_dir),
+        "FRAMEWORK_WORKSPACE_DIR": str(layout.workspace_dir),
+    }
 
 
 def _find_harness_invocation() -> tuple[str, str] | None:

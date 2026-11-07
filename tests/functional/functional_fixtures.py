@@ -287,7 +287,8 @@ class FunctionalHarness:
             spelling = _FLAG_SPELLINGS[property_name]
             values = value if property_name in _SET_VALUED_PROPERTIES else (value,)
             for item in values:
-                flags.extend((spelling, str(item)))
+                # `--flag=value`: a value starting with a hyphen is never read as an option.
+                flags.append(f"{spelling}={item}")
         return tuple(flags)
 
     def invoke(self, function: str, **inquiry: Any) -> CommandRun:

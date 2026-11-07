@@ -64,9 +64,10 @@ GitHub pre-releases.
 ### Recovery
 
 - **`workflow-instance-busy` now says how to recover.** The message names the holding
-  orchestrator session and prints the exact command that ends it: the installed interpreter
-  and `harness.py`, `end-session --session-id <holder>`, and the framework root to run it
-  against. The README gains "Recovering an interrupted workflow instance".
+  orchestrator session and prints the exact command that ends it: the effective framework
+  layout as environment variables, the installed interpreter and `harness.py`, and
+  `end-session --session-id=<holder>`, rendered for PowerShell on Windows. The README gains
+  "Recovering an interrupted workflow instance".
 
 ### Adapters
 

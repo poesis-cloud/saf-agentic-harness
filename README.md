@@ -92,16 +92,22 @@ harness still counts that session as the instance's live driver and refuses ever
 orchestrator session (function 3, invariant 10).
 
 **Find the holder.** The error message names the holding orchestrator session and prints the
-exact command that ends it, for example:
+exact command that ends it, with the effective framework layout set in its environment. In a
+POSIX shell, for example:
 
 ```text
-… run: /path/to/.venv/bin/python /path/to/harness.py end-session --session-id <holder id>
-(with FRAMEWORK_DIR=/path/to/framework)
+… run: FRAMEWORK_DIR=/path/to/framework FRAMEWORK_WORKSPACE_DIR=/path/to/framework/workspace … /path/to/.venv/bin/python /path/to/harness.py end-session --session-id=<holder id>
+```
+
+On Windows it is rendered for PowerShell instead:
+
+```text
+… run: $env:FRAMEWORK_DIR='C:\path\to\framework'; … & 'C:\path\to\.venv\Scripts\python.exe' 'C:\path\to\harness.py' 'end-session' '--session-id=<holder id>'
 ```
 
 **Recover.** Only if that session is really gone, run the printed command from your own
-terminal, with `FRAMEWORK_DIR` set to the framework root shown. Then retry: the next
-orchestrator session continues the workflow instance and re-resolves its unfinished step.
+terminal, as printed. Then retry: the next orchestrator session continues the workflow
+instance and re-resolves its unfinished step.
 
 **Why this is safe.** `end-session` only appends the session's ending entry to that session's
 log. Every later call from the ended session is refused (`session-ended`, C8 — fail closed),
