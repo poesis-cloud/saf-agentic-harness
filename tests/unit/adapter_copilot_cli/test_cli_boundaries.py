@@ -338,6 +338,24 @@ def test_shell_commands_naming_the_workspace_are_denied(rig: Rig) -> None:
     assert rig.fire("preToolUse", pre_tool_use(("powershell", {"command": "git status --short"}))) is None
 
 
+def test_h6_skips_the_return_of_an_attributable_sub_agent_with_no_actor(rig: Rig) -> None:
+    """Adapter spec H6: a sub-agent never registered as the step's worker — here its
+    `subagentStart` names no actor — has its return skipped once it stops; the next
+    return is evaluated."""
+    rig.open_turn()
+    rig.tracker.write(HOST, rig.tracker.read(HOST).with_context_injected())
+    rig.fire("subagentStart", {"sessionId": HOST, "agentId": SUBAGENT, "parentAgentId": HOST,
+                               "timestamp": 1793784701180, "cwd": CWD})
+    rig.fire("subagentStop", {"sessionId": HOST, "agentId": SUBAGENT, "parentAgentId": HOST,
+                              "stopReason": "end_turn", "timestamp": 1793784701190})
+
+    rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
+    assert rig.runner.inquiries("check-step-postconditions") == []
+
+    rig.fire("postToolUse", post_tool_use("task", {"agent_type": STEP_ACTOR}))
+    assert len(rig.runner.inquiries("check-step-postconditions")) == 1
+
+
 # --- H5 ------------------------------------------------------------------------------
 
 

@@ -1473,6 +1473,158 @@ class TestFailedRegistration:
         )
         assert len(runner.find_calls("check-step-authorization")) == 1
 
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            build_error_report("start-session", code="worker-session-bound", message="already bound"),
+            build_report("start-session", "not-applicable"),
+        ],
+        ids=["worker-session-bound", "never-registered"],
+    )
+    def test_a_refused_sub_agents_return_never_concludes_the_step(
+        self, make_adapter, tracker: SessionTracker, refusal
+    ) -> None:
+        """Adapter spec H6 (live trial T1): a dispatch return whose sub-agent's
+        registration was refused, or that was never registered as the step's worker, does
+        not trigger `check-step-postconditions` — the step stays in flight for its bound
+        worker session, and only the next return evaluates it."""
+        runner = FakeCommandRunner(reports=queue_reports(start_session=[refusal]))
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload()))
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+
+        ignored = adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+
+        assert ignored.stdout == ""
+        assert runner.find_calls("check-step-postconditions") == []
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
+    def test_a_bound_worker_returning_before_the_refused_one_is_evaluated(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """Adapter spec H6: only a STOPPED ignored sub-agent's return is skipped. When the
+        bound worker returns while the refused sub-agent still runs, its return concludes
+        the step at once; the refused sub-agent's later return evaluates nothing."""
+        runner = FakeCommandRunner(
+            reports=queue_reports(
+                start_session=[
+                    build_error_report(
+                        "start-session", code="worker-session-bound", message="already bound"
+                    )
+                ]
+            )
+        )
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload()))
+
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
+    def test_an_attributable_sub_agent_with_no_actor_has_its_return_skipped(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """Adapter spec H6: a sub-agent never registered as the step's worker — here its
+        `SubagentStart` names no actor — has its return skipped once it stops."""
+        runner = FakeCommandRunner()
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        payload = _subagent_start_payload()
+        del payload["agent_type"]
+        adapter.handle_hook_event(_event(payload))
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert runner.find_calls("check-step-postconditions") == []
+        assert runner.find_calls("start-session") == []
+
+    def test_a_return_that_loses_every_unlink_race_re_lists_the_armed_markers(
+        self, tracker: SessionTracker, monkeypatch
+    ) -> None:
+        """Adapter spec H6: a return snapshots marker B, a concurrent return consumes B
+        while sub-agent C stops and arms its own; the losing return still consumes C's."""
+        for worker in ("worker-b", "worker-c"):
+            tracker.mark_ignored_return(HOST_SESSION, worker)
+        tracker.arm_ignored_return(HOST_SESSION, "worker-b")
+        original_unlink = Path.unlink
+        raced: list[str] = []
+
+        def racing_unlink(self: Path, missing_ok: bool = False) -> None:
+            if not raced and self.name == "worker-b":
+                raced.append(self.name)
+                original_unlink(self)
+                tracker.arm_ignored_return(HOST_SESSION, "worker-c")
+                raise FileNotFoundError(self)
+            original_unlink(self, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", racing_unlink)
+
+        assert tracker.consume_ignored_return(HOST_SESSION) is True
+        assert raced == ["worker-b"]
+        assert tracker.consume_ignored_return(HOST_SESSION) is False
+
+    def test_arming_an_unrecorded_sub_agent_leaves_no_directory_behind(
+        self, tracker: SessionTracker, tmp_path: Path
+    ) -> None:
+        """A `SubagentStop` of an untracked conversation (or of the bound worker) records
+        nothing, so it must leave no marker directory that no later close would clean up."""
+        assert tracker.arm_ignored_return("ungoverned-host", "worker-x") is False
+        assert not list(tmp_path.rglob("*ignored-returns*"))
+
+    def test_a_new_turn_forgets_a_pending_ignored_return(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """A pending ignored return belongs to its turn: H0's fresh stack drops it."""
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        tracker.mark_ignored_return(HOST_SESSION, "stale")
+        tracker.arm_ignored_return(HOST_SESSION, "stale")
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        assert tracker.consume_ignored_return(HOST_SESSION) is False
+
     def test_a_not_applicable_step_still_passes_through(
         self, make_adapter, tracker: SessionTracker
     ) -> None:

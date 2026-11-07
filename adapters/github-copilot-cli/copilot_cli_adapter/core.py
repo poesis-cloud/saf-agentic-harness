@@ -239,6 +239,7 @@ class Adapter:
             self._tracker.delete(host_id)
             return None
         parent = hook.raw_parent_host_session_id
+        self._tracker.clear_ignored_returns(host_id)
         record = SessionRecord(
             session_id=session_id,
             agent=str(hook.scoping_agent),
@@ -259,7 +260,12 @@ class Adapter:
             return None
         agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         actor = self._binding.probe(hook.payload, self._binding.host_step_actor_keys)
-        if agent_id is None or actor is None:
+        if agent_id is None:
+            return None
+        if actor is None:
+            # Never registered as the step's worker, yet attributable: its return must not
+            # conclude the step (H6).
+            self._ignore_return(parent_host, parent, sanitize_identifier(str(agent_id)))
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
@@ -288,10 +294,12 @@ class Adapter:
             },
         )
         if report is not None and read_status(report) == _NOT_APPLICABLE:
+            self._ignore_return(parent_host, parent, step_host)
             return None
         failure = self._registration_failure(report)
         if failure is not None:
             self._tracker.write(step_host, replace(record, registration_failure=failure))
+            self._ignore_return(parent_host, parent, step_host)
             return None
         context, delivered = self._resolve_context(
             record,
@@ -302,6 +310,18 @@ class Adapter:
         if not context:
             return None
         return renderer.step_context(context)
+
+    def _ignore_return(
+        self, dispatcher_host: str, dispatcher: SessionRecord, step_host: str
+    ) -> None:
+        """Mark this sub-agent's return as not concluding the dispatcher's step (H6).
+
+        Adapter spec H6: a dispatch return whose sub-agent's worker-session registration
+        was refused, or that was never registered as the step's worker, does not trigger
+        `check-step-postconditions`; the step stays in flight for its bound worker session.
+        """
+        if dispatcher.registered:
+            self._tracker.mark_ignored_return(dispatcher_host, step_host)
 
     # H2 / H3 / H4 ---------------------------------------------------------------------
 
@@ -675,7 +695,8 @@ class Adapter:
             return None
         decision: dict[str, Any] = {}
         if self._binding.is_dispatch_tool(call.name):
-            decision = dict(self._settle_step(record) or {})
+            if not self._tracker.consume_ignored_return(host_id):
+                decision = dict(self._settle_step(record) or {})
         elif hook.event == POST_TOOL_USE and (
             self._binding.resolve_write_action(call.name, call.args) is not None
         ):
@@ -767,7 +788,13 @@ class Adapter:
     def _close_subagent(self, hook: HookInput) -> Decision:
         agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         if agent_id is not None:
-            self._close(sanitize_identifier(str(agent_id)))
+            step_host = sanitize_identifier(str(agent_id))
+            dispatcher = hook.dispatcher_host_id
+            if dispatcher:
+                # H6: a sub-agent recorded as ignored at H1 has now stopped, so the
+                # dispatcher's next return is its own (host fact 6) and is not evaluated.
+                self._tracker.arm_ignored_return(dispatcher, step_host)
+            self._close(step_host)
         return None
 
     def _close_host_session(self, hook: HookInput) -> Decision:

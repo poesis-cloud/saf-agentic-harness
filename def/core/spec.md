@@ -1693,7 +1693,9 @@ Contract schemas — [contracts/api/check-step-postconditions.input.schema.json]
 - Trigger — the step-ended boundary (THE evaluation point: the step's worker session has ended, the
   state it left is final). The invocation runs in the dispatching (orchestrator) session — the
   same session that owns the step's precondition check: at step-ended the worker session has
-  already closed.
+  already closed. The step-ended boundary is the return of the step's own dispatch: a host
+  binding that can attribute a dispatch return to a refused worker session does not treat it
+  as the step-ended boundary.
 
 **Postconditions**
 

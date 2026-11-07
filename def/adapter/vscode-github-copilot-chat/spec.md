@@ -1302,8 +1302,8 @@ into workspace state, a failing one withheld. Same physical registration as H5; 
 Note: the payload does **not** echo the subagent's `agent_id` — correlation of which step
 ended relies on function 3, invariant 9 (one in-flight step per orchestrator session; see I7).
 
-**Harness invocation** — function 10 `check-step-postconditions`, always invoked when
-`tool_name` matches the binding's dispatch-tool list:
+**Harness invocation** — function 10 `check-step-postconditions`, invoked when `tool_name`
+matches the binding's dispatch-tool list — except for a refused sub-agent's return (below):
 
 ```json
 { "in": { "sessionId": "<current agent session of session_id>", "parentSessionId": null } }
@@ -1318,6 +1318,22 @@ subagent's own tool-calling loop, hence inside the parent's dispatch tool call (
 Defensively, this hook still resolves
 the **stack base** (the orchestrator's turn session), not the raw top — correct under either
 ordering.
+
+**A refused sub-agent's return does not conclude the step.** A dispatch return whose
+sub-agent is the session of a refused registration (function 0 returned an error, e.g.
+`worker-session-bound`), or that the adapter never registered as the step's worker, does NOT
+trigger `check-step-postconditions`: it passes through, the step stays in flight for its bound
+worker session, and that worker's return concludes it (core function 10, Trigger). This
+`PostToolUse` names no sub-agent (I7), but `SubagentStart` and `SubagentStop` do
+(`agent_id`). When H1 does not register the sub-agent as the step's worker, it records a
+pending marker for it; that sub-agent's own `SubagentStop` arms the marker; H6 consumes one
+armed marker instead of evaluating. A sub-agent's `SubagentStop` fires before the
+`PostToolUse` of its own dispatch (I13(e)), so a skipped return always follows the stop of a
+sub-agent that was never the step's worker: while the bound worker runs, every dispatch
+return is skipped, and the bound worker's return is evaluated as soon as no such stopped
+sub-agent's return is outstanding. One marker file per sub-agent, moved and consumed
+atomically, so concurrent hook processes never lose or share one. Markers are per turn: H0
+and `Stop` drop them.
 
 **Out** (stdout, exit 0)
 

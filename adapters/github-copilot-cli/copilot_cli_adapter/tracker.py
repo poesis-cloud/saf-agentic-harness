@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -54,6 +55,7 @@ class SessionTracker:
 
     def __init__(self, state_dir: Path) -> None:
         self._sessions_dir = state_dir / "sessions"
+        self._ignored_returns_dir = state_dir / "ignored-returns"
 
     def read(self, host_id: str) -> SessionRecord | None:
         path = self._path(host_id)
@@ -80,6 +82,70 @@ class SessionTracker:
 
     def delete(self, host_id: str) -> None:
         self._path(host_id).unlink(missing_ok=True)
+        self.clear_ignored_returns(host_id)
+
+    def mark_ignored_return(self, dispatcher_host_id: str, agent_host_id: str) -> None:
+        """Record a sub-agent whose return must not conclude its dispatcher's step.
+
+        Adapter spec H6: the return of a sub-agent whose worker-session registration was
+        refused — or that was never registered as the step's worker — does not trigger
+        `check-step-postconditions`. The marker stays PENDING until that very sub-agent
+        stops (`arm_ignored_return`). One FILE per sub-agent, moved and consumed
+        atomically, so concurrent hook processes never lose or share a marker.
+        """
+        pending = self._ignored_returns_dir / _safe_component(dispatcher_host_id) / "pending"
+        pending.mkdir(parents=True, exist_ok=True)
+        (pending / _safe_component(agent_host_id)).touch()
+
+    def arm_ignored_return(self, dispatcher_host_id: str, agent_host_id: str) -> bool:
+        """At that sub-agent's own stop, make its marker consumable by the next return.
+
+        The host fires a sub-agent's `subagentStop` before the dispatcher's return of that
+        same dispatch (host fact 6), so an armed marker always belongs to a sub-agent that
+        has already stopped — never to the bound worker, which is never marked.
+        """
+        directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
+        name = _safe_component(agent_host_id)
+        pending = directory / "pending" / name
+        if not pending.is_file():
+            # Nothing was recorded for this sub-agent (an ungoverned conversation, or the
+            # bound worker): leave no directory behind.
+            return False
+        returned = directory / "returned"
+        returned.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(pending, returned / name)
+        except FileNotFoundError:
+            return False
+        return True
+
+    def consume_ignored_return(self, dispatcher_host_id: str) -> bool:
+        """Consume one armed ignored return of this dispatcher, if any.
+
+        While the step's bound worker runs, every return of this dispatcher is that of a
+        stopped, ignored sub-agent, whose marker is armed. Consumption is an atomic
+        unlink: two concurrent returns never consume the same marker.
+        """
+        returned = self._ignored_returns_dir / _safe_component(dispatcher_host_id) / "returned"
+        # Re-list after losing every unlink race: a concurrent return may have consumed
+        # the markers seen while another sub-agent armed a new one meanwhile.
+        while returned.is_dir():
+            markers = sorted(returned.iterdir())
+            if not markers:
+                return False
+            for marker in markers:
+                try:
+                    marker.unlink()
+                except FileNotFoundError:
+                    continue
+                return True
+        return False
+
+    def clear_ignored_returns(self, host_id: str) -> None:
+        """Forget every pending ignored return of a session that closes or restarts."""
+        shutil.rmtree(
+            self._ignored_returns_dir / _safe_component(host_id), ignore_errors=True
+        )
 
     def descendants(self, host_id: str) -> tuple[str, ...]:
         """Answer every host session registered (transitively) under `host_id`."""
@@ -112,6 +178,13 @@ class SessionTracker:
         if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
             raise ValueError(f"unsafe host session id: {host_id!r}")
         return self._sessions_dir / f"{host_id}.json"
+
+
+def _safe_component(host_id: str) -> str:
+    """Refuse a host id that could escape the tracker's directory."""
+    if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
+        raise ValueError(f"unsafe host session id: {host_id!r}")
+    return host_id
 
 
 __all__ = ["TrackerError", "STEP_ORIGIN", "TURN_ORIGIN", "SessionRecord", "SessionTracker"]
