@@ -63,11 +63,17 @@ replayed from a live capture in the process tests).
    - Dispatch: `task` (`agent_type`, `name`, `description`, `prompt`, optional `model`/`mode`).
    - Also `skill`, MCP tools, and `ask_user` in an interactive session. The standalone CLI's
      non-interactive prompt mode (`copilot -p`) offers **no `ask_user`** (observed, 1.0.105).
-   - The file tools depend on the MODEL (observed, CLI 1.0.105). Claude-family models get
-     `create`/`edit`; `create` refuses a missing parent folder ("Parent directory … does not
-     exist. You need to create it before creating the file"), and `edit` needs an existing
-     file. GPT-5.x models get no `create`/`edit` but a freeform `apply_patch`, whose
-     `toolArgs` is the raw patch string; its `*** Add File:` creates missing folders.
+   - The concrete file tools are resolved by the host from the agent's declared `tools`
+     aliases, per model and per runtime version; the harness cannot observe or configure that
+     mapping. Observed on CLI 1.0.105: Claude-family models get `create`/`edit` (`create`
+     refuses a missing parent folder ("Parent directory … does not exist. You need to create
+     it before creating the file"), and `edit` needs an existing file); GPT-5.x get
+     `apply_patch` (no `create`/`edit`, but a freeform `apply_patch`, whose `toolArgs` is the
+     raw patch string; its `*** Add File:` creates missing folders). Observed on app runtime
+     1.0.102: for an agent declaring `edit`, a `gpt-5.3-codex` `task` subagent reported only
+     `view`, `rg`, `glob`, `powershell*` and `skill`, with no write tool. Therefore
+     [`models.yaml`](../../../adapters/github-copilot-cli/models.yaml) binds only models
+     verified to receive a write tool on this host (see [Model binding](#model-binding)).
    - Paths are absolute host paths (`C:\Users\…`, `/home/…`).
 6. **Subagents.** `subagentStart`/`subagentStop` carry the subagent's
    `agentId`/`agentType`/`agentName` and, in `parentAgentId`, the DISPATCHER's id. For a
