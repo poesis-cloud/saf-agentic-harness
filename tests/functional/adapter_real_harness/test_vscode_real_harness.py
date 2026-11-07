@@ -121,3 +121,62 @@ def test_a_governed_step_commits_on_its_step_ref_and_promotes_without_a_checkout
     outcome = journal[-1]["report"]
     assert outcome["context"]["function"] == "check-step-postconditions"
     assert outcome["promotion"]["outcome"] == "promoted"
+
+
+def _orchestrator_outcomes(real: RealHarness) -> list[dict[str, Any]]:
+    log = real.workspace_dir / "logs" / f"{TURN_SESSION_ID}.log.jsonl"
+    return [
+        json.loads(line)["report"]
+        for line in log.read_text(encoding="utf-8").splitlines()
+        if '"check-step-postconditions"' in line
+    ]
+
+
+def test_a_refused_duplicate_returning_first_never_concludes_the_bound_workers_step(
+    real: RealHarness,
+) -> None:
+    """Live trial T1: the orchestrator dispatches the resolved step twice; B returns FIRST.
+    On this host the shared `session_id` stacks B under A, so function 0 never registers B
+    as the step's worker (`not-applicable`). Adapter spec H6: a dispatch return whose
+    sub-agent was never registered as the step's worker — or whose registration was
+    refused — does not trigger `check-step-postconditions`: the step stays in flight for
+    its bound worker A, whose write is allowed and whose return concludes and promotes
+    the step."""
+    head = real.git("rev-parse", "HEAD")
+    write_input = {"filePath": str(real.workspace_dir / REPORT_REF), "content": REPORT_BYTES}
+    _fire(real, "UserPromptSubmit", user_prompt_submit(), ORCHESTRATOR)
+    _fire(
+        real,
+        "PreToolUse",
+        pre_tool_use(
+            "run_in_terminal",
+            {"command": f"python harness.py resolve-step --workflow-slug {WORKFLOW}", "isBackground": False},
+        ),
+    )
+    for _ in range(2):
+        assert _permission(_fire(real, "PreToolUse", pre_tool_use("runSubagent", dispatch_tool_input(ACTOR)))) != "deny"
+    _fire(real, "SubagentStart", subagent_start(agent_id="worker-a", agent_type=ACTOR))
+    _fire(real, "SubagentStart", subagent_start(agent_id="worker-b", agent_type=ACTOR))
+    assert not (real.workspace_dir / "logs" / "worker-b.log.jsonl").exists()
+
+    _fire(real, "SubagentStop", subagent_stop(agent_id="worker-b"))
+    returned_b = _fire(real, "PostToolUse", post_tool_use("runSubagent", dispatch_tool_input(ACTOR)))
+
+    assert returned_b.is_silent
+    assert _orchestrator_outcomes(real) == []
+
+    assert _permission(_fire(real, "PreToolUse", pre_tool_use("create_file", write_input))) != "deny"
+    real.write_report()
+    _fire(real, "PostToolUse", post_tool_use("create_file", write_input))
+    (step_ref,) = real.step_refs()
+    assert step_ref.endswith(f"/{STEP}/worker-a")
+    assert REPORT_REF in real.git("ls-tree", "-r", "--name-only", step_ref)
+
+    _fire(real, "SubagentStop", subagent_stop(agent_id="worker-a"))
+    _fire(real, "PostToolUse", post_tool_use("runSubagent", dispatch_tool_input(ACTOR)))
+
+    (outcome,) = _orchestrator_outcomes(real)
+    assert outcome["outcome"]["status"] == "pass"
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
+    assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"

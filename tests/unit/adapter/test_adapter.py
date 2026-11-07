@@ -1473,6 +1473,57 @@ class TestFailedRegistration:
         )
         assert len(runner.find_calls("check-step-authorization")) == 1
 
+    @pytest.mark.parametrize(
+        "refusal",
+        [
+            build_error_report("start-session", code="worker-session-bound", message="already bound"),
+            build_report("start-session", "not-applicable"),
+        ],
+        ids=["worker-session-bound", "never-registered"],
+    )
+    def test_a_refused_sub_agents_return_never_concludes_the_step(
+        self, make_adapter, tracker: SessionTracker, refusal
+    ) -> None:
+        """Adapter spec H6 (live trial T1): a dispatch return whose sub-agent's
+        registration was refused, or that was never registered as the step's worker, does
+        not trigger `check-step-postconditions` — the step stays in flight for its bound
+        worker session, and only the next return evaluates it."""
+        runner = FakeCommandRunner(reports=queue_reports(start_session=[refusal]))
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload()))
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+
+        ignored = adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+
+        assert ignored.stdout == ""
+        assert runner.find_calls("check-step-postconditions") == []
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
+    def test_a_new_turn_forgets_a_pending_ignored_return(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """A pending ignored return belongs to its turn: H0's fresh stack drops it."""
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        tracker.mark_ignored_return(HOST_SESSION, "stale")
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+
+        assert tracker.consume_ignored_return(HOST_SESSION) is False
+
     def test_a_not_applicable_step_still_passes_through(
         self, make_adapter, tracker: SessionTracker
     ) -> None:

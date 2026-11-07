@@ -63,6 +63,14 @@ GitHub pre-releases.
 
 ### Adapters
 
+- **A refused sub-agent's return no longer concludes the step** (live trial T1). When the
+  orchestrator dispatched a resolved step twice, the duplicate's registration was refused
+  (`worker-session-bound`). Its dispatch return still triggered `check-step-postconditions`,
+  which closed the step while the bound worker was still running. Both adapters now record,
+  at H1, each sub-agent whose registration was refused or never happened, and H6 skips one
+  such return instead of evaluating. The step stays in flight until its bound worker
+  returns. The core spec's function 10 trigger and both adapter specs' H6 state the rule.
+
 - **The H5 retry hint names the revert the harness performed.** Both adapters used to say
   "restored from HEAD" for every rejected write. They now render each failing path's revert
   record from the function-9 report: "restored from <step ref>", "restored from HEAD", or

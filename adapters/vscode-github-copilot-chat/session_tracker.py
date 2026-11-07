@@ -32,10 +32,40 @@ class SessionTracker:
     def __init__(self, store_path: Path) -> None:
         """Create the tracker over its own JSON record file."""
         self._store_path = store_path
+        self._ignored_returns_path = store_path.with_name(
+            f"{store_path.stem}.ignored-returns{store_path.suffix}"
+        )
 
     def reset_current(self, raw_host_id: str, session_id: str) -> None:
         """Discard whatever a prior turn left and open a fresh stack on this session."""
         self._write_stacks({**self._read_stacks(), raw_host_id: [session_id]})
+        self._clear_ignored_returns(raw_host_id)
+
+    def mark_ignored_return(self, raw_host_id: str, session_id: str) -> None:
+        """Record that ONE dispatch return of this conversation must not conclude its step.
+
+        Adapter spec H6: the return of a sub-agent whose worker-session registration was
+        refused — or that was never registered as the step's worker — does not trigger
+        `check-step-postconditions`; the step stays in flight for its bound worker session.
+        """
+        pending = self._read_ignored_returns()
+        pending.setdefault(raw_host_id, []).append(session_id)
+        self._write_ignored_returns(pending)
+
+    def consume_ignored_return(self, raw_host_id: str) -> bool:
+        """Consume one pending ignored return of this conversation, if there is one.
+
+        The host fires a sub-agent's `SubagentStop`, then its dispatch return, only after
+        that sub-agent started (I13(e)), so while the step's bound worker runs, every
+        dispatch return of this conversation belongs to an ignored sub-agent.
+        """
+        pending = self._read_ignored_returns()
+        queue = pending.get(raw_host_id)
+        if not queue:
+            return False
+        queue.pop(0)
+        self._write_ignored_returns(pending)
+        return True
 
     def reset_unregistered(self, raw_host_id: str, session_id: str) -> None:
         """Open this turn as UNREGISTERED: its `start-session` failed (fail closed)."""
@@ -65,6 +95,7 @@ class SessionTracker:
         stacks = self._read_stacks()
         stacks[raw_host_id] = []
         self._write_stacks(stacks)
+        self._clear_ignored_returns(raw_host_id)
 
     def resolve_current(self, raw_host_id: str) -> str | None:
         """Resolve the agent session a firing of this host conversation belongs to."""
@@ -80,6 +111,23 @@ class SessionTracker:
         """Resolve the orchestrator turn session at the bottom of the stack (H6)."""
         stack = self._read_stacks().get(raw_host_id) or []
         return stack[0] if stack else None
+
+    def _clear_ignored_returns(self, raw_host_id: str) -> None:
+        pending = self._read_ignored_returns()
+        if pending.pop(raw_host_id, None) is not None:
+            self._write_ignored_returns(pending)
+
+    def _read_ignored_returns(self) -> MutableMapping[str, list[str]]:
+        if not self._ignored_returns_path.exists():
+            return {}
+        recorded: Any = json.loads(self._ignored_returns_path.read_text(encoding="utf-8"))
+        return {key: list(value) for key, value in recorded.items()}
+
+    def _write_ignored_returns(self, pending: MutableMapping[str, list[str]]) -> None:
+        self._ignored_returns_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ignored_returns_path.write_text(
+            json.dumps(pending, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def _read_stacks(self) -> MutableMapping[str, list[str]]:
         if not self._store_path.exists():

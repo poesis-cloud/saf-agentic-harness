@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
+import uuid
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterator
@@ -54,6 +56,7 @@ class SessionTracker:
 
     def __init__(self, state_dir: Path) -> None:
         self._sessions_dir = state_dir / "sessions"
+        self._ignored_returns_dir = state_dir / "ignored-returns"
 
     def read(self, host_id: str) -> SessionRecord | None:
         path = self._path(host_id)
@@ -80,6 +83,45 @@ class SessionTracker:
 
     def delete(self, host_id: str) -> None:
         self._path(host_id).unlink(missing_ok=True)
+        self.clear_ignored_returns(host_id)
+
+    def mark_ignored_return(self, dispatcher_host_id: str, agent_host_id: str | None) -> None:
+        """Record that ONE dispatch return of this dispatcher must not conclude its step.
+
+        Adapter spec H6: the return of a sub-agent whose worker-session registration was
+        refused — or that was never registered as the step's worker — does not trigger
+        `check-step-postconditions`. One marker FILE per such sub-agent, so concurrent hook
+        processes never lose each other's marks.
+        """
+        directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        name = _safe_component(agent_host_id) if agent_host_id else f"unnamed-{uuid.uuid4().hex}"
+        (directory / name).touch()
+
+    def consume_ignored_return(self, dispatcher_host_id: str) -> bool:
+        """Consume one recorded ignored return of this dispatcher, if any is pending.
+
+        The host fires a sub-agent's return after that sub-agent started (host fact 6), so
+        while the step's bound worker runs, every return of this dispatcher belongs to an
+        ignored sub-agent and finds its marker. Consumption is an atomic unlink: two
+        concurrent returns never consume the same marker.
+        """
+        directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
+        if not directory.is_dir():
+            return False
+        for marker in sorted(directory.iterdir()):
+            try:
+                marker.unlink()
+            except FileNotFoundError:
+                continue
+            return True
+        return False
+
+    def clear_ignored_returns(self, host_id: str) -> None:
+        """Forget every pending ignored return of a session that closes or restarts."""
+        shutil.rmtree(
+            self._ignored_returns_dir / _safe_component(host_id), ignore_errors=True
+        )
 
     def descendants(self, host_id: str) -> tuple[str, ...]:
         """Answer every host session registered (transitively) under `host_id`."""
@@ -112,6 +154,13 @@ class SessionTracker:
         if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
             raise ValueError(f"unsafe host session id: {host_id!r}")
         return self._sessions_dir / f"{host_id}.json"
+
+
+def _safe_component(host_id: str) -> str:
+    """Refuse a host id that could escape the tracker's directory."""
+    if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
+        raise ValueError(f"unsafe host session id: {host_id!r}")
+    return host_id
 
 
 __all__ = ["TrackerError", "STEP_ORIGIN", "TURN_ORIGIN", "SessionRecord", "SessionTracker"]

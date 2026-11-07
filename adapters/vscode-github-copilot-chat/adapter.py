@@ -186,11 +186,15 @@ class Adapter:
         actor = self._binding.probe_payload_value(
             event.payload, self._binding.host_step_actor_keys
         )
-        if parent_session_id is None or agent_id is None or actor is None:
+        if parent_session_id is None:
+            return self._renderer.render_pass_through()
+        if agent_id is None or actor is None:
+            self._ignore_return(host_id, "unnamed")
             return self._renderer.render_pass_through()
         session_id = derive_worker_session_id(str(agent_id))
         if is_unregistered(parent_session_id):
             self._tracker.push_unregistered(host_id, session_id)
+            self._ignore_return(host_id, session_id)
             return self._renderer.render_pass_through()
         try:
             registration = self._command_runner.run_function(
@@ -203,14 +207,18 @@ class Adapter:
             )
         except Exception as failure:
             self._tracker.push_unregistered(host_id, session_id)
+            self._ignore_return(host_id, session_id)
             return self._renderer.render_system_message(str(failure))
         status = _read_status(registration)
         if status == _NOT_APPLICABLE_STATUS:
+            self._ignore_return(host_id, session_id)
             return self._renderer.render_pass_through()
         if status != _STARTED_STATUS:
             # `worker-session-bound` and every other error: the step is pushed UNREGISTERED,
-            # so its writes and dispatches are denied rather than attributed or passed.
+            # so its writes and dispatches are denied rather than attributed or passed, and
+            # its return does not conclude the step its bound worker session still runs.
             self._tracker.push_unregistered(host_id, session_id)
+            self._ignore_return(host_id, session_id)
             return self._renderer.render_system_message(
                 f"the harness could not register this worker session: {_describe(registration)}"
             )
@@ -226,6 +234,15 @@ class Adapter:
             )
         except Exception as failure:
             return self._renderer.render_system_message(str(failure))
+
+    def _ignore_return(self, host_id: str, session_id: str) -> None:
+        """Mark this sub-agent's dispatch return as not concluding the step (H6).
+
+        Adapter spec H6: a dispatch return whose sub-agent's worker-session registration
+        was refused, or that was never registered as the step's worker, does not trigger
+        `check-step-postconditions`; the step stays in flight for its bound worker session.
+        """
+        self._tracker.mark_ignored_return(host_id, session_id)
 
     def _handle_step_starting(self, event: HookEvent) -> HookDecision:
         """H2 — enforce the step's preconditions before the dispatch executes."""
@@ -391,10 +408,11 @@ class Adapter:
 
     def _handle_step_ended(self, event: HookEvent) -> HookDecision:
         """H6 — evaluate the returned step in the DISPATCHING session (the stack base)."""
-        session_id = self._tracker.resolve_base(
-            sanitize_identifier(event.raw_host_session_id)
-        )
+        host_id = sanitize_identifier(event.raw_host_session_id)
+        session_id = self._tracker.resolve_base(host_id)
         if session_id is None or is_unregistered(session_id):
+            return self._renderer.render_pass_through()
+        if self._tracker.consume_ignored_return(host_id):
             return self._renderer.render_pass_through()
         try:
             report = self._command_runner.run_function(

@@ -319,6 +319,18 @@ own permission flow still applies to what the harness lets through.
   conditions, then `[artifact delivery] fail — <artifactDelivery.failureMessage>` when
   delivery failed, and the "re-resolve" directive. The step's result text is NOT read; the runtime
   elides it.
+  - **A refused sub-agent's return does not conclude the step.** A dispatch return whose
+    sub-agent is the session of a refused registration (function 0 returned an error, e.g.
+    `worker-session-bound`), or that the adapter never registered as the step's worker, does
+    NOT trigger `check-step-postconditions`: the step stays in flight for its bound worker
+    session, and that worker's return concludes it (core function 10, Trigger). The
+    `postToolUse(task)` names no sub-agent, but `subagentStart` does (`agentId`): when H1
+    does not register the sub-agent as the step's worker, it records one pending ignored
+    return for the dispatcher (one marker file per sub-agent, beside the session records),
+    and H6 consumes one instead of evaluating. Every sub-agent's return follows its own
+    `subagentStart` (host fact 6), so while the bound worker runs, every return of the
+    dispatcher belongs to such a sub-agent. Closing the dispatcher's session, or a new turn
+    on its host session, drops its pending markers.
 - **H0 fallback:** if the session's context never landed (no `userPromptTransformed` firing),
   the first `postToolUse` appends it as short load directives, which fit the 10 KB cap.
 

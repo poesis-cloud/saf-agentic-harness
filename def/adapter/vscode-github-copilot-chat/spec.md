@@ -1302,8 +1302,8 @@ into workspace state, a failing one withheld. Same physical registration as H5; 
 Note: the payload does **not** echo the subagent's `agent_id` — correlation of which step
 ended relies on function 3, invariant 9 (one in-flight step per orchestrator session; see I7).
 
-**Harness invocation** — function 10 `check-step-postconditions`, always invoked when
-`tool_name` matches the binding's dispatch-tool list:
+**Harness invocation** — function 10 `check-step-postconditions`, invoked when `tool_name`
+matches the binding's dispatch-tool list — except for a refused sub-agent's return (below):
 
 ```json
 { "in": { "sessionId": "<current agent session of session_id>", "parentSessionId": null } }
@@ -1318,6 +1318,17 @@ subagent's own tool-calling loop, hence inside the parent's dispatch tool call (
 Defensively, this hook still resolves
 the **stack base** (the orchestrator's turn session), not the raw top — correct under either
 ordering.
+
+**A refused sub-agent's return does not conclude the step.** A dispatch return whose
+sub-agent is the session of a refused registration (function 0 returned an error, e.g.
+`worker-session-bound`), or that the adapter never registered as the step's worker, does NOT
+trigger `check-step-postconditions`: it passes through, the step stays in flight for its bound
+worker session, and that worker's return concludes it (core function 10, Trigger). This
+`PostToolUse` names no sub-agent (I7), but `SubagentStart` does (`agent_id`): when H1 does not
+register the sub-agent as the step's worker, it records one pending ignored return for the
+conversation, and H6 consumes it instead of evaluating. Every sub-agent's return follows its
+own `SubagentStart` (I13(e)), so while the bound worker runs, every dispatch return of the
+conversation belongs to such a sub-agent. The record is per turn: H0 and `Stop` drop it.
 
 **Out** (stdout, exit 0)
 

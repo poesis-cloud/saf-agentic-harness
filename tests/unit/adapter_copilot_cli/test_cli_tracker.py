@@ -39,3 +39,27 @@ def test_a_corrupt_record_raises_instead_of_reading_as_ungoverned(tmp_path: Path
 def test_unsafe_ids_are_refused(tmp_path: Path, unsafe: str) -> None:
     with pytest.raises(ValueError):
         SessionTracker(tmp_path).read(unsafe)
+
+
+def test_an_ignored_return_is_consumed_exactly_once(tmp_path) -> None:
+    """Adapter spec H6: each sub-agent whose registration was refused (or never happened)
+    accounts for exactly ONE dispatch return of its dispatcher that is not evaluated."""
+    tracker = SessionTracker(tmp_path)
+    tracker.mark_ignored_return("host", "worker-b")
+    tracker.mark_ignored_return("host", None)
+
+    assert [tracker.consume_ignored_return("host") for _ in range(3)] == [True, True, False]
+    assert tracker.consume_ignored_return("other-host") is False
+
+
+def test_closing_a_session_forgets_its_pending_ignored_returns(tmp_path) -> None:
+    """A pending ignored return belongs to its dispatcher's session: closing (or a new
+    turn on the same host session) drops it, so it never swallows a later turn's return."""
+    tracker = SessionTracker(tmp_path)
+    tracker.mark_ignored_return("host", "worker-b")
+    tracker.delete("host")
+    assert tracker.consume_ignored_return("host") is False
+
+    tracker.mark_ignored_return("host", "worker-c")
+    tracker.clear_ignored_returns("host")
+    assert tracker.consume_ignored_return("host") is False

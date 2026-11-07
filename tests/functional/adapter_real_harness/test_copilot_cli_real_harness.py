@@ -124,3 +124,72 @@ def test_a_governed_step_commits_on_its_step_ref_and_promotes_without_a_checkout
         if '"check-step-postconditions"' in line
     ]
     assert [outcome["promotion"]["outcome"] for outcome in outcomes] == ["promoted"]
+
+
+def _outcomes(real: RealHarness) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)["report"]
+        for log in (real.workspace_dir / "logs").glob("*.log.jsonl")
+        for line in log.read_text(encoding="utf-8").splitlines()
+        if '"check-step-postconditions"' in line
+    ]
+
+
+def test_a_refused_duplicate_returning_first_never_concludes_the_bound_workers_step(
+    real: RealHarness,
+) -> None:
+    """Live trial T1: the orchestrator dispatches the resolved step twice. Worker B's
+    registration is refused (`worker-session-bound`) and B returns FIRST. Adapter spec H6:
+    a dispatch return whose sub-agent's registration was refused does not trigger
+    `check-step-postconditions` — the step stays in flight for its bound worker A, whose
+    write is allowed and whose return concludes and promotes the step."""
+    head = real.git("rev-parse", "HEAD")
+    artifact = str(real.workspace_dir / REPORT_REF)
+    cwd = str(real.workspace_dir)
+    shell = "powershell" if sys.platform == "win32" else "bash"
+    worker_a, worker_b = "aaaaaaaa-0000-4000-8000-00000000000a", "bbbbbbbb-0000-4000-8000-00000000000b"
+    task = {"agent_type": ACTOR, "prompt": "p"}
+
+    _fire(real, "userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1, "cwd": cwd}, ORCHESTRATOR)
+    _fire(real, "preToolUse", {"sessionId": HOST, "cwd": cwd, "toolCalls": [
+        {"id": "r", "name": shell, "args": {
+            "command": f"python {real.harness_root / 'harness.py'} resolve-step --workflow-slug {WORKFLOW}",
+            "description": "resolve"}}]})
+    assert not _denied(_fire(real, "preToolUse", {"sessionId": HOST, "cwd": cwd, "toolCalls": [
+        {"id": "t1", "name": "task", "args": task}, {"id": "t2", "name": "task", "args": task}]}))
+    _fire(real, "subagentStart", {"sessionId": HOST, "agentId": worker_a, "agentType": ACTOR, "timestamp": 2})
+    _fire(real, "subagentStart", {"sessionId": HOST, "agentId": worker_b, "agentType": ACTOR, "timestamp": 3})
+    (step_ref,) = real.step_refs()
+    assert step_ref.endswith(f"/{STEP}/{worker_a}")
+
+    _fire(real, "agentStop", {"sessionId": worker_b, "stopReason": "end_turn", "timestamp": 4})
+    _fire(real, "subagentStop", {"sessionId": HOST, "agentId": worker_b, "agentType": ACTOR,
+                                 "stopReason": "end_turn", "timestamp": 5})
+    returned_b = _fire(real, "postToolUse", {"sessionId": HOST, "timestamp": 6, "toolName": "task",
+                                             "toolArgs": task,
+                                             "toolResult": {"resultType": "success", "textResultForLlm": "b"}})
+
+    assert "check-step-postconditions" not in json.dumps(returned_b or {})
+    assert _outcomes(real) == []
+
+    write = {"sessionId": worker_a, "agentId": worker_a, "agentType": ACTOR, "cwd": cwd, "toolCalls": [
+        {"id": "w", "name": "create", "args": {"path": artifact, "file_text": REPORT_BYTES}}]}
+    assert not _denied(_fire(real, "preToolUse", write))
+    real.write_report()
+    _fire(real, "postToolUse", {"sessionId": worker_a, "timestamp": 7, "toolName": "create",
+                                "toolArgs": {"path": artifact, "file_text": REPORT_BYTES},
+                                "toolResult": {"resultType": "success", "textResultForLlm": "ok"}})
+    assert REPORT_REF in real.git("ls-tree", "-r", "--name-only", step_ref)
+
+    _fire(real, "agentStop", {"sessionId": worker_a, "stopReason": "end_turn", "timestamp": 8})
+    _fire(real, "subagentStop", {"sessionId": HOST, "agentId": worker_a, "agentType": ACTOR,
+                                 "stopReason": "end_turn", "timestamp": 9})
+    _fire(real, "postToolUse", {"sessionId": HOST, "timestamp": 10, "toolName": "task",
+                                "toolArgs": task,
+                                "toolResult": {"resultType": "success", "textResultForLlm": "a"}})
+
+    (outcome,) = _outcomes(real)
+    assert outcome["outcome"]["status"] == "pass"
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
+    assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"
