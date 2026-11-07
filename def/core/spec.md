@@ -1958,8 +1958,10 @@ harness versions it supports, and the harness checks the declaration.
   session by another harness version — the stamp differs, or the session's start entry has
   none — is refused with `state-error`, code `harness-version-changed` ("the session was
   started by harness `<a>`; installed `<b>`: start a new session"), and is not journaled
-  (rule 4). Function 11 is exempt, so a session another version started can always be
-  ended. Reading another version's logs (function 3's driver check, function 10's
+  (rule 4). Function 11 is exempt from this check, so any harness version the framework's
+  `require` admits can end a session another version started. A version outside `require`
+  runs no function at all, function 11 included (configuration error, above): its sessions
+  are ended once a compatible harness is installed. Reading another version's logs (function 3's driver check, function 10's
   correlation) is unaffected: logs are read through their contract, never through a
   version.
 
