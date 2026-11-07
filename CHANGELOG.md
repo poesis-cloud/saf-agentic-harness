@@ -31,9 +31,12 @@ The first pinnable pre-release of the SAFe agentic orchestration harness.
   - **Promotion.** Function 10 rebases the step ref in memory with `git merge-tree` (a path
     changed on both sides is `step-rebase-conflict`). It checks delivery over the step state
     and the worker session's own commits, and evaluates the postconditions on the step state.
-    On pass, it fast-forwards the workspace branch by one compare-and-swap, syncs the promoted
-    paths' index entries, and releases the locks; on fail, nothing is touched. Its report
-    carries `promotion` (`{outcome: promoted | withheld, workspaceCommit}`).
+    On pass, it fast-forwards the workspace branch by one atomic compare-and-swap, the
+    acceptance point; it then syncs the promoted paths' index entries and deletes the locks,
+    best-effort, since a promoted holder's locks already count as released. On fail, it
+    withholds: the workspace branch, the index and the locks are untouched (only the step ref
+    may have moved, by the rebase). Its report carries `promotion`
+    (`{outcome: promoted | withheld, workspaceCommit}`).
   - The internal sweep (`ArtifactStore.sweep_workspace`) reports step refs, every held
     artifact lock (stale ones included) with its holder, and unlocked working-tree changes.
 - **The condition language.** `setQuery` / `setPredicate` read `workspace` (artifact
@@ -129,8 +132,9 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 - **Artifact delivery:** a step outcome passes only if its step state changes exactly one
   artifact instance of the step's declared kind, which the worker session's own function-9
   commits also change, and every declared postcondition passes (function 10, invariants
-  4–5). Zero postconditions do not pass vacuously. Delivery is a harness invariant, not a
-  condition: it has no slug and cannot be configured. Function 10 reports it as
+  4–5). Delivery is checked even when a step declares no postconditions; with none, delivery
+  alone decides. Delivery is a harness invariant, not a condition: it has no slug and cannot
+  be configured. Function 10 reports it as
   `artifactDelivery` in the same journaled entry.
 - **Orchestrator sessions:** each orchestrator session drives at most one workflow instance
   at a time; another is refused with `state-error` / `session-instance-bound`. A workflow
@@ -225,10 +229,12 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 - **Bootstrap failure at `preToolUse`:** the hook exits 2 and the agent sees only "hook
   exited with code 2". The diagnostic goes to the hook's stderr.
 - **A hook timeout fails open** (confirmed live), and so does a hook that fails to spawn
-  (I6). Deadlines inside the hook stop harness calls before the host's timeout, except for a
-  stall before the adapter even runs.
-- **A refused `start-session` is not journaled** (core spec, rule 4: the refused session has
-  no log). The refusal reaches the agent only through the hook.
+  (I6). In the Copilot app / CLI adapter, deadlines inside the hook stop harness calls before
+  the host's timeout, except for a stall before the adapter even runs. The VS Code adapter
+  sets no such deadline, so a stalled harness call there can reach the host's timeout.
+- **A `start-session` refused with `worker-session-bound` is not journaled** (core spec,
+  rule 4: the refused worker session has no log). The refusal reaches the agent only through
+  the hook.
 - **An interrupted orchestrator session keeps its workflow instance busy** until it is
   ended manually; see the README's "Recovering an interrupted workflow instance".
 - **Copilot app / CLI:** the following limits apply.
