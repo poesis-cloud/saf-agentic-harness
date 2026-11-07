@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
+import shlex
+from typing import Mapping, Sequence
 
 from config import Step, StepCondition, Workflow, WorkflowCatalog
 from errors import HarnessError, InquiryError, StateError, SystemFailureError
@@ -25,6 +28,8 @@ _START_FUNCTION = "start-session"
 _END_FUNCTION = "end-session"
 _ENDED_STATUS = "ended"
 _STEP_RESOLUTION_STATUS = "step-resolution"
+# The generic recovery invocation, when the composition root names no installed one.
+_GENERIC_END_SESSION_INVOCATION = ("python", "harness.py")
 _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 
 
@@ -39,6 +44,11 @@ def _require_inquiry_slugs(session_id: str, parent_session_id: str | None) -> No
                 f"Session attribution '{value}' is not a safe slug.",
                 False,
             )
+
+
+def _powershell_quote(value: str) -> str:
+    """Quote one value as a PowerShell single-quoted literal."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _is_step_resolution(entry: LogEntry) -> bool:
@@ -130,11 +140,24 @@ class StepResolver:
         session_log_store: SessionLogStore,
         workflow_catalog: WorkflowCatalog,
         clock: Clock | None = None,
+        harness_invocation: Sequence[str] | None = None,
+        recovery_environment: Mapping[str, str] | None = None,
+        windows_shell: bool | None = None,
     ) -> None:
-        """Create the resolver over its injected store, catalog, and entry clock."""
+        """Create the resolver over its injected store, catalog, and entry clock.
+
+        `harness_invocation` (the installed interpreter and `harness.py`) and
+        `recovery_environment` (the effective `FRAMEWORK_*` layout, so the command
+        targets the same configuration and session logs) only shape the advisory
+        recovery command a `workflow-instance-busy` message gives; without them it is
+        the generic form. It is rendered for PowerShell on Windows, else a POSIX shell.
+        """
         self._session_log_store = session_log_store
         self._catalog = workflow_catalog
         self._clock = clock or Clock()
+        self._harness_invocation = tuple(harness_invocation or _GENERIC_END_SESSION_INVOCATION)
+        self._recovery_environment = dict(recovery_environment or {})
+        self._windows_shell = os.name == "nt" if windows_shell is None else windows_shell
 
     def resolve_step(
         self,
@@ -261,9 +284,35 @@ class StepResolver:
             "workflow-instance-busy",
             f"Orchestrator session '{holder}' has not ended and holds the unfinished "
             f"step resolution of step '{pending.report.payload['step']['slug']}' in "
-            f"workflow instance '{view.workflow_instance_id}'.",
+            f"workflow instance '{view.workflow_instance_id}'. If that session is really "
+            f"gone (its host run was interrupted, so its end was never observed), end it "
+            f"from your own terminal — only then — and retry: "
+            f"{self._render_end_session_command(holder)}",
             False,
         )
+
+    def _render_end_session_command(self, holder: str) -> str:
+        """Render the advisory recovery command that ends the holding session (C8).
+
+        One line for the user's own terminal: the effective `FRAMEWORK_*` layout, then
+        the invocation. PowerShell on Windows (single-quoted literals, the `&` call
+        operator), a POSIX shell elsewhere. The session id is attached with `=`, so an
+        id starting with a hyphen is never parsed as an option.
+        """
+        argv = [*self._harness_invocation, _END_FUNCTION, f"--session-id={holder}"]
+        if self._windows_shell:
+            assignments = "".join(
+                f"$env:{name}={_powershell_quote(value)}; "
+                for name, value in self._recovery_environment.items()
+            )
+            invocation = "& " + " ".join(_powershell_quote(part) for part in argv)
+        else:
+            assignments = "".join(
+                f"{name}={shlex.quote(value)} "
+                for name, value in self._recovery_environment.items()
+            )
+            invocation = shlex.join(argv)
+        return f"run: {assignments}{invocation}"
 
     def _require_no_step_in_flight(
         self, view: WorkflowInstanceView, in_flight: LogEntry | None

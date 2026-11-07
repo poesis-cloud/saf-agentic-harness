@@ -10,6 +10,10 @@ working tree.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
+import tempfile
 from typing import Any, Callable, Mapping
 
 from functional_fixtures import (
@@ -232,6 +236,41 @@ class TestRecovery:
         report = assert_contract_round_trip(harness, run)
         assert run.error_code == "workflow-instance-busy"
         assert report["context"]["workflowInstanceId"] is None
+
+    def test_the_busy_messages_command_unsticks_the_instance_when_run(
+        self, harness: FunctionalHarness
+    ) -> None:
+        """The `workflow-instance-busy` message names the holder and an exact recovery
+        command. RUN in a shell — PowerShell on Windows, a POSIX shell elsewhere — from
+        an environment without the hooks' `FRAMEWORK_*` variables, it ends that session
+        (even one whose id starts with a hyphen); the next orchestrator session then
+        continues the workflow instance, and the ended session's later calls are refused
+        (C8, fail closed)."""
+        holder = "-planner-o"
+        planning = _drive(harness, holder, PLANNING)
+        harness.invoke("start-session", sessionId="planner-o2", agent="orchestrator")
+        busy = harness.invoke("resolve-step", sessionId="planner-o2", workflowSlug=PLANNING)
+        message = busy.report["outcome"]["error"]["message"]
+        assert f"'{holder}'" in message
+        command = message.split("run: ", 1)[1]
+        assert sys.executable in command and "harness.py" in command
+        assert f"--session-id={holder}" in command
+
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("FRAMEWORK_")}
+        shell = (
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+            if os.name == "nt"
+            else ["sh", "-c", command]
+        )
+        ran = subprocess.run(shell, capture_output=True, text=True, env=environment, cwd=tempfile.gettempdir())
+
+        assert ran.returncode == 0, ran.stderr
+        assert json.loads(ran.stdout)["outcome"]["status"] == "ended"
+        resumed = harness.invoke("resolve-step", sessionId="planner-o2", workflowSlug=PLANNING)
+        assert resumed.status == "step-resolution"
+        assert resumed.report["context"]["workflowInstanceId"] == planning["context"]["workflowInstanceId"]
+        refused = harness.invoke("resolve-step", sessionId=holder, workflowSlug=PLANNING)
+        assert refused.error_code == "session-ended"
 
     def test_a_failed_step_instance_is_withheld_and_its_retry_continues_its_work(
         self, build_harness: Callable[..., FunctionalHarness]

@@ -80,6 +80,40 @@ make adapter      # the adapter conformance plane only (tests/adapter)
 host hook registration. See the [`Makefile`](Makefile) for what each target runs and the
 [TDD plan](def/tdd-plan.md) for the test layout.
 
+## Recovering an interrupted workflow instance
+
+**Symptom.** `resolve-step` answers `state-error` with code `workflow-instance-busy`, and
+the workflow instance stays stuck.
+
+**Cause.** The host interrupted a run (a crash, a force-quit, a killed terminal) while an
+orchestrator session held an unfinished step resolution, and that session's end was never
+observed. Ending a session is best-effort ([C8](def/core/spec.md#c8---session-ending)), so the
+harness still counts that session as the instance's live driver and refuses every other
+orchestrator session (function 3, invariant 10).
+
+**Find the holder.** The error message names the holding orchestrator session and prints the
+exact command that ends it, with the effective framework layout set in its environment. In a
+POSIX shell, for example:
+
+```text
+… run: FRAMEWORK_DIR=/path/to/framework FRAMEWORK_WORKSPACE_DIR=/path/to/framework/workspace … /path/to/.venv/bin/python /path/to/harness.py end-session --session-id=<holder id>
+```
+
+On Windows it is rendered for PowerShell instead:
+
+```text
+… run: $env:FRAMEWORK_DIR='C:\path\to\framework'; … & 'C:\path\to\.venv\Scripts\python.exe' 'C:\path\to\harness.py' 'end-session' '--session-id=<holder id>'
+```
+
+**Recover.** Only if that session is really gone, run the printed command from your own
+terminal, as printed. Then retry: the next orchestrator session continues the workflow
+instance and re-resolves its unfinished step.
+
+**Why this is safe.** `end-session` only appends the session's ending entry to that session's
+log. Every later call from the ended session is refused (`session-ended`, C8 — fail closed),
+so even if it was in fact still alive, it can no longer resolve, gate, or conclude a step: the
+new orchestrator session is the instance's only driver.
+
 <!-- roadmap:start -->
 ## Roadmap
 
