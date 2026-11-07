@@ -1,11 +1,11 @@
-# TDD execution plan — harness core and `vscode-github-copilot-chat` adapter
+# TDD execution plan — harness core and `github-copilot` adapter
 
 ## 1. Purpose and standing directives
 
 This plan governs the multi-agent, test-driven implementation of two things at once: the
 harness core specified in [`core/spec.md`](core/spec.md) — twelve functions, five packages,
 one dependency direction — and the host binding specified in
-[`adapter/vscode-github-copilot-chat/spec.md`](adapter/vscode-github-copilot-chat/spec.md).
+[`adapter/github-copilot/spec.md`](adapter/github-copilot/spec.md).
 It is the shared contract between the pairs working those two lanes in parallel: what the
 oracle is, who challenges whom, in what order the work lands, and what "done" means at each
 gate.
@@ -204,9 +204,10 @@ placement, path setup), and the shared pytest configuration. One pair.
   `JsonlStore`), `config/ConfigLoader` (parse + contract-validate + semantic rules, fail-fast),
   and the two stores (`artifact_store/`, `session_log_store/`). Everything else depends on
   this, so it goes first and alone in its lane.
-- **Pair B — adapter unit TDD.** `HookBinding`, `HookClassifier` + `EventClass`,
-  `SessionTracker`, `Adapter`, `HookRenderer`, and the command-runner port. This runs in
-  parallel with Pair A **precisely because of I15**: the adapter's only dependency into the
+- **Pair B — adapter unit TDD.** The adapter's classes (`Adapter`, `SessionTracker`, the tool
+  binding, the context renderer) and the command-runner port. This runs in parallel with
+  Pair A **precisely because the adapter depends on the command API only** (adapter spec,
+  Adapter architecture): the adapter's only dependency into the
   core is the command API, so it can be driven end to end against a **fake command runner**
   long before a single command class exists. That is the architectural rule paying for itself
   in schedule.
@@ -252,7 +253,7 @@ here.
   the C0–C8 scenarios. Plus **golden-fixture log replay**: re-running against a golden fixture
   set of session logs must be "byte-stable per log and merge-stable per instance view — the
   determinism check".
-- **Adapter functional tests** end to end through `dispatch.sh`: real stdin envelopes in, real
+- **Adapter functional tests** end to end through the adapter's hook entry: real stdin envelopes in, real
   stdout decision objects out, both validated against the adapter's own seam-1 and seam-4
   contracts.
 
@@ -282,15 +283,12 @@ The other suites:
 
 - `tests/functional/` — one module per harness function (twelve), over the real command entry
   point, plus `test_log_replay.py` (golden-fixture log replay).
-- `tests/functional/adapter/` — the adapter end to end, one module per hook (H0–H7) plus the
-  dispatch plumbing.
-- `tests/unit/adapter/` — the adapter's class-level suite (`HookBinding`, `HookClassifier`,
-  `EventClass`, `SessionTracker`, session-id derivation, `Adapter`, `HookRenderer`, command
-  runner).
-- `tests/adapter/` — the adapter's **host-binding** suite: the hook map, the adapter
-  configuration, the dispatch funnel, the two seam contracts, and the hook / agent-hook /
-  settings rendering. These assert the declarative binding data, its contracts, and the
-  rendered output, not adapter Python behavior.
+- `tests/functional/adapter_github_copilot/` — the adapter end to end as a process, replaying
+  captured host payloads (H0–H7), plus the plugin-mode bootstrap.
+- `tests/unit/adapter_github_copilot/` — the adapter's class-level suite (`Adapter`,
+  `SessionTracker`, the tool binding, patch and path extraction, the context renderer, the
+  command runner, the installer and the plugin renderer).
+- `tests/functional/adapter_real_harness/` — the adapter over the real harness.
 
 ### Isolation
 
@@ -327,22 +325,19 @@ Release **v1.0.0-alpha.1** is in preparation. Verified directly against the tree
 | 5 — gates | Open — see [§7](#7-known-gaps-and-risks) for what still blocks the `product-owner` gate |
 
 Implementation is complete: all twelve harness functions (0 `start-session` … 11
-`end-session`) and the `vscode-github-copilot-chat` adapter (`HookBinding`, `HookClassifier`
-with `EventClass`, `SessionTracker`, session-id derivation (`session_identity.py`), `Adapter`,
-`HookRenderer`, command runner, `adapters/dispatch.sh`, and the `adapters/render_hooks.py`
-installer behind `make install-hooks`).
+`end-session`) and the `github-copilot` adapter (`Adapter`, `SessionTracker`, the tool
+binding, the context renderer, the command runner, and the `install.py` developer
+installer).
 
-Test planes — all implemented and green under `make verify` (counts are a snapshot at the
-time of this refresh; `make verify` is authoritative):
+Test planes — all implemented and green under `make verify`, which is authoritative for their
+counts:
 
-| Plane | Location | Tests |
-| --- | --- | --- |
-| Unit — core | `tests/unit/{utils,config,stores,services,commands}`, `test_application.py`, `test_errors.py` | 447 |
-| Unit — adapter | `tests/unit/adapter/` | 156 |
-| Functional — core | `tests/functional/` (one module per function, plus `test_log_replay.py` and `test_unreadable_logs.py`) | 189 |
-| Functional — adapter | `tests/functional/adapter/` (H0–H7, dispatch plumbing, hook bootstrap) | 65 |
-| Adapter conformance | `tests/adapter/` (hook map, adapter configuration, dispatch funnel, hook contracts, hook / agent-hook / settings rendering) | 85 |
-| **Total** | `tests/` | **942** |
+| Plane | Location |
+| --- | --- |
+| Unit — core | `tests/unit/{utils,config,stores,services,commands}`, `test_application.py`, `test_errors.py` |
+| Unit — adapter | `tests/unit/adapter_github_copilot/` |
+| Functional — core | `tests/functional/` (one module per function, plus `test_log_replay.py` and `test_unreadable_logs.py`) |
+| Functional — adapter | `tests/functional/adapter_github_copilot/`, `tests/functional/adapter_real_harness/` |
 
 ## 7. Known gaps and risks
 
@@ -393,12 +388,10 @@ followed in a `def/`-only change:
   `hostStepSessionKeys` becomes `hostWorkerSessionKeys` (`tools.conf.schema.json`, both
   adapters), and the identifiers `find_step_session_ids` / `host_step_session_keys` become
   `find_worker_session_ids` / `host_worker_session_keys`, as the class diagrams already show;
-- adapter specs — restatements of the old commit flow (e.g. `vscode-github-copilot-chat` H5
-  "state advanced by the validated commit", I6 "unmediated writes never commit") are aligned
-  with the core when the adapters are — **resolved**: both adapter specs now say a validated
-  write commits onto the step ref, never the workspace branch; function 8 claims the locks
-  and denies out-of-step writes; and function 10 promotes (H3, H5, H6, I6, I8, and the
-  `github-copilot-cli` limits table).
+- adapter specs — restatements of the old commit flow are aligned with the core when the
+  adapters are — **resolved**: the adapter spec says a validated write commits onto the step
+  ref, never the workspace branch; function 8 claims the locks and denies out-of-step writes;
+  and function 10 promotes (H3, H5, H6, and the `github-copilot` limits table).
 
 **Resolved — the condition language is implemented** (#20). The core spec (function 5,
 invariant 2; function 10, invariant 1) replaces the `stateCondition` CEL vocabulary: the
@@ -452,18 +445,9 @@ landed on `main`, but the repository records no close-out of the **catch-up `sys
 review**; it stays open until the Wave 5 `system-architect` gate ratifies them. Until then, a
 finding against them is a normal correction, not a regression.
 
-**Adapter open items I13(a)/(d) remain open — live-host verification only.** They are
-the permanently tracked items in
-[`adapter/vscode-github-copilot-chat/spec.md`](adapter/vscode-github-copilot-chat/spec.md).
-I4 is closed: both adapters now run functions 3–4 from their own `PreToolUse`/`preToolUse`
-hook with the payload's session and never edit an agent's command, so the core's former
-tool-boundary-stamp exception is retired and nothing tracks it any more.
-I13(a) and I13(d) are out of test scope: (a) whether a steering message
-submitted mid-execution fires `UserPromptSubmit` on the native panel path, and (d) hooks being
-a preview feature whose setting names and event set may drift. Neither is closable by a test —
-(a) needs live host experimentation, and (d) is a drift risk whose intended detector is the
-fail-fast adapter-binding validation at instantiation, not a unit test. Do not write tests that
-pretend to resolve them.
+**Mediated attribution is closed.** The adapter runs functions 3–4 from its own
+`preToolUse` hook with the payload's session and never edits an agent's command, so the core's
+former tool-boundary-stamp exception is retired and nothing tracks it any more.
 
 **Process traps hit during execution** — both cost real time, both have the same mitigation:
 

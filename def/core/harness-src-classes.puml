@@ -515,6 +515,11 @@ package "CD - Harness core classes (src/)" <<Frame>> {
       +load_model_profiles(root: Path) : ModelProfiles
       +load_workspace_layout(root: Path) : WorkspaceLayout
       +load_workflow_catalog(root: Path) : WorkflowCatalog
+      +load_harness_requirement(root: Path) : HarnessRequirement
+    }
+    class HarnessRequirement <<dataclass>> {
+      +require : str
+      +admits(version: str) : bool
     }
     class FrameworkLayout <<dataclass>> {
       +framework_dir : Path

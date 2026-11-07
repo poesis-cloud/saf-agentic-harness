@@ -1,20 +1,33 @@
-# Adapter — `github-copilot-cli`
+# Adapter — `github-copilot`
 
-The host binding for the **GitHub Copilot CLI agent runtime**, and therefore for the
-**GitHub Copilot app**, which embeds the same runtime. This document is the adapter's
-canonical specification. It binds the runtime's **hooks** to the harness boundaries, the same
-way [`../vscode-github-copilot-chat/spec.md`](../vscode-github-copilot-chat/spec.md) does for
-VS Code. The boundary vocabulary (H0–H7), the invariants (I1–I15), and the harness function
-contracts are not restated here. They are the VS Code spec's and [`../../core/spec.md`](../../core/spec.md)'s.
-This document specifies only what differs for this host. The class model is
+The host binding for the **GitHub Copilot agent runtime**, the one runtime three hosts share:
+
+- the **GitHub Copilot CLI**;
+- the **GitHub Copilot app**, which embeds it;
+- **VS Code** with the chat **Session Target: Copilot**, which runs the same runtime and hook
+  format. VS Code's other runtime, *Local*, is not supported: in plugin mode a Local-runtime
+  payload is detected and refused (see [Local runtime](#local-runtime)).
+
+This document is the adapter's canonical specification. It binds the runtime's **hooks** to
+the boundaries of [`../../core/spec.md`](../../core/spec.md) (Boundary Normalization), and it
+is the harness's only host binding. H0–H7 name those boundaries as bound in
+[Hook → boundary binding](#hook--boundary-binding). The harness function contracts are the
+core's and are not restated here. The class model is
 [`adapter-src-classes.puml`](adapter-src-classes.puml).
 
-**Why the id `github-copilot-cli`.** The app and the CLI run one runtime, with one hook
-engine, one tool vocabulary and one custom-agent/plugin format. The adapter binds that
-runtime, not a window around it. A user of the CLI alone installs the same adapter. Nothing in
-the binding is app-only: the facts below that were observed to differ between the standalone
-CLI and the app are host-conditional, and the adapter accepts both forms (each is
+**Why the id `github-copilot`.** The CLI, the app and VS Code's Copilot session target run one
+runtime, with one hook engine, one tool vocabulary and one custom-agent/plugin format. The
+adapter binds that runtime, not a window around it, so the same adapter serves all three.
+Nothing in the binding is app-only: the facts below that were observed to differ between the
+standalone CLI and the app are host-conditional, and the adapter accepts both forms (each is
 replayed from a live capture in the process tests).
+
+**Two ways to install.** In **plugin mode** (see [Plugin mode](#plugin-mode)) the harness is
+its own Copilot plugin, the *harness plugin*, installed from a marketplace beside the
+framework's plugin; nothing in it is machine-specific. The **developer install**
+(`install.py`, see [Rendered registration](#rendered-registration--installpy)) renders the
+hooks with absolute paths for a harness checkout and a framework checkout. Where the two
+differ, this document says so.
 
 ## Sources
 
@@ -23,8 +36,10 @@ replayed from a live capture in the process tests).
 | Hook events, input/output fields, config format, locations, timeouts, failure semantics | [Hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference), [About hooks](https://docs.github.com/en/copilot/concepts/customizations/hooks) |
 | Custom agents (`*.agent.md`, frontmatter `tools`, `model`, `hooks`) | [Custom agents configuration](https://docs.github.com/en/copilot/reference/custom-agents-configuration) |
 | Plugins (`plugin.json`, `hooks.json`, marketplaces) | [CLI plugin reference](https://docs.github.com/en/copilot/reference/cli-plugin-reference) |
-| **Actual** payload shapes, tool names, subagent identity (authoritative where they differ from the docs) | Payloads captured in the GitHub Copilot app on Windows, runtime **1.0.102**: [`tests/functional/adapter_copilot_cli/fixtures/copilot-app-windows-1.0.102.jsonl`](../../../tests/functional/adapter_copilot_cli/fixtures/copilot-app-windows-1.0.102.jsonl) |
-| The same, on the **standalone CLI** (Linux, `copilot -p`, framework bundle loaded with `--plugin-dir`, runtime **1.0.105**) | [`tests/functional/adapter_copilot_cli/fixtures/copilot-cli-linux-1.0.105.jsonl`](../../../tests/functional/adapter_copilot_cli/fixtures/copilot-cli-linux-1.0.105.jsonl) |
+| VS Code's two runtimes, plugin hooks, `PLUGIN_ROOT` | [VS Code hooks](https://github.com/microsoft/vscode-docs/blob/main/docs/agent-customization/hooks.md), [VS Code agent plugins](https://github.com/microsoft/vscode-docs/blob/main/docs/agent-customization/agent-plugins.md) |
+| `PLUGIN_DATA` (persistent, writable, per installed plugin) | [Agent Plugins specification 1.0, §9](https://github.com/agentplugins/agent-plugins-spec/blob/main/spec/1.0.0.md), [Hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference) |
+| **Actual** payload shapes, tool names, subagent identity (authoritative where they differ from the docs) | Payloads captured in the GitHub Copilot app on Windows, runtime **1.0.102**: [`tests/functional/adapter_github_copilot/fixtures/copilot-app-windows-1.0.102.jsonl`](../../../tests/functional/adapter_github_copilot/fixtures/copilot-app-windows-1.0.102.jsonl) |
+| The same, on the **standalone CLI** (Linux, `copilot -p`, framework bundle loaded with `--plugin-dir`, runtime **1.0.105**) | [`tests/functional/adapter_github_copilot/fixtures/copilot-cli-linux-1.0.105.jsonl`](../../../tests/functional/adapter_github_copilot/fixtures/copilot-cli-linux-1.0.105.jsonl) |
 
 ## Host facts the design rests on
 
@@ -72,7 +87,7 @@ replayed from a live capture in the process tests).
      raw patch string; its `*** Add File:` creates missing folders). Observed on app runtime
      1.0.102: for an agent declaring `edit`, a `gpt-5.3-codex` `task` subagent reported only
      `view`, `rg`, `glob`, `powershell*` and `skill`, with no write tool. Therefore
-     [`models.yaml`](../../../adapters/github-copilot-cli/models.yaml) binds only models
+     [`models.yaml`](../../../adapters/github-copilot/models.yaml) binds only models
      verified to receive a write tool on this host (see [Model binding](#model-binding)).
    - Paths are absolute host paths (`C:\Users\…`, `/home/…`).
 6. **Subagents.** `subagentStart`/`subagentStop` carry the subagent's
@@ -97,6 +112,21 @@ replayed from a live capture in the process tests).
    folder: the app's trust, or the CLI's trust prompt / `--trust-folder`. In an untrusted
    folder they silently do not run. Plugin hooks and a plugin agent's scoped hooks DO run in
    an untrusted folder (observed, standalone CLI 1.0.105, `-p`).
+9. **Plugin hooks (documented).** A plugin hook runs with the **workspace** as its working
+   directory, not the plugin's folder, and receives the plugin's root in the environment
+   variable `PLUGIN_ROOT` and its persistent, writable data folder in `PLUGIN_DATA`. The
+   data folder survives plugin updates; the root is replaced on every update and is read-only
+   in a sandboxed session. VS Code's hook parser takes `command`, `bash`, `powershell` and the
+   per-OS overrides, but **no `exec`**, so a portable plugin registration uses shell strings.
+   A plugin in the Agent Plugins 1.0 format keeps its hooks in its Copilot extension
+   directory, `com.github.copilot/hooks/hooks.json`. Nothing installs Python or Python
+   packages for a git-sourced plugin, on any host.
+10. **VS Code's runtimes (documented).** VS Code with **Session Target: Copilot** runs this
+    runtime, with its lowerCamel events and payloads (`toolName`/`toolArgs`). VS Code's
+    **Local** runtime also loads plugin hooks and accepts this runtime's event names, but
+    still sends its own payloads: snake_case fields (`tool_name`, `tool_input`, `session_id`)
+    and a `hookEventName`/`hook_event_name` field. A plugin hook can therefore receive a
+    Local-runtime payload, and must tell the two families apart.
 
 ## Hook → boundary binding
 
@@ -125,6 +155,43 @@ therefore need no `FRAMEWORK_*` variables (no `setx`), and the host's permission
 consulted for a harness command, because a hook deny comes before it: no approval rule is
 needed, also in autopilot.
 
+## Adapter architecture
+
+One hook firing crosses four seams. Each seam has one governing contract.
+
+1. **stdin:** the host event JSON, governed by this adapter's
+   [`contracts/hook-stdin.schema.json`](../../../adapters/github-copilot/contracts/hook-stdin.schema.json).
+2. **entry:** the registered command reaches `adapter.py hook --event <e>`, through the
+   plugin-mode shim and launcher or through the interpreter `install.py` records. This
+   seam only shapes argv and has no contract of its own.
+3. **adapter → core:** this adapter's own code does five things:
+   - classifies the event through `tools.yaml`;
+   - resolves the session;
+   - sequences the calls: registration first, one invocation per path, abort on failure;
+   - invokes the harness function commands (`harness.py`, one command per function,
+     host-blind), each under `contracts/api/<function>.input|output.schema.json`;
+   - lets every completed invocation journal per `contracts/log-entry.schema.json`.
+4. **stdout:** the host decision this adapter renders from the reports, governed by
+   [`contracts/hook-stdout.schema.json`](../../../adapters/github-copilot/contracts/hook-stdout.schema.json).
+   Decisions are structured stdout on exit 0. Exit 2 is only the hard-failure fallback
+   (see [Fail-closed entry](#fail-closed-entry)).
+
+- **The adapter depends on the command API only.** It never depends on the core's
+  `services`, `stores` or `config`, and never reads `ConfigLoader`, the access control
+  list or the session log. Framework-agent gating (C7) and step-resolution correlation are
+  validated inside the invoked commands, never pre-checked by the adapter. Session
+  identification uses only host-observed event data plus the adapter's own private
+  records.
+- **The adapter owns everything host-aware:** event classification, session tracking,
+  orchestration, rendering reports into host decisions, its own declarative YAML
+  (`hooks.yaml`, `agent-hooks.yaml`, `tools.yaml`, `models.yaml`) loaded with its own
+  tools, and the two seam contracts. Nothing host-specific leaks into the function
+  commands or their contracts (C4).
+- **The binding is fail-fast on every hook load.** `tools.yaml` and `models.yaml`
+  validate against `contracts/conf/adapters/*.conf.schema.json` through
+  `adapters/binding_contract.py`. An empty probe list that a declared gate depends on is
+  refused, because it would classify every firing as a pass-through (a silent fail-open).
+
 ## Session identity
 
 **Mapping to the core's sessions.** The core defines its two session kinds host-agnostically —
@@ -141,10 +208,19 @@ returns to the orchestrator.
 - **Worker session (H1):** the subagent's `agentId`, which is exactly the `sessionId` every event
   inside the subagent carries. Attribution at the tool boundary is therefore native: no
   `parentToolCallId` correlation is needed.
-- **Records** live outside every repository, under `SAF_HARNESS_STATE_DIR`, else
-  `%LOCALAPPDATA%\saf-agentic-harness\github-copilot-cli`, else
-  `$XDG_STATE_HOME/saf-agentic-harness/github-copilot-cli`. A corrupt record is an error:
-  `preToolUse` denies.
+- **Records** live outside every repository, in the adapter's **state folder**:
+  `SAF_HARNESS_STATE_DIR`, else `$PLUGIN_DATA/state` when `PLUGIN_DATA` is set (plugin mode),
+  else `%LOCALAPPDATA%\saf-agentic-harness\github-copilot` on Windows, else
+  `$XDG_STATE_HOME/saf-agentic-harness/github-copilot` (`XDG_STATE_HOME` defaulting to
+  `~/.local/state`). A corrupt record is an error: `preToolUse` denies.
+- **Each record is stamped** with the governed workspace and the harness version that opened
+  it. The workspace is fixed when the record is created (H0 or H1) and every later firing of
+  the session uses the recorded one: in plugin mode it is resolved from the session's folder
+  ([Workspace resolution](#workspace-resolution)), in the developer install it is the
+  registered layout's. A firing whose installed harness version differs from the record's is
+  denied with "the plugin was updated; start a new session" (core:
+  [Harness compatibility](../../core/spec.md#harness-compatibility)); H7 still ends that
+  session, since core function 11 is exempt from the version check.
 - **Unregistered sessions** have a record whose `start-session` answered an error or no
   report. Only an explicit `not-applicable` means ungoverned (core rule 2), so these fail
   closed: every write, dispatch and harness request is denied with the recorded failure, I9
@@ -172,11 +248,18 @@ own permission flow still applies to what the harness lets through.
   It also states that the shell does not run the line, that the answer arrives as a hook
   denial starting `SAFe agentic harness RESULT` which is the successful result to act on
   (never to re-issue), and that only `SAFe agentic harness REJECTED` means a refused request.
-- **Invariant:** it reads no state and writes none. It fires for summarizer sessions too.
+- **Invariant:** the announce reads no session state and writes none. It fires for summarizer
+  sessions too. In plugin mode it follows the registration and provisioning entries (see
+  [Plugin mode](#plugin-mode)), and announces only in a SAF workspace.
 
 ### H0 — userPromptSubmitted / userPromptTransformed (agent-scoped)
 
 - **Pre:** `--agent` is present (scoped hook) and `sessionId` is non-empty. Otherwise pass.
+- **Plugin mode:** the scoped entry also carries `--framework <name>`. Before anything else, H0
+  writes the session's intent record (see [Fail-closed scope](#fail-closed-scope)). It then
+  resolves the workspace (see [Workspace resolution](#workspace-resolution)); in a folder that
+  is not a SAF workspace of that framework, H0 records nothing and its context is "this folder
+  is not a SAF workspace; ask me to initialise it".
 - **Worker sessions are H1's.** An orchestrator agent acting a step still fires its scoped hook.
   When the record for `sessionId` is a step (`origin: step`), H0 passes: no `start-session`,
   no workflow context. When there is no record but `parentAgentId` names a session that has
@@ -292,8 +375,11 @@ own permission flow still applies to what the harness lets through.
    to have run. So the deny reason is the only channel that returns text to the agent
    without editing or running its command. It is also immune to the permission layer and to
    autopilot's unattended denials, because the hook decides first.
-6. **I9:** any other shell command naming the workspace (by name, relative path or absolute
-   prefix) or `logs/` → deny. Read-only commands are included.
+6. **I9, the shell guard** (the binding's `guardedShellTools` class): any other shell
+   command naming the workspace (by name, relative path or absolute prefix) or `logs/` →
+   deny. Read-only commands are included. The guard is textual and advisory: C6's graded
+   guarantee (detect-and-remediate plus the CI gate) remains the integrity claim. The
+   guard closes the routine escape, not the adversarial one.
    - A relative path token resolves against the payload's `cwd`. A token counts as a path
      when it has a separator or a leading `.`, when it exists, or when it follows `--`.
    - Git pathspecs are path references: every token after `--`, and the `<path>` of a
@@ -358,7 +444,8 @@ own permission flow still applies to what the harness lets through.
 
 - **Bootstrap failure** (as for every adapter): any failure escaping the hook handling exits
   **2** with a stderr diagnostic. This covers:
-  - a missing or non-directory framework root (`--framework-dir`, else `FRAMEWORK_DIR`);
+  - a missing or non-directory framework root (`--framework-dir`, else `FRAMEWORK_DIR`; in
+    plugin mode, the registered root of the framework the workspace marker names);
   - an unreadable or malformed `<fw>/.env` (parsed exactly as the core `EnvLoader` does);
   - an off-contract or empty-probe binding (`adapters/binding_contract.py`);
   - a framework model catalogue (`<fw>/conf/model-profiles.conf.yaml`) that is missing,
@@ -370,19 +457,20 @@ own permission flow still applies to what the harness lets through.
   The runtime turns exit 2 into a **deny** at `preToolUse` and into a user-visible warning at
   every other event. That is the right severity, because only `preToolUse` can veto. Exit 2 is
   chosen even for a session without a record, because a broken bootstrap is exactly what keeps
-  H0 from creating that record. A broken install therefore blocks tool use in every folder
-  where the plugin's hooks fire until it is repaired. That is visible and fail-closed, never
-  silent.
+  H0 from creating that record. A broken developer install therefore blocks tool use in every
+  folder where its hooks fire until it is repaired. That is visible and fail-closed, never
+  silent. **Plugin mode** narrows this rule to the sessions governance applies to (see
+  [Fail-closed scope](#fail-closed-scope)).
 - **A readable but malformed tool-call batch** in a governed session is denied with a reason.
 - **Harness failures** (no report, non-zero exit, stderr, a call stopped at the hook
   deadline) become fixed text such as
   "check-step-authorization unavailable" and deny the write. The raw text goes to stderr only.
   Error reports (`inquiry-error`, `state-error`, `system-error`) deny, and the core's own
-  `code — message` is relayed, as in the VS Code adapter.
+  `code — message` is relayed.
 
 ## Model binding
 
-[`models.yaml`](../../../adapters/github-copilot-cli/models.yaml) maps every model-profile slug
+[`models.yaml`](../../../adapters/github-copilot/models.yaml) maps every model-profile slug
 to a model id this host offers. On **every** hook load, the bootstrap reads the framework model
 catalogue (`<fw>/conf/model-profiles.conf.yaml`) and refuses a catalogue that names a profile
 slug `models.yaml` does not bind (core function 4: unroutable configurations die at load). The
@@ -393,10 +481,228 @@ the models the host currently offers, and the check re-reads both files on each 
 runtime passes no model list to hooks (none in any captured payload), so the adapter cannot
 check `models.yaml` against the live host list itself.
 
+## Plugin mode
+
+In plugin mode the harness ships as its own Copilot plugin, the **harness plugin**, beside
+the framework's plugin, the **framework plugin**. Both are installed from a marketplace into
+a host-managed, read-only folder that every update replaces. Nothing in either plugin holds a
+machine path: every path is derived at runtime.
+
+### The harness plugin
+
+The harness plugin is in the **Agent Plugins 1.0** format
+([specification](https://github.com/agentplugins/agent-plugins-spec/blob/main/spec/1.0.0.md)),
+which the Copilot CLI, the app and VS Code all read. Its root (`PLUGIN_ROOT`) holds:
+
+| Path | Content |
+| --- | --- |
+| `plugin.json` | the manifest: `$schema: https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`, `name: saf-agentic-harness`, the harness `version`, `description`, `license`, `repository`. The schema is closed: no component path keys, no other top-level field. |
+| `com.github.copilot/hooks/hooks.json` | the global hooks, as shell strings only (below), in the Copilot extension directory |
+| `VERSION` | the harness version, one line |
+| `requirements.lock` | the runtime requirements, hash-locked for every supported platform |
+| `launcher.py` | the stdlib-only launcher |
+| `bin/saf-hook.sh`, `bin/saf-hook.ps1` | the shims every hook entry runs |
+| `bin/register.sh`, `bin/register.ps1` | the `sessionStart` registration, shell only |
+| `bin/launcher.sh`, `bin/launcher.ps1` | the stable launcher, copied into the registry |
+| `harness.py`, `src/`, `contracts/`, `adapters/github-copilot/`, `adapters/binding_contract.py` | the harness runtime |
+| `LICENSE`, `README.md` | the license and the install instructions |
+
+The manifest validates against the official schema
+(`schemas/1.0.0/plugin.schema.json` of the specification) in the harness CI.
+
+### The registry
+
+The two plugins find each other through a **per-user registry**, a folder outside every
+repository and every plugin: `SAF_AGENTIC_REGISTRY_DIR`, else
+`%LOCALAPPDATA%\saf-agentic\registry` on Windows, else
+`$XDG_STATE_HOME/saf-agentic/registry` (`XDG_STATE_HOME` defaulting to `~/.local/state`).
+Its format is a contract between the harness and every framework plugin:
+
+| Entry | Written by | Content |
+| --- | --- | --- |
+| `harness/<version>/root` | the harness plugin's `sessionStart` | the harness plugin's root, as an absolute path |
+| `harness/<version>/data` | the harness plugin's `sessionStart` | the harness plugin's data folder (its `PLUGIN_DATA`), as an absolute path |
+| `harness/latest` | the harness plugin's `sessionStart` | the version that registered last |
+| `harness/launcher.sh`, `harness/launcher.ps1` | the harness plugin's `sessionStart` | the stable launcher |
+| `frameworks/<name>/root` | the framework plugin's `sessionStart` | the framework plugin's root, as an absolute path; `<name>` is its plugin name |
+| `sessions/<host session id>` | the harness launcher, at `sessionStart` and H1 | the harness version serving that host session |
+| `intents/<host session id>` | H0, or the shim when no Python is found | present when an orchestrator was selected in that host session (see [Fail-closed scope](#fail-closed-scope)) |
+
+- Every entry is a UTF-8 text file holding one line; readers strip surrounding whitespace.
+  Every write goes to a temporary file in the same folder, then is renamed over the entry,
+  so a reader never sees a partial entry. The last writer wins.
+- Both plugins register with a **shell-only** script (`sh` on POSIX, PowerShell on Windows),
+  never Python, so a registration never depends on the runtime it helps find.
+- Entries are keyed by version, so parallel harness versions (for example one installed by
+  the CLI and another by VS Code) never overwrite each other's root.
+- The **stable launcher** is the one entry point a framework plugin calls. Every harness
+  version installs the same launcher behavior, in shell: it runs the `bin/saf-hook` shim of
+  `harness/latest` with the payload and its arguments, with `PLUGIN_ROOT` and `PLUGIN_DATA`
+  set to that version's registered root and data folder. A scoped hook runs inside the
+  framework plugin, whose own variables are not the harness's.
+- **Version routing.** `launcher.py` reads the host session id from the payload. When
+  `sessions/` records another version for it, it hands the firing, unchanged, to that
+  version's `launcher.py`, with that version's root and data folder. A session's scoped hooks
+  therefore run the same harness version, on the same state folder, as its global hooks.
+- `launcher.py` deletes a host session's `sessions/` and `intents/` entries at its
+  `sessionEnd`, itself and before the adapter runs, so the deletion never depends on the
+  runtime. A leftover entry is harmless, because host session ids are unique.
+
+**The framework's scoped H0.** A framework orchestrator's agent-scoped H0 entries call the
+stable launcher, with the framework's plugin name and the orchestrator's slug:
+
+- `command`: `sh "${SAF_AGENTIC_REGISTRY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/saf-agentic/registry}/harness/launcher.sh" <event> --framework <name> --agent <slug>`
+- `windows`: `& "$(if ($env:SAF_AGENTIC_REGISTRY_DIR) { $env:SAF_AGENTIC_REGISTRY_DIR } else { Join-Path $env:LOCALAPPDATA 'saf-agentic\registry' })\harness\launcher.ps1" <event> --framework <name> --agent <slug>`
+
+where `<event>` is `userPromptSubmitted` or `userPromptTransformed`. The framework plugin
+renders these entries; the harness specifies them here.
+
+**An unpopulated registry fails closed.** Hosts do not order the `sessionStart` hooks of two
+plugins. When a firing in a governance context (see [Fail-closed scope](#fail-closed-scope))
+needs a registry entry that is not there yet, typically the framework's root in the first
+session after an install, it is denied with "the SAF plugins are not registered yet: start a
+new session".
+
+### Registration and the launcher
+
+Every global hook entry is a shell string, never `exec`, and reaches the plugin through the
+`PLUGIN_ROOT` environment variable:
+
+```json
+{ "type": "command",
+  "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" preToolUse",
+  "powershell": "& \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" preToolUse",
+  "timeoutSec": 120 }
+```
+
+`sessionStart` has two entries, in order: `bin/register` (the registry), then the shim
+(provisioning and the announce), with a `timeoutSec` of 300.
+
+- **The shim** finds an interpreter of Python ≥ 3.10, in order: `SAF_HARNESS_PYTHON`, then
+  `py -3` (Windows), `python3`, `python`. It runs `launcher.py <event> [arguments]` with
+  the payload on stdin. When no interpreter is found, the shim decides alone, in shell,
+  without Git. It reads the payload's `sessionId` textually (the string value of its
+  `"sessionId"` member). At a scoped H0 it writes that session's `intents/` entry. At a
+  `preToolUse` it denies (exit 2, the remedy on stderr) when the session folder or one of its
+  ancestors holds `.saf/workspace.yaml`, or when the session has an `intents/` entry, and
+  passes otherwise.
+- **`launcher.py`** imports the standard library only and parses on every supported Python.
+  It derives every path at runtime:
+  - the adapter's state folder: `$PLUGIN_DATA/state` (see [Session identity](#session-identity));
+  - the governed workspace and the framework (see [Workspace resolution](#workspace-resolution));
+  - the framework layout, from `<framework root>/.env`, as for every adapter. No
+    `FRAMEWORK_*` value is written into a hook entry.
+
+  It applies the [fail-closed scope](#fail-closed-scope) and the
+  [Local-runtime refusal](#local-runtime). It then runs the provisioned interpreter on
+  `adapters/github-copilot/adapter.py hook --event <e> --framework-dir <framework root>
+  --workspace-dir <workspace>`, with the payload and its stdout, stderr and exit status
+  passed through unchanged.
+
+### Python provisioning
+
+At `sessionStart`, the launcher provisions the harness runtime. Provisioning never runs in
+any other event: a `preToolUse` timeout fails open, so a gating event never waits for an
+install.
+
+- **Where.** A virtual environment under `$PLUGIN_DATA/venv/` (else under the state folder),
+  keyed by `<harness version>-<first 12 hex digits of the SHA-256 of requirements.lock>-<Python ABI tag>-<platform tag>`.
+  A new harness version, lock, interpreter or platform therefore gets its own environment.
+- **How.** With `uv` when it is on `PATH` (`uv venv`, then `uv pip install`), else with the
+  standard library's `venv` and `pip`. Both install from `requirements.lock` with
+  `--require-hashes` and binaries only (`--only-binary=:all:`). `PIP_INDEX_URL` and
+  `UV_INDEX_URL` are honored, so a mirror works.
+- **Ready.** The last step writes a `.ready` stamp into the environment. An environment
+  without the stamp is never used: it is deleted and rebuilt. An exclusive OS file lock on
+  the environment serializes concurrent sessions; a session that waits for it reuses the
+  environment the other built.
+- **Skip.** With `SAF_HARNESS_PYTHON` set, nothing is provisioned: that interpreter is used
+  as is, and must import the harness requirements.
+- **Until ready**, every gating event in a governance context is denied with the remedy;
+  outside one, events pass. A failed provisioning is reported once, as the `sessionStart`
+  warning.
+- **The lock** is generated in the harness CI with
+  `uv pip compile --universal --generate-hashes`, so it covers every supported platform.
+
+### Workspace resolution
+
+In plugin mode the governed workspace is resolved at runtime from the session's folder, not
+from the installation.
+
+- **The marker.** A folder is a **SAF workspace** when its Git top-level (`git rev-parse
+  --show-toplevel` from the payload's `cwd`) holds `.saf/workspace.yaml` **committed** in
+  `HEAD`. The committed content is read, and validates against
+  [`contracts/conf/workspace-marker.schema.json`](../../../contracts/conf/workspace-marker.schema.json):
+
+  ```yaml
+  framework: poesis-saf-agentic-organization   # the framework plugin's name (a slug)
+  root: portfolio                              # the workspace root: a top-level node slug of the framework's workspace layout
+  ```
+
+  Both properties are required and no other property is allowed. The workspace
+  (`FRAMEWORK_WORKSPACE_DIR`) is that Git top-level. The framework root (`FRAMEWORK_DIR`) is
+  the registered root of the plugin `framework` names. A `root` that is not a top-level node
+  slug of the framework's `conf/workspace.conf.yaml` is a configuration error, and fails
+  closed.
+- **Fixed per session.** The workspace is resolved when the session's record is created (H0
+  for an orchestrator session; H1 records the dispatcher's workspace for a worker session) and
+  stored in the record. Later firings never re-resolve it.
+- **One framework per workspace.** A firing governs a workspace only for the framework its
+  marker names: H0 carrying `--framework <name>` for another framework treats the folder as
+  unmarked.
+- **An unmarked folder** is ungoverned. An orchestrator selected there gets, as its H0
+  context, "this folder is not a SAF workspace; ask me to initialise it", and its session
+  stays ungoverned, so the framework's initialisation can write the marker.
+- **The developer install** does not read the marker: its workspace is `--workspace-dir`,
+  else the layout's `FRAMEWORK_WORKSPACE_DIR`.
+
+### Fail-closed scope
+
+In plugin mode, the hooks fire in every folder of every session. The harness therefore fails
+closed only where governance applies. A session is in a **governance context** when its
+folder is a SAF workspace, or when an orchestrator was selected in it: H0 writes the
+session's **intent record**, its `intents/` registry entry, with the standard library only
+and before anything else can fail. The registry is shared by every harness version, so every
+version's hooks see it. `launcher.py` deletes it at the session's `sessionEnd`.
+
+The **runtime is unavailable** when any of these holds:
+
+- no Python ≥ 3.10 is found;
+- the provisioned environment is not ready;
+- Git is missing or older than 2.38;
+- a registry entry the firing needs is missing;
+- the framework or the harness configuration fails to load, including the compatibility
+  check (core: [Harness compatibility](../../core/spec.md#harness-compatibility)).
+
+| Situation | While the runtime is unavailable |
+| --- | --- |
+| No governance context | **Pass** (exit 0, empty). `sessionStart` warns once, naming the problem and its remedy. |
+| An orchestrator was selected | Every later `preToolUse` of the session is **denied** with the exact remedy. |
+| A SAF workspace | Every `preToolUse` is **denied** with the exact remedy, shell commands included (I9). |
+
+A denial from `launcher.py` is a structured `deny` whose reason names the problem and the
+remedy, for example "Git ≥ 2.38 required (found 2.34)". A denial from the shim alone is exit 2
+with the same text on stderr. Once the runtime is available, every rule of this document
+applies unchanged. The developer install keeps the stricter rule of
+[Fail-closed entry](#fail-closed-entry): a bootstrap failure denies in every folder.
+
+### Local runtime
+
+`launcher.py` tells the two payload families apart before anything else (host fact 10). A
+payload carrying `tool_name`, `tool_input`, `session_id`, `hookEventName` or
+`hook_event_name` is VS Code's **Local** runtime; any other is this runtime. In a governance
+context, a Local-runtime `preToolUse` is refused with exit 2 and "select Session Target:
+Copilot" on stderr; exit 2 blocks in both runtimes, and the Local runtime's output contract
+is not this adapter's. Every other Local-runtime firing, and every one outside a governance
+context, passes without running the adapter.
+
 ## Rendered registration — `install.py`
 
-The source of truth is [`hooks.yaml`](../../../adapters/github-copilot-cli/hooks.yaml) (global)
-and [`agent-hooks.yaml`](../../../adapters/github-copilot-cli/agent-hooks.yaml) (scoped H0).
+This is the **developer install**, for a harness checkout and a framework checkout. Plugin
+mode does not use it.
+
+The source of truth is [`hooks.yaml`](../../../adapters/github-copilot/hooks.yaml) (global)
+and [`agent-hooks.yaml`](../../../adapters/github-copilot/agent-hooks.yaml) (scoped H0).
 `install.py` renders both, with absolute machine paths. The output is generated and never
 committed.
 
@@ -405,7 +711,7 @@ committed.
 | `--framework-dir` (required) | The framework **checkout** (e.g. `saf-agentic-organization`, holding `.env`, `workflows/`, `instructions/`, `skills/`, `workspace/`), NOT the rendered bundle. Every hook's `cwd` and `FRAMEWORK_DIR`. |
 | `--workspace-dir` | Override `FRAMEWORK_WORKSPACE_DIR` (absolute) — e.g. a portfolio repository outside the checkout. Written into the global hooks' `env` AND passed as `--workspace-dir` (scoped hooks cannot carry `env`). |
 | `--bundle-dir` | The framework's rendered Copilot plugin bundle. Global hooks go to `<bundle>/hooks.json` (or the path a string `hooks` key in `plugin.json` names). The scoped H0 block goes into `<bundle>/agents/<orchestrator>.agent.md`. |
-| `--hooks-target plugin\|repo\|user\|none` | Where the global hook file goes: the bundle (default with `--bundle-dir`), `<target-repo>/.github/hooks/safe-harness-copilot-cli.json`, or `$COPILOT_HOME`/`~/.copilot/hooks/…`. |
+| `--hooks-target plugin\|repo\|user\|none` | Where the global hook file goes: the bundle (default with `--bundle-dir`), `<target-repo>/.github/hooks/safe-harness-github-copilot.json`, or `$COPILOT_HOME`/`~/.copilot/hooks/…`. |
 | `--python` | The absolute interpreter recorded in every entry (`exec`, and `SAF_HARNESS_PYTHON` in `env`). Defaults to the one running `install.py`, which should be the harness venv. The install is refused unless it imports the harness requirements (`yaml`, `jsonschema`, `celpy`). |
 | `--hook-style exec\|shell` | `exec` + `args` (default: no shell at all), or `powershell` + `bash` command strings. |
 | `--agents-dir`, `--agents-dest`, `--workflows-dir`, `--skip-agents`, `--dry-run` | As named. |
@@ -418,7 +724,7 @@ committed.
   The hook therefore bootstraps from its registration alone, because the host runs hooks with
   its own environment and not the operator's shell (no `setx`).
 - **Scoped block:** inserted inside the frontmatter, between the managed markers
-  `# >>> safe-harness copilot-cli H0 … >>>` and `# <<< safe-harness copilot-cli H0 <<<`.
+  `# >>> safe-harness github-copilot H0 … >>>` and `# <<< safe-harness github-copilot H0 <<<`.
   It has `command` (POSIX-quoted) and `windows` (`& '<python>' …`) with `--agent <slug>`.
   Scoped hooks cannot carry `env`, so every resolved `FRAMEWORK_*_DIR` (the same values the
   global entries' `env` holds, environment overrides included) is passed as
@@ -440,7 +746,7 @@ committed.
 | Shell writes (I9) | `powershell`/`bash` is an unmediated write channel: the guard is textual and advisory (a variable or an encoded command evades it). | Workspace paths named in a shell command are denied. H5 does not see shell writes, so the core bounds them: no harness commit carries their bytes, the harness advances workspace state only by promotion, and a dirtied unclaimed path fails function 8's staging-baseline check. A foreign Git commit can still carry them into the local workspace branch, outside the harness's guarantee (C6); C6's detect-and-remediate plane owns cleanup. Document "write through `create`/`edit`" in the agents. |
 | Folder trust | Repository hooks do not run in an untrusted folder (both hosts); the boundaries they register never fire, so the session stays ungoverned. | With `--hooks-target repo`, trust the folder (`--trust-folder` on the CLI). Prefer plugin hooks, which run regardless. A harness command in an ungoverned session is denied with a diagnosis. |
 | H0 inside a subagent | Agent-scoped hooks DO fire for an orchestrator dispatched as a subagent (observed, app 1.0.102), after `subagentStart`. | H0 leaves a worker session to H1 and never opens a root for an agent a governed session dispatched. The hint is part of every governed context. |
-| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned (parity with VS Code). An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 detect-and-remediate plane. |
+| H1 `not-applicable` | A subagent whose dispatcher is ungoverned, or a harness `not-applicable` answer, leaves the subagent ungoverned. An error answer does not: the subagent is recorded unregistered and its writes and dispatches are denied. | C6 detect-and-remediate plane. |
 | H4 result channel | The harness answer reaches the agent as a hook DENIAL of its shell call. On the standalone CLI (1.0.105) the model receives the tool result `Denied by preToolUse hook: <reason>`, the reason verbatim; the app's wrapper is not byte-verified. A model may read "denied" as failure and retry. | The reason starts with `SAFe agentic harness RESULT` and says it is the successful answer; the injected hint and the org's orchestrator prose say the same. A re-issued request is answered again (resolve functions do not advance on their own), so a retry costs a turn but changes nothing. |
 | H4 on hook timeout | A timed-out `preToolUse` fails open, so the agent's own line would run in its shell. | That line has no `--session-id` and the agent shell has no `FRAMEWORK_DIR`: the harness refuses it at its exit plane (`FRAMEWORK_DIR is unset`, exit 2) and nothing is journaled. |
 | `apply_patch` | Offered instead of `create`/`edit` to GPT-5.x models only (CLI 1.0.105); `toolArgs` is the raw patch string. | Bound as a patch tool: every header target is authorized; an unparseable patch → deny. |
@@ -450,7 +756,12 @@ committed.
 | `exec` entries | Observed executing in the standalone CLI (1.0.105, plugin `hooks.json`); not yet observed in the app. | `--hook-style shell` renders `powershell`/`bash` strings with the same arguments. |
 | Plugin agent names | The runtime namespaces plugin agents `<plugin>:<agent>`. | `hostAgentNamespaceSeparator` strips the namespace before `start-session`. Agents must dispatch the namespaced `agent_type`; that is the framework bundle's prose, not the adapter's. |
 | Human gate in `copilot -p` | Non-interactive prompt mode offers no `ask_user`. | None in the adapter: a framework whose steps need a human gate must run interactively. |
-| Latency | Plugin hooks start Python on every tool call in every folder. | Ungoverned firings return after one state lookup. Use a repository or project-scoped install when this matters. |
+| Latency | Plugin hooks fire on every tool call in every folder. | In plugin mode the shim answers in shell, without starting Python, when the folder holds no marker and the session has no intent record. Ungoverned firings that reach the adapter return after one state lookup. |
+| Scoped H0 without the harness plugin | A framework orchestrator's scoped H0 calls the stable launcher in the registry. When the harness plugin is not installed, disabled, or has never started a session, the launcher is missing: the entry fails, and `userPromptSubmitted` cannot veto. | The session stays ungoverned, as with no hooks at all. The framework's orchestrator prose refuses to dispatch without the harness context that `sessionStart` injects. |
+| Plugin hooks disabled | Host policy (for example a managed-hooks-only setting) or a user setting can disable plugin hooks. Nothing fires. | None in the adapter: as above, the framework's orchestrator prose refuses without the harness context. |
+| Sandboxed sessions | A sandboxed CLI session lets a plugin hook write only its own data folder and the session's grants. The registry lies outside both, so registration and intent records cannot be written. | Fails closed: in a governance context, a firing that needs a missing registry entry is denied with the remedy. Grant the registry folder to the sandbox, or point `SAF_AGENTIC_REGISTRY_DIR` at a granted folder. |
+| Writes into another folder | Governance is decided by the session's own folder (its Git top-level). A session started in an unmarked folder is ungoverned, even when a tool writes by absolute path into a SAF workspace elsewhere. | Work on a SAF workspace from a session opened in it. C6's detect-and-remediate plane and the workspace CI gate catch what reaches the workspace branch. |
+| VS Code's Local runtime | Local payloads reach plugin hooks (host fact 10), in a format this adapter does not bind. | Refused in a governance context with "select Session Target: Copilot" (see [Local runtime](#local-runtime)). |
 
 ## Mediated-attribution status
 
@@ -460,8 +771,7 @@ private records, and nothing model-authored is stamped, rewritten or executed. T
 command line is only a structurally recognized request (rules above), and model-authored
 attribution in it is denied outright. This satisfies the core's mediated attribution rule
 directly; the core's mediated-invocation backstop still applies inside the functions. The
-VS Code adapter uses the same hook-executed design (its I4 is resolved), so the core's former
-tool-boundary-stamp exception has been retired.
+core's former tool-boundary-stamp exception is retired.
 
 ## Inconsistencies found while binding this host
 
@@ -470,6 +780,3 @@ tool-boundary-stamp exception has been retired.
   `contracts/artifact.schema.json` as `gsmarc://saf/contracts/artifact/v1`.
   `check-step-artifact` then fails with `Unresolvable`, which H5 relays as "unavailable". This
   is a cross-repository defect, outside this adapter.
-- The shared `adapters/dispatch.sh` is a bash script. This adapter does not use it: every entry
-  runs `adapter.py` through an explicit interpreter, so Windows needs no bash. See
-  [`../../../adapters/README.md`](../../../adapters/README.md).

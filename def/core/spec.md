@@ -340,7 +340,7 @@ twelve functions in play across one workflow instance — framework user, orches
 step subagents, host, adapter, and harness core. It lives one level up (`def/`), not under
 `def/core/`, because it depicts one concrete host binding's hooks (as a distinct Adapter
 participant, separate from the host-agnostic Harness core) realizing the boundaries — see
-[`../adapter/vscode-github-copilot-chat/spec.md`](../adapter/vscode-github-copilot-chat/spec.md).
+[`../adapter/github-copilot/spec.md`](../adapter/github-copilot/spec.md).
 
 ![Harness functions sequence diagram](../harness.sd.png)
 
@@ -356,7 +356,7 @@ statuses; which condition produces which status is fixed by kind, never per-func
 | Status | Assigned to | Journaled |
 | --- | --- | --- |
 | `inquiry-error` | Everything wrong with the inquiry itself, distinguished by `error.code`: it fails its input contract or domain validation (code `invalid-inquiry` — non-slug `sessionId`, missing `agent`; `unknown-workflow`), or it is illegitimate at its surface (code `session-unregistered` — the mediated backstop; `not-facilitator`) | Yes when the session is attributable and open; contract-validation failures are pre-attribution and unjournalable (rule 4) |
-| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), another orchestrator session that has not ended holds an unfinished step resolution in the deduced workflow instance (`workflow-instance-busy`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its worker session (`worker-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), a step ref cannot be rebased onto a moved workspace branch, or the workspace branch moved under the step instance before its promotion's compare-and-swap (`step-rebase-conflict`) | Yes, except the C8 refusal (rule 3) and `worker-session-bound` (rule 4) |
+| `state-error` | Persisted state contradicts an otherwise legitimate inquiry: the target session's log carries an ending entry (C8 — code `session-ended`), a step is already in flight (`step-in-flight`), another orchestrator session that has not ended holds an unfinished step resolution in the deduced workflow instance (`workflow-instance-busy`), the orchestrator session already drives a workflow instance of another workflow (`session-instance-bound`), a step resolution already registered its worker session (`worker-session-bound`), a step correlation is missing or of the wrong kind (`step-correlation-missing`, `session-kind-mismatch`), a re-registration names a different agent (`session-conflict`), a condition evaluation fails at runtime (`condition-evaluation-failed`), a path resolves to no artifact schema at the commit gate (`artifact-schema-unresolved`), a step ref cannot be rebased onto a moved workspace branch, or the workspace branch moved under the step instance before its promotion's compare-and-swap (`step-rebase-conflict`), the session was started by another harness version (`harness-version-changed` — [Harness compatibility](#harness-compatibility)) | Yes, except the C8 refusal (rule 3), `worker-session-bound` (rule 4) and `harness-version-changed` (rule 4) |
 | `configuration-error` | Configuration invalid at use time — residual only: the fail-fast load ([Internal validation](#internal-validation--not-functions)) owns configuration validity, so reaching this status at runtime indicates config mutated after load | Yes |
 | `system-error` | The environment fails: Git index lock, disk full, an unreadable log (code `log-unreadable` — a log file that cannot be opened, retryable, or whose bytes are not JSONL log entries, not retryable; the invoking session's own log or any log a cross-log scan reads), log creation or append failing (`log-creation-failed`, `log-append-failed` — the report is still returned; the entry is lost — best-effort; an error report whose own entry is lost keeps its primary error) | Yes, when the log is writable |
 
@@ -371,7 +371,7 @@ the codes named in this specification
 `unknown-workflow`, `step-in-flight`, `workflow-instance-busy`, `session-instance-bound`,
 `worker-session-bound`, `step-correlation-missing`,
 `condition-evaluation-failed`, `artifact-schema-unresolved`,
-`step-rebase-conflict`, `log-unreadable`,
+`step-rebase-conflict`, `harness-version-changed`, `log-unreadable`,
 `log-creation-failed`, `log-append-failed`) are normative; implementations
 may add codes but never repurpose these. Statuses, codes, and structured fields are the
 normative test surface; `error.message` and every `failureMessage` are **advisory prose** —
@@ -391,14 +391,16 @@ payload. Hook planes render it as pass-through (C7).
 ending entry returns `state-error` with code `session-ended` — and is **not journaled**: no
 entry ever follows the ending entry (function 11, invariant 1). Apart from `worker-session-bound`,
 which has no log of its own to journal to (rule 4), this is the only `state-error` that does
-not journal.
+not journal, besides `harness-version-changed` (rule 4).
 
 **4. The failure-journaling rule.** Error outcomes are ordinary outcomes and journal to the
 attributed session's log — with these exceptions, all forced by the absence of an open
 target log: the C8 refusal (rule 3) and `not-applicable` (rule 2) are **returned but never
 journaled**; `session-unregistered` returns its report (the context is constructible — the
 id is a valid slug) but has no log to journal to; so does function 0's `worker-session-bound`
-refusal — the refused worker session is never registered, so no log of its own exists; and a
+refusal — the refused worker session is never registered, so no log of its own exists;
+`harness-version-changed` is returned but never journaled — one harness version never writes
+into a log another version started; and a
 **contract-validation failure** (`invalid-inquiry`) produces **no report at all** — a
 contract-valid report cannot be built when the inquiry's own `sessionId` is missing or
 malformed, so the failure surfaces at the
@@ -442,7 +444,8 @@ agent-authored argument.
   opened this one — nullable: a dispatching agent session, or `null` for a root session).
   `agent` is **required**: the framework-agent identity — the harness
   starts agent sessions, so every invocation names one.
-- **Out** — `SessionStartReport`: the `session` object.
+- **Out** — `SessionStartReport`: the `session` object, which records the `harnessVersion`
+  that started the session ([Harness compatibility](#harness-compatibility)).
 - **Caller usage** — never called by an agent's own action; called by whatever surrounds the
   session's start (a hook mechanism). Later
   mediated agent invocations of the same
@@ -463,7 +466,12 @@ Example:
       "workflowInstanceId": null
     },
     "outcome": { "status": "started" },
-    "session": { "agent": "qa-engineer", "sessionId": "01j9xqr7t3", "parentSessionId": "01j9xq0f2m" }
+    "session": {
+      "agent": "qa-engineer",
+      "sessionId": "01j9xqr7t3",
+      "parentSessionId": "01j9xq0f2m",
+      "harnessVersion": "1.0.0"
+    }
   }
 }
 ```
@@ -1904,8 +1912,10 @@ agent facilitating at least one workflow, no two artifact kinds claiming the sam
 path), the
 cross-configuration coherence rules (workflow actors exist in the ACL, capability tags belong
 to the model catalog's vocabulary, step `artifact` slugs resolve to artifact schemas,
-instruction/skill refs resolve to files in the framework layout), and the layout environment
-(every required variable present and pointing to an existing directory).
+instruction/skill refs resolve to files in the framework layout), the layout environment
+(every required variable present and pointing to an existing directory), and the harness
+compatibility declaration (the installed harness version satisfies `require` — see
+[Harness compatibility](#harness-compatibility)).
 `Application` builds every configuration dataclass at
 instantiation, so **every invocation of any function fails fast — with the full reports, as
 domain exceptions at the trigger plane — before any function runs** on an invalid
@@ -1929,6 +1939,31 @@ holder's workflow instance and step, and working-tree paths that differ from `HE
 a lock, are reported too. The embedding application uses it for C6's canonical-branch guarantee — the required CI status check on the workspace
 repository (see C6, guarantee scope) — and may ship it as an advisory pre-commit hook;
 remediation always goes through agents.
+
+### Harness compatibility
+
+The framework and the harness are released independently, so the framework declares which
+harness versions it supports, and the harness checks the declaration.
+
+- **The declaration.** `conf/harness.conf.yaml` holds one property, `require`: a PEP 440
+  version specifier set, e.g. `require: ">=1.0.0a1,<1.1"`. The file is required and validates
+  against `conf/framework/harness.conf.schema.json`.
+- **The check is configuration validity.** The fail-fast load ([Internal
+  validation](#internal-validation--not-functions)) compares the installed harness version,
+  read as a PEP 440 version (`1.0.0-alpha.1` reads as `1.0.0a1`), against `require`. A
+  version outside the range is a configuration error like any other — exit 3, before any
+  function runs — with the message "requires harness `<range>`; installed `<version>`".
+- **The version stamp.** Function 0 records the installed harness version in the started
+  session's `session` object (`harnessVersion`). Every later call of functions 0–10 for that
+  session by another harness version — the stamp differs, or the session's start entry has
+  none — is refused with `state-error`, code `harness-version-changed` ("the session was
+  started by harness `<a>`; installed `<b>`: start a new session"), and is not journaled
+  (rule 4). Function 11 is exempt from this check, so any harness version the framework's
+  `require` admits can end a session another version started. A version outside `require`
+  runs no function at all, function 11 included (configuration error, above): its sessions
+  are ended once a compatible harness is installed. Reading another version's logs (function 3's driver check, function 10's
+  correlation) is unaffected: logs are read through their contract, never through a
+  version.
 
 ### General invariants
 
@@ -2470,6 +2505,7 @@ beside the `ConfigLoader` that builds it):
 | `conf/model-profiles.conf.yaml` | `conf/framework/model-profiles.conf.schema.json` | `ModelProfiles` |
 | `conf/workspace.conf.yaml` | `conf/framework/workspace.conf.schema.json` | `WorkspaceLayout` |
 | `conf/workflows/*.workflow.conf.yaml` | `conf/framework/workflow.conf.schema.json` | `WorkflowCatalog` / `Workflow` / `Step` |
+| `conf/harness.conf.yaml` | `conf/framework/harness.conf.schema.json` | `HarnessRequirement` ([Harness compatibility](#harness-compatibility)) |
 
 The framework's **layout is environment, not file configuration**: the framework declares WHERE
 its pieces live via environment variables, loaded from a `.env` file at the framework root
