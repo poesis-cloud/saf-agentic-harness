@@ -219,7 +219,8 @@ returns to the orchestrator.
   ([Workspace resolution](#workspace-resolution)), in the developer install it is the
   registered layout's. A firing whose installed harness version differs from the record's is
   denied with "the plugin was updated; start a new session" (core:
-  [Harness compatibility](../../core/spec.md#harness-compatibility)).
+  [Harness compatibility](../../core/spec.md#harness-compatibility)); H7 still ends that
+  session, since core function 11 is exempt from the version check.
 - **Unregistered sessions** have a record whose `start-session` answered an error or no
   report. Only an explicit `not-applicable` means ungoverned (core rule 2), so these fail
   closed: every write, dispatch and harness request is denied with the recorded failure, I9
@@ -520,6 +521,7 @@ Its format is a contract between the harness and every framework plugin:
 | Entry | Written by | Content |
 | --- | --- | --- |
 | `harness/<version>/root` | the harness plugin's `sessionStart` | the harness plugin's root, as an absolute path |
+| `harness/<version>/data` | the harness plugin's `sessionStart` | the harness plugin's data folder (its `PLUGIN_DATA`), as an absolute path |
 | `harness/latest` | the harness plugin's `sessionStart` | the version that registered last |
 | `harness/launcher.sh`, `harness/launcher.ps1` | the harness plugin's `sessionStart` | the stable launcher |
 | `frameworks/<name>/root` | the framework plugin's `sessionStart` | the framework plugin's root, as an absolute path; `<name>` is its plugin name |
@@ -535,9 +537,13 @@ Its format is a contract between the harness and every framework plugin:
 - The **stable launcher** is the one entry point a framework plugin calls. Every harness
   version installs the same launcher behavior: it reads the host session id from the
   payload, takes the version recorded for it under `sessions/` (else `harness/latest`), and
-  runs that version's `bin/saf-hook` shim with the payload and its arguments. A session's
-  scoped hooks therefore run the same harness version as its global hooks.
-- `sessions/` entries are deleted at the session's closure (H7). A leftover entry is
+  runs that version's `bin/saf-hook` shim with the payload and its arguments, with
+  `PLUGIN_ROOT` and `PLUGIN_DATA` set to that version's registered root and data folder. A
+  scoped hook runs inside the framework plugin, whose own variables are not the harness's;
+  this way a session's scoped hooks run the same harness version, on the same state folder,
+  as its global hooks.
+- `launcher.py` deletes a host session's `sessions/` entry at its `sessionEnd`, itself and
+  before the adapter runs, so the deletion never depends on the runtime. A leftover entry is
   harmless, because host session ids are unique.
 
 **The framework's scoped H0.** A framework orchestrator's agent-scoped H0 entries call the
@@ -572,9 +578,9 @@ Every global hook entry is a shell string, never `exec`, and reaches the plugin 
 
 - **The shim** finds an interpreter of Python ≥ 3.10, in order: `SAF_HARNESS_PYTHON`, then
   `py -3` (Windows), `python3`, `python`. It runs `launcher.py <event> [arguments]` with
-  the payload on stdin. When no interpreter is found, the shim decides alone, in shell: it
-  denies a `preToolUse` (exit 2, the remedy on stderr) when the session folder's Git
-  top-level holds `.saf/workspace.yaml`, and passes otherwise.
+  the payload on stdin. When no interpreter is found, the shim decides alone, in shell,
+  without Git: it denies a `preToolUse` (exit 2, the remedy on stderr) when the session
+  folder or one of its ancestors holds `.saf/workspace.yaml`, and passes otherwise.
 - **`launcher.py`** imports the standard library only and parses on every supported Python.
   It derives every path at runtime:
   - the adapter's state folder: `$PLUGIN_DATA/state` (see [Session identity](#session-identity));
@@ -651,7 +657,8 @@ In plugin mode, the hooks fire in every folder of every session. The harness the
 closed only where governance applies. A session is in a **governance context** when its
 folder is a SAF workspace, or when an orchestrator was selected in it: H0 writes a
 stdlib-only **intent record** for the host session into the state folder before anything
-else can fail. The intent record is deleted at the session's closure.
+else can fail. `launcher.py` deletes it at the session's `sessionEnd`, itself and before the
+adapter runs, so the deletion never depends on the runtime.
 
 The **runtime is unavailable** when any of these holds:
 
@@ -747,6 +754,7 @@ committed.
 | Latency | Plugin hooks fire on every tool call in every folder. | In plugin mode the shim answers in shell, without starting Python, when the folder holds no marker and the session has no intent record. Ungoverned firings that reach the adapter return after one state lookup. |
 | Scoped H0 without the harness plugin | A framework orchestrator's scoped H0 calls the stable launcher in the registry. When the harness plugin is not installed, disabled, or has never started a session, the launcher is missing: the entry fails, and `userPromptSubmitted` cannot veto. | The session stays ungoverned, as with no hooks at all. The framework's orchestrator prose refuses to dispatch without the harness context that `sessionStart` injects. |
 | Plugin hooks disabled | Host policy (for example a managed-hooks-only setting) or a user setting can disable plugin hooks. Nothing fires. | None in the adapter: as above, the framework's orchestrator prose refuses without the harness context. |
+| Writes into another folder | Governance is decided by the session's own folder (its Git top-level). A session started in an unmarked folder is ungoverned, even when a tool writes by absolute path into a SAF workspace elsewhere. | Work on a SAF workspace from a session opened in it. C6's detect-and-remediate plane and the workspace CI gate catch what reaches the workspace branch. |
 | VS Code's Local runtime | Local payloads reach plugin hooks (host fact 10), in a format this adapter does not bind. | Refused in a governance context with "select Session Target: Copilot" (see [Local runtime](#local-runtime)). |
 
 ## Mediated-attribution status
