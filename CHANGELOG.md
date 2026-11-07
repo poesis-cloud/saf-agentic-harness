@@ -155,10 +155,11 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
 - **Unreadable logs:** session-log read and write failures are a `system-error` report, never
   a raw exception: `log-unreadable` (retryable when the file cannot be opened, not when it
   cannot be parsed), `log-creation-failed` and `log-append-failed`.
-- **Hook bootstrap fails closed:** every rendered hook records `FRAMEWORK_DIR` and its
-  validated interpreter in its `env`, independent of the inherited environment, and loads
-  `FRAMEWORK_DIR/.env`. A hook that cannot bootstrap exits 2, which the host treats as
-  blocking.
+- **Hook bootstrap fails closed:** every rendered hook records its validated interpreter and
+  the framework layout, independent of the inherited environment: global hooks in their
+  `env` (`FRAMEWORK_DIR`, whose `.env` is loaded), and the Copilot app / CLI's agent-scoped H0
+  hooks in their command (the interpreter, then `--layout` arguments). A hook that cannot
+  bootstrap exits 2, which the host treats as blocking.
 - **Unroutable model catalogue fails closed:** on every hook load, both adapters refuse a
   framework model catalogue (`conf/model-profiles.conf.yaml`) that is missing or names a
   profile slug the adapter's `models.yaml` does not bind. Nothing is cached from install, so
