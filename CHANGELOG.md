@@ -46,8 +46,9 @@ The first pinnable pre-release of the SAFe agentic orchestration harness.
   same macro (`a.kind == '<literal>'`, or a path join with a step instance of a literal step
   of a known workflow). An unguarded read; an unknown kind, step or workflow slug; an
   undeclared property; and, in a precondition, a current-workflow step that is not a
-  declared predecessor or a path join with `step` are configuration load errors. Only the
-  kinds the guards fix are read from the evaluated state.
+  declared predecessor or a path join with `step` are configuration load errors. When the
+  configuration load can fix every kind a condition reads, only those kinds are read from
+  the evaluated state; otherwise every kind is.
 - **Recovery.** `workflow-instance-busy` names the holding orchestrator session and prints
   the exact command that ends it: the effective framework layout as environment variables,
   the installed interpreter and `harness.py`, and `end-session --session-id=<holder>`,
@@ -183,7 +184,7 @@ and the [Copilot CLI adapter README](adapters/github-copilot-cli/README.md).
   `.nan`, `.inf`), are a `parse` finding, so the write is reverted.
 - **Hook-executed H4 attribution:** both adapters pass the tracked parent session with a
   `resolve-step`/`resolve-step-model` request, so a worker session's request is journaled
-  under its orchestrator session.
+  with its orchestrator session as `parentSessionId`, not `null`.
 - **`github-copilot-cli`, nested step dispatch:** a step dispatched by an orchestrator that
   is itself a subagent opens under that orchestrator's session. H1 reads the dispatcher
   from the host-observed `parentAgentId`; the nested `subagentStart` `sessionId` is an
