@@ -106,10 +106,15 @@ class SessionTracker:
         """
         directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
         name = _safe_component(agent_host_id)
+        pending = directory / "pending" / name
+        if not pending.is_file():
+            # Nothing was recorded for this sub-agent (an ungoverned conversation, or the
+            # bound worker): leave no directory behind.
+            return False
         returned = directory / "returned"
         returned.mkdir(parents=True, exist_ok=True)
         try:
-            os.replace(directory / "pending" / name, returned / name)
+            os.replace(pending, returned / name)
         except FileNotFoundError:
             return False
         return True

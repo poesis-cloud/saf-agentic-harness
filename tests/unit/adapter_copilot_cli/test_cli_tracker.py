@@ -100,3 +100,12 @@ def test_a_return_that_loses_every_unlink_race_re_lists_the_armed_markers(
     assert tracker.consume_ignored_return("host") is True
     assert raced == ["worker-b"]
     assert tracker.consume_ignored_return("host") is False
+
+
+def test_arming_an_unrecorded_sub_agent_leaves_no_directory_behind(tmp_path) -> None:
+    """A `subagentStop` of an ungoverned conversation (or of the bound worker) records
+    nothing, so it must leave no marker directory that no later close would clean up."""
+    tracker = SessionTracker(tmp_path)
+
+    assert tracker.arm_ignored_return("ungoverned-host", "worker-x") is False
+    assert not (tmp_path / "ignored-returns").exists()

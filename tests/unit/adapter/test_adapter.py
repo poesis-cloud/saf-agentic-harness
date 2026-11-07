@@ -1606,6 +1606,14 @@ class TestFailedRegistration:
         assert raced == ["worker-b"]
         assert tracker.consume_ignored_return(HOST_SESSION) is False
 
+    def test_arming_an_unrecorded_sub_agent_leaves_no_directory_behind(
+        self, tracker: SessionTracker, tmp_path: Path
+    ) -> None:
+        """A `SubagentStop` of an untracked conversation (or of the bound worker) records
+        nothing, so it must leave no marker directory that no later close would clean up."""
+        assert tracker.arm_ignored_return("ungoverned-host", "worker-x") is False
+        assert not list(tmp_path.rglob("*ignored-returns*"))
+
     def test_a_new_turn_forgets_a_pending_ignored_return(
         self, make_adapter, tracker: SessionTracker
     ) -> None:
