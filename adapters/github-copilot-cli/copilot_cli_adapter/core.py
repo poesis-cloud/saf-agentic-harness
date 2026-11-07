@@ -260,7 +260,12 @@ class Adapter:
             return None
         agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         actor = self._binding.probe(hook.payload, self._binding.host_step_actor_keys)
-        if agent_id is None or actor is None:
+        if agent_id is None:
+            return None
+        if actor is None:
+            # Never registered as the step's worker, yet attributable: its return must not
+            # conclude the step (H6).
+            self._ignore_return(parent_host, parent, sanitize_identifier(str(agent_id)))
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))

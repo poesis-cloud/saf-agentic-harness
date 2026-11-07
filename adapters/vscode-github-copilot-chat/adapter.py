@@ -188,9 +188,14 @@ class Adapter:
         )
         if parent_session_id is None:
             return self._renderer.render_pass_through()
-        if agent_id is None or actor is None:
+        if agent_id is None:
             return self._renderer.render_pass_through()
         session_id = derive_worker_session_id(str(agent_id))
+        if actor is None:
+            # Never registered as the step's worker, yet attributable: its return must not
+            # conclude the step (H6).
+            self._ignore_return(host_id, session_id)
+            return self._renderer.render_pass_through()
         if is_unregistered(parent_session_id):
             self._tracker.push_unregistered(host_id, session_id)
             self._ignore_return(host_id, session_id)

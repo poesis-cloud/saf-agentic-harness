@@ -122,14 +122,18 @@ class SessionTracker:
         unlink: two concurrent returns never consume the same marker.
         """
         returned = self._ignored_returns_dir / _safe_component(dispatcher_host_id) / "returned"
-        if not returned.is_dir():
-            return False
-        for marker in sorted(returned.iterdir()):
-            try:
-                marker.unlink()
-            except FileNotFoundError:
-                continue
-            return True
+        # Re-list after losing every unlink race: a concurrent return may have consumed
+        # the markers seen while another sub-agent armed a new one meanwhile.
+        while returned.is_dir():
+            markers = sorted(returned.iterdir())
+            if not markers:
+                return False
+            for marker in markers:
+                try:
+                    marker.unlink()
+                except FileNotFoundError:
+                    continue
+                return True
         return False
 
     def clear_ignored_returns(self, host_id: str) -> None:

@@ -72,3 +72,31 @@ def test_closing_a_session_forgets_its_pending_ignored_returns(tmp_path) -> None
     tracker.arm_ignored_return("host", "worker-c")
     tracker.clear_ignored_returns("host")
     assert tracker.consume_ignored_return("host") is False
+
+
+def test_a_return_that_loses_every_unlink_race_re_lists_the_armed_markers(
+    tmp_path, monkeypatch
+) -> None:
+    """Adapter spec H6: a return snapshots marker B, a concurrent return consumes B while
+    sub-agent C stops and arms its own marker. The losing return must still consume C's —
+    otherwise an ignored return would evaluate the step while the bound worker runs."""
+    tracker = SessionTracker(tmp_path)
+    for worker in ("worker-b", "worker-c"):
+        tracker.mark_ignored_return("host", worker)
+    tracker.arm_ignored_return("host", "worker-b")
+    original_unlink = Path.unlink
+    raced: list[str] = []
+
+    def racing_unlink(self: Path, missing_ok: bool = False) -> None:
+        if not raced and self.name == "worker-b":
+            raced.append(self.name)
+            original_unlink(self)
+            tracker.arm_ignored_return("host", "worker-c")
+            raise FileNotFoundError(self)
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", racing_unlink)
+
+    assert tracker.consume_ignored_return("host") is True
+    assert raced == ["worker-b"]
+    assert tracker.consume_ignored_return("host") is False
