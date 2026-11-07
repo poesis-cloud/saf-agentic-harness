@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import Any, MutableMapping
 
@@ -32,9 +34,6 @@ class SessionTracker:
     def __init__(self, store_path: Path) -> None:
         """Create the tracker over its own JSON record file."""
         self._store_path = store_path
-        self._ignored_returns_path = store_path.with_name(
-            f"{store_path.stem}.ignored-returns{store_path.suffix}"
-        )
 
     def reset_current(self, raw_host_id: str, session_id: str) -> None:
         """Discard whatever a prior turn left and open a fresh stack on this session."""
@@ -42,30 +41,47 @@ class SessionTracker:
         self._clear_ignored_returns(raw_host_id)
 
     def mark_ignored_return(self, raw_host_id: str, session_id: str) -> None:
-        """Record that ONE dispatch return of this conversation must not conclude its step.
+        """Record a sub-agent whose dispatch return must not conclude the step (H6).
 
         Adapter spec H6: the return of a sub-agent whose worker-session registration was
         refused — or that was never registered as the step's worker — does not trigger
-        `check-step-postconditions`; the step stays in flight for its bound worker session.
+        `check-step-postconditions`. The marker stays PENDING until that very sub-agent's
+        `SubagentStop` (`arm_ignored_return`). One FILE per sub-agent, moved and consumed
+        atomically, so concurrent hook processes never lose or share a marker.
         """
-        pending = self._read_ignored_returns()
-        pending.setdefault(raw_host_id, []).append(session_id)
-        self._write_ignored_returns(pending)
+        pending = self._ignored_returns_dir(raw_host_id) / "pending"
+        pending.mkdir(parents=True, exist_ok=True)
+        (pending / _safe_component(session_id)).touch()
+
+    def arm_ignored_return(self, raw_host_id: str, session_id: str) -> bool:
+        """At that sub-agent's `SubagentStop`, make its marker consumable by the next return.
+
+        The host fires a sub-agent's `SubagentStop` before the `PostToolUse` of that same
+        dispatch (I13(e)), so an armed marker always belongs to a sub-agent that has already
+        stopped — never to the bound worker, which is never marked.
+        """
+        directory = self._ignored_returns_dir(raw_host_id)
+        name = _safe_component(session_id)
+        returned = directory / "returned"
+        returned.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(directory / "pending" / name, returned / name)
+        except FileNotFoundError:
+            return False
+        return True
 
     def consume_ignored_return(self, raw_host_id: str) -> bool:
-        """Consume one pending ignored return of this conversation, if there is one.
-
-        The host fires a sub-agent's `SubagentStop`, then its dispatch return, only after
-        that sub-agent started (I13(e)), so while the step's bound worker runs, every
-        dispatch return of this conversation belongs to an ignored sub-agent.
-        """
-        pending = self._read_ignored_returns()
-        queue = pending.get(raw_host_id)
-        if not queue:
+        """Consume one armed ignored return of this conversation, if any (atomic unlink)."""
+        returned = self._ignored_returns_dir(raw_host_id) / "returned"
+        if not returned.is_dir():
             return False
-        queue.pop(0)
-        self._write_ignored_returns(pending)
-        return True
+        for marker in sorted(returned.iterdir()):
+            try:
+                marker.unlink()
+            except FileNotFoundError:
+                continue
+            return True
+        return False
 
     def reset_unregistered(self, raw_host_id: str, session_id: str) -> None:
         """Open this turn as UNREGISTERED: its `start-session` failed (fail closed)."""
@@ -113,20 +129,12 @@ class SessionTracker:
         return stack[0] if stack else None
 
     def _clear_ignored_returns(self, raw_host_id: str) -> None:
-        pending = self._read_ignored_returns()
-        if pending.pop(raw_host_id, None) is not None:
-            self._write_ignored_returns(pending)
+        shutil.rmtree(self._ignored_returns_dir(raw_host_id), ignore_errors=True)
 
-    def _read_ignored_returns(self) -> MutableMapping[str, list[str]]:
-        if not self._ignored_returns_path.exists():
-            return {}
-        recorded: Any = json.loads(self._ignored_returns_path.read_text(encoding="utf-8"))
-        return {key: list(value) for key, value in recorded.items()}
-
-    def _write_ignored_returns(self, pending: MutableMapping[str, list[str]]) -> None:
-        self._ignored_returns_path.parent.mkdir(parents=True, exist_ok=True)
-        self._ignored_returns_path.write_text(
-            json.dumps(pending, indent=2, sort_keys=True), encoding="utf-8"
+    def _ignored_returns_dir(self, raw_host_id: str) -> Path:
+        return (
+            self._store_path.with_name(f"{self._store_path.stem}.ignored-returns")
+            / _safe_component(raw_host_id)
         )
 
     def _read_stacks(self) -> MutableMapping[str, list[str]]:
@@ -140,6 +148,13 @@ class SessionTracker:
         self._store_path.write_text(
             json.dumps(stacks, indent=2, sort_keys=True), encoding="utf-8"
         )
+
+
+def _safe_component(identifier: str) -> str:
+    """Refuse an identifier that could escape the tracker's marker directory."""
+    if not identifier or "/" in identifier or "\\" in identifier or identifier.startswith("."):
+        raise ValueError(f"unsafe identifier: {identifier!r}")
+    return identifier
 
 
 __all__ = ["UNREGISTERED_PREFIX", "SessionTracker", "is_unregistered"]

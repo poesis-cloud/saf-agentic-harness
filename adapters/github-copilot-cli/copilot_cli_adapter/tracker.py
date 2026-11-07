@@ -13,7 +13,6 @@ import json
 import os
 import shutil
 import tempfile
-import uuid
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterator
@@ -85,31 +84,47 @@ class SessionTracker:
         self._path(host_id).unlink(missing_ok=True)
         self.clear_ignored_returns(host_id)
 
-    def mark_ignored_return(self, dispatcher_host_id: str, agent_host_id: str | None) -> None:
-        """Record that ONE dispatch return of this dispatcher must not conclude its step.
+    def mark_ignored_return(self, dispatcher_host_id: str, agent_host_id: str) -> None:
+        """Record a sub-agent whose return must not conclude its dispatcher's step.
 
         Adapter spec H6: the return of a sub-agent whose worker-session registration was
         refused — or that was never registered as the step's worker — does not trigger
-        `check-step-postconditions`. One marker FILE per such sub-agent, so concurrent hook
-        processes never lose each other's marks.
+        `check-step-postconditions`. The marker stays PENDING until that very sub-agent
+        stops (`arm_ignored_return`). One FILE per sub-agent, moved and consumed
+        atomically, so concurrent hook processes never lose or share a marker.
+        """
+        pending = self._ignored_returns_dir / _safe_component(dispatcher_host_id) / "pending"
+        pending.mkdir(parents=True, exist_ok=True)
+        (pending / _safe_component(agent_host_id)).touch()
+
+    def arm_ignored_return(self, dispatcher_host_id: str, agent_host_id: str) -> bool:
+        """At that sub-agent's own stop, make its marker consumable by the next return.
+
+        The host fires a sub-agent's `subagentStop` before the dispatcher's return of that
+        same dispatch (host fact 6), so an armed marker always belongs to a sub-agent that
+        has already stopped — never to the bound worker, which is never marked.
         """
         directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        name = _safe_component(agent_host_id) if agent_host_id else f"unnamed-{uuid.uuid4().hex}"
-        (directory / name).touch()
+        name = _safe_component(agent_host_id)
+        returned = directory / "returned"
+        returned.mkdir(parents=True, exist_ok=True)
+        try:
+            os.replace(directory / "pending" / name, returned / name)
+        except FileNotFoundError:
+            return False
+        return True
 
     def consume_ignored_return(self, dispatcher_host_id: str) -> bool:
-        """Consume one recorded ignored return of this dispatcher, if any is pending.
+        """Consume one armed ignored return of this dispatcher, if any.
 
-        The host fires a sub-agent's return after that sub-agent started (host fact 6), so
-        while the step's bound worker runs, every return of this dispatcher belongs to an
-        ignored sub-agent and finds its marker. Consumption is an atomic unlink: two
-        concurrent returns never consume the same marker.
+        While the step's bound worker runs, every return of this dispatcher is that of a
+        stopped, ignored sub-agent, whose marker is armed. Consumption is an atomic
+        unlink: two concurrent returns never consume the same marker.
         """
-        directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
-        if not directory.is_dir():
+        returned = self._ignored_returns_dir / _safe_component(dispatcher_host_id) / "returned"
+        if not returned.is_dir():
             return False
-        for marker in sorted(directory.iterdir()):
+        for marker in sorted(returned.iterdir()):
             try:
                 marker.unlink()
             except FileNotFoundError:

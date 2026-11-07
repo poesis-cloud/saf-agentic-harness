@@ -1324,11 +1324,16 @@ sub-agent is the session of a refused registration (function 0 returned an error
 `worker-session-bound`), or that the adapter never registered as the step's worker, does NOT
 trigger `check-step-postconditions`: it passes through, the step stays in flight for its bound
 worker session, and that worker's return concludes it (core function 10, Trigger). This
-`PostToolUse` names no sub-agent (I7), but `SubagentStart` does (`agent_id`): when H1 does not
-register the sub-agent as the step's worker, it records one pending ignored return for the
-conversation, and H6 consumes it instead of evaluating. Every sub-agent's return follows its
-own `SubagentStart` (I13(e)), so while the bound worker runs, every dispatch return of the
-conversation belongs to such a sub-agent. The record is per turn: H0 and `Stop` drop it.
+`PostToolUse` names no sub-agent (I7), but `SubagentStart` and `SubagentStop` do
+(`agent_id`). When H1 does not register the sub-agent as the step's worker, it records a
+pending marker for it; that sub-agent's own `SubagentStop` arms the marker; H6 consumes one
+armed marker instead of evaluating. A sub-agent's `SubagentStop` fires before the
+`PostToolUse` of its own dispatch (I13(e)), so a skipped return always follows the stop of a
+sub-agent that was never the step's worker: while the bound worker runs, every dispatch
+return is skipped, and the bound worker's return is evaluated as soon as no such stopped
+sub-agent's return is outstanding. One marker file per sub-agent, moved and consumed
+atomically, so concurrent hook processes never lose or share one. Markers are per turn: H0
+and `Stop` drop them.
 
 **Out** (stdout, exit 0)
 

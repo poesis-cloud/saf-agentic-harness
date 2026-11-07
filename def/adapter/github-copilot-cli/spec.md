@@ -324,13 +324,16 @@ own permission flow still applies to what the harness lets through.
     `worker-session-bound`), or that the adapter never registered as the step's worker, does
     NOT trigger `check-step-postconditions`: the step stays in flight for its bound worker
     session, and that worker's return concludes it (core function 10, Trigger). The
-    `postToolUse(task)` names no sub-agent, but `subagentStart` does (`agentId`): when H1
-    does not register the sub-agent as the step's worker, it records one pending ignored
-    return for the dispatcher (one marker file per sub-agent, beside the session records),
-    and H6 consumes one instead of evaluating. Every sub-agent's return follows its own
-    `subagentStart` (host fact 6), so while the bound worker runs, every return of the
-    dispatcher belongs to such a sub-agent. Closing the dispatcher's session, or a new turn
-    on its host session, drops its pending markers.
+    `postToolUse(task)` names no sub-agent, but `subagentStart` and `subagentStop` do
+    (`agentId`). When H1 does not register the sub-agent as the step's worker, it records a
+    pending marker for it under the dispatcher; that sub-agent's own `subagentStop` arms the
+    marker; H6 consumes one armed marker instead of evaluating. A sub-agent's `subagentStop`
+    fires before the dispatcher's `postToolUse(task)` of that dispatch (host fact 6), so a
+    skipped return always follows the stop of a sub-agent that was never the step's worker:
+    while the bound worker runs, every return is skipped, and the bound worker's return is
+    evaluated as soon as no such stopped sub-agent's return is outstanding. One marker file
+    per sub-agent, beside the session records, moved and consumed atomically. Closing the
+    dispatcher's session, or a new turn on its host session, drops its markers.
 - **H0 fallback:** if the session's context never landed (no `userPromptTransformed` firing),
   the first `postToolUse` appends it as short load directives, which fit the 10 KB cap.
 

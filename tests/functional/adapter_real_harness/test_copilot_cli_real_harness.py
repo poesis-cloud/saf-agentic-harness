@@ -193,3 +193,51 @@ def test_a_refused_duplicate_returning_first_never_concludes_the_bound_workers_s
     assert outcome["promotion"]["outcome"] == "promoted"
     assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
     assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"
+
+
+def test_the_bound_worker_returning_before_the_refused_one_concludes_the_step_at_once(
+    real: RealHarness,
+) -> None:
+    """Live trial T1, the other order: the bound worker A returns while the refused
+    duplicate B still runs. Adapter spec H6: A's return concludes and promotes the step at
+    once — only a STOPPED ignored sub-agent's return is skipped — and B's later return
+    evaluates nothing."""
+    artifact = str(real.workspace_dir / REPORT_REF)
+    cwd = str(real.workspace_dir)
+    shell = "powershell" if sys.platform == "win32" else "bash"
+    worker_a, worker_b = "aaaaaaaa-0000-4000-8000-00000000000a", "bbbbbbbb-0000-4000-8000-00000000000b"
+    task = {"agent_type": ACTOR, "prompt": "p"}
+
+    _fire(real, "userPromptSubmitted", {"sessionId": HOST, "prompt": "go", "timestamp": 1, "cwd": cwd}, ORCHESTRATOR)
+    _fire(real, "preToolUse", {"sessionId": HOST, "cwd": cwd, "toolCalls": [
+        {"id": "r", "name": shell, "args": {
+            "command": f"python {real.harness_root / 'harness.py'} resolve-step --workflow-slug {WORKFLOW}",
+            "description": "resolve"}}]})
+    _fire(real, "subagentStart", {"sessionId": HOST, "agentId": worker_a, "agentType": ACTOR, "timestamp": 2})
+    _fire(real, "subagentStart", {"sessionId": HOST, "agentId": worker_b, "agentType": ACTOR, "timestamp": 3})
+    write = {"sessionId": worker_a, "agentId": worker_a, "agentType": ACTOR, "cwd": cwd, "toolCalls": [
+        {"id": "w", "name": "create", "args": {"path": artifact, "file_text": REPORT_BYTES}}]}
+    assert not _denied(_fire(real, "preToolUse", write))
+    real.write_report()
+    _fire(real, "postToolUse", {"sessionId": worker_a, "timestamp": 4, "toolName": "create",
+                                "toolArgs": {"path": artifact, "file_text": REPORT_BYTES},
+                                "toolResult": {"resultType": "success", "textResultForLlm": "ok"}})
+    (step_ref,) = real.step_refs()
+
+    _fire(real, "agentStop", {"sessionId": worker_a, "stopReason": "end_turn", "timestamp": 5})
+    _fire(real, "subagentStop", {"sessionId": HOST, "agentId": worker_a, "agentType": ACTOR,
+                                 "stopReason": "end_turn", "timestamp": 6})
+    _fire(real, "postToolUse", {"sessionId": HOST, "timestamp": 7, "toolName": "task", "toolArgs": task,
+                                "toolResult": {"resultType": "success", "textResultForLlm": "a"}})
+
+    (outcome,) = _outcomes(real)
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
+
+    _fire(real, "agentStop", {"sessionId": worker_b, "stopReason": "end_turn", "timestamp": 8})
+    _fire(real, "subagentStop", {"sessionId": HOST, "agentId": worker_b, "agentType": ACTOR,
+                                 "stopReason": "end_turn", "timestamp": 9})
+    _fire(real, "postToolUse", {"sessionId": HOST, "timestamp": 10, "toolName": "task", "toolArgs": task,
+                                "toolResult": {"resultType": "success", "textResultForLlm": "b"}})
+
+    assert len(_outcomes(real)) == 1

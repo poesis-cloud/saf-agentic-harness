@@ -261,7 +261,6 @@ class Adapter:
         agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         actor = self._binding.probe(hook.payload, self._binding.host_step_actor_keys)
         if agent_id is None or actor is None:
-            self._ignore_return(parent_host, parent, None)
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
@@ -308,7 +307,7 @@ class Adapter:
         return renderer.step_context(context)
 
     def _ignore_return(
-        self, dispatcher_host: str, dispatcher: SessionRecord, step_host: str | None
+        self, dispatcher_host: str, dispatcher: SessionRecord, step_host: str
     ) -> None:
         """Mark this sub-agent's return as not concluding the dispatcher's step (H6).
 
@@ -784,7 +783,13 @@ class Adapter:
     def _close_subagent(self, hook: HookInput) -> Decision:
         agent_id = self._binding.probe(hook.payload, self._binding.host_worker_session_keys)
         if agent_id is not None:
-            self._close(sanitize_identifier(str(agent_id)))
+            step_host = sanitize_identifier(str(agent_id))
+            dispatcher = hook.dispatcher_host_id
+            if dispatcher:
+                # H6: a sub-agent recorded as ignored at H1 has now stopped, so the
+                # dispatcher's next return is its own (host fact 6) and is not evaluated.
+                self._tracker.arm_ignored_return(dispatcher, step_host)
+            self._close(step_host)
         return None
 
     def _close_host_session(self, hook: HookInput) -> Decision:

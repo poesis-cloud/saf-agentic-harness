@@ -180,3 +180,40 @@ def test_a_refused_duplicate_returning_first_never_concludes_the_bound_workers_s
     assert outcome["promotion"]["outcome"] == "promoted"
     assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
     assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"
+
+
+def test_the_bound_worker_returning_before_the_duplicate_concludes_the_step_at_once(
+    real: RealHarness,
+) -> None:
+    """Live trial T1, the other order: the bound worker A returns while the never-registered
+    duplicate B still runs. Adapter spec H6: A's return concludes and promotes the step at
+    once — only a STOPPED ignored sub-agent's return is skipped — and B's later return
+    evaluates nothing."""
+    write_input = {"filePath": str(real.workspace_dir / REPORT_REF), "content": REPORT_BYTES}
+    _fire(real, "UserPromptSubmit", user_prompt_submit(), ORCHESTRATOR)
+    _fire(
+        real,
+        "PreToolUse",
+        pre_tool_use(
+            "run_in_terminal",
+            {"command": f"python harness.py resolve-step --workflow-slug {WORKFLOW}", "isBackground": False},
+        ),
+    )
+    _fire(real, "SubagentStart", subagent_start(agent_id="worker-a", agent_type=ACTOR))
+    _fire(real, "SubagentStart", subagent_start(agent_id="worker-b", agent_type=ACTOR))
+    assert _permission(_fire(real, "PreToolUse", pre_tool_use("create_file", write_input))) != "deny"
+    real.write_report()
+    _fire(real, "PostToolUse", post_tool_use("create_file", write_input))
+    (step_ref,) = real.step_refs()
+
+    _fire(real, "SubagentStop", subagent_stop(agent_id="worker-a"))
+    _fire(real, "PostToolUse", post_tool_use("runSubagent", dispatch_tool_input(ACTOR)))
+
+    (outcome,) = _orchestrator_outcomes(real)
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-parse", "HEAD") == real.git("rev-parse", step_ref)
+
+    _fire(real, "SubagentStop", subagent_stop(agent_id="worker-b"))
+    _fire(real, "PostToolUse", post_tool_use("runSubagent", dispatch_tool_input(ACTOR)))
+
+    assert len(_orchestrator_outcomes(real)) == 1

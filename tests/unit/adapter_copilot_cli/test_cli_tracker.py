@@ -41,14 +41,21 @@ def test_unsafe_ids_are_refused(tmp_path: Path, unsafe: str) -> None:
         SessionTracker(tmp_path).read(unsafe)
 
 
-def test_an_ignored_return_is_consumed_exactly_once(tmp_path) -> None:
+def test_an_ignored_return_is_consumable_only_once_its_sub_agent_stopped(tmp_path) -> None:
     """Adapter spec H6: each sub-agent whose registration was refused (or never happened)
-    accounts for exactly ONE dispatch return of its dispatcher that is not evaluated."""
+    accounts for exactly ONE dispatcher return that is not evaluated — and only once that
+    very sub-agent has stopped, so a bound worker returning first is still evaluated."""
     tracker = SessionTracker(tmp_path)
     tracker.mark_ignored_return("host", "worker-b")
-    tracker.mark_ignored_return("host", None)
+    tracker.mark_ignored_return("host", "worker-c")
 
-    assert [tracker.consume_ignored_return("host") for _ in range(3)] == [True, True, False]
+    assert tracker.consume_ignored_return("host") is False
+    assert tracker.arm_ignored_return("host", "worker-a") is False
+    assert tracker.arm_ignored_return("host", "worker-b") is True
+    assert tracker.arm_ignored_return("host", "worker-b") is False
+    assert [tracker.consume_ignored_return("host") for _ in range(2)] == [True, False]
+    assert tracker.arm_ignored_return("host", "worker-c") is True
+    assert tracker.consume_ignored_return("host") is True
     assert tracker.consume_ignored_return("other-host") is False
 
 
@@ -57,9 +64,11 @@ def test_closing_a_session_forgets_its_pending_ignored_returns(tmp_path) -> None
     turn on the same host session) drops it, so it never swallows a later turn's return."""
     tracker = SessionTracker(tmp_path)
     tracker.mark_ignored_return("host", "worker-b")
+    tracker.arm_ignored_return("host", "worker-b")
     tracker.delete("host")
     assert tracker.consume_ignored_return("host") is False
 
     tracker.mark_ignored_return("host", "worker-c")
+    tracker.arm_ignored_return("host", "worker-c")
     tracker.clear_ignored_returns("host")
     assert tracker.consume_ignored_return("host") is False

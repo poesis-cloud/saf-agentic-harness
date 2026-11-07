@@ -1514,12 +1514,52 @@ class TestFailedRegistration:
         )
         assert len(runner.find_calls("check-step-postconditions")) == 1
 
+    def test_a_bound_worker_returning_before_the_refused_one_is_evaluated(
+        self, make_adapter, tracker: SessionTracker
+    ) -> None:
+        """Adapter spec H6: only a STOPPED ignored sub-agent's return is skipped. When the
+        bound worker returns while the refused sub-agent still runs, its return concludes
+        the step at once; the refused sub-agent's later return evaluates nothing."""
+        runner = FakeCommandRunner(
+            reports=queue_reports(
+                start_session=[
+                    build_error_report(
+                        "start-session", code="worker-session-bound", message="already bound"
+                    )
+                ]
+            )
+        )
+        adapter = make_adapter(runner)
+        tracker.reset_current(HOST_SESSION, TURN_SESSION)
+        adapter.handle_hook_event(_event(_subagent_start_payload()))
+
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
+        adapter.handle_hook_event(
+            _event(
+                {
+                    "timestamp": TIMESTAMP,
+                    "hook_event_name": "SubagentStop",
+                    "session_id": HOST_SESSION,
+                    "agent_id": "subagent-invocation-id",
+                }
+            )
+        )
+        adapter.handle_hook_event(
+            _event(_post_tool_payload("runSubagent", {"agentName": "qa-engineer"}))
+        )
+        assert len(runner.find_calls("check-step-postconditions")) == 1
+
     def test_a_new_turn_forgets_a_pending_ignored_return(
         self, make_adapter, tracker: SessionTracker
     ) -> None:
         """A pending ignored return belongs to its turn: H0's fresh stack drops it."""
         tracker.reset_current(HOST_SESSION, TURN_SESSION)
         tracker.mark_ignored_return(HOST_SESSION, "stale")
+        tracker.arm_ignored_return(HOST_SESSION, "stale")
         tracker.reset_current(HOST_SESSION, TURN_SESSION)
 
         assert tracker.consume_ignored_return(HOST_SESSION) is False

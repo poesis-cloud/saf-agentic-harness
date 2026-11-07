@@ -189,7 +189,6 @@ class Adapter:
         if parent_session_id is None:
             return self._renderer.render_pass_through()
         if agent_id is None or actor is None:
-            self._ignore_return(host_id, "unnamed")
             return self._renderer.render_pass_through()
         session_id = derive_worker_session_id(str(agent_id))
         if is_unregistered(parent_session_id):
@@ -438,6 +437,9 @@ class Adapter:
             if agent_id is None:
                 return self._renderer.render_pass_through()
             ending_session_id = derive_worker_session_id(str(agent_id))
+            # H6: a sub-agent recorded as ignored at H1 has now stopped, so the next
+            # dispatch return is its own (I13(e)) and is not evaluated.
+            self._tracker.arm_ignored_return(host_id, ending_session_id)
             current = self._tracker.resolve_current(host_id)
             if current == f"{UNREGISTERED_PREFIX}{ending_session_id}":
                 self._tracker.pop_current(host_id)
