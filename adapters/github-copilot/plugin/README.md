@@ -33,6 +33,7 @@ section *Plugin mode*.
 | --- | --- |
 | `SAF_HARNESS_PYTHON` | Use this interpreter as is: nothing is provisioned. It must import the harness requirements. |
 | `SAF_AGENTIC_REGISTRY_DIR` | The per-user registry folder (default `%LOCALAPPDATA%\saf-agentic\registry`, or `$XDG_STATE_HOME/saf-agentic/registry`). |
+| `SAF_AGENTIC_REGISTRY_WAIT_SEC` | How long the stable launcher waits for the registry (default 8). |
 | `PIP_INDEX_URL`, `UV_INDEX_URL` | The package index to provision from. |
 
 Auto-update is off unless you opt in for the marketplace. Updating the plugin during a session
