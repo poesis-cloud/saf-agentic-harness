@@ -50,7 +50,7 @@ SCOPED_EVENTS = frozenset({"userPromptSubmitted", "userPromptTransformed"})
 SESSION_START = "sessionStart"
 GATING_EVENT = "preToolUse"
 SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$")
-SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+UNSAFE_ID_CHARACTER = re.compile(r"[^a-z0-9-]")
 
 NOT_A_WORKSPACE = "this folder is not a SAF workspace; ask me to initialise it"
 SELECT_COPILOT = "select Session Target: Copilot"
@@ -104,8 +104,11 @@ def write_entry(path: Path, value: str) -> None:
 
 
 def safe_id(value: Any) -> str | None:
-    """A host session id usable as a file name, or None."""
-    return value if isinstance(value, str) and SAFE_ID.match(value) else None
+    """A host session id as the adapter names its records: lowercase, every character
+    outside `[a-z0-9-]` mapped to `-` (`sanitize_identifier`). None when absent."""
+    if not isinstance(value, str) or not value:
+        return None
+    return UNSAFE_ID_CHARACTER.sub("-", value.lower())
 
 
 def is_local_runtime(payload: Mapping[str, Any]) -> bool:

@@ -450,7 +450,7 @@ def no_python(rig: PluginRig, tmp_path: Path) -> dict[str, str]:
         return environment
     tools = tmp_path / "tools"
     tools.mkdir()
-    for name in ("cat", "sed", "tr", "dirname", "mkdir", "head", "mv", "cp", "sh"):
+    for name in ("cat", "sed", "tr", "grep", "dirname", "mkdir", "head", "mv", "cp", "sh"):
         located = shutil.which(name)
         if located:
             (tools / name).symlink_to(located)
@@ -518,4 +518,37 @@ def test_without_python_a_json_escaped_folder_is_still_scanned(
     )
 
     assert done.returncode == 2
+
+
+def test_an_uppercase_session_id_keys_the_same_records_everywhere(
+    rig: PluginRig, no_python: dict[str, str]
+) -> None:
+    """The launcher, the shims and the adapter name a host session's files alike."""
+    upper = HOST.upper()
+    assert rig.launcher("userPromptSubmitted",
+                        dict(rig.payload(prompt="go", timestamp=1), sessionId=upper),
+                        "--framework", FRAMEWORK, "--agent", ORCHESTRATOR).code == 0
+    assert (rig.registry / "intents" / HOST).is_file()
+    assert (rig.data / "state" / "github-copilot" / "sessions" / f"{HOST}.json").is_file()
+
+    run = rig.script("saf-hook", "preToolUse",
+                     payload=dict(rig.shell_call("echo hi", folder=rig.elsewhere),
+                                  sessionId=upper),
+                     environment=no_python)
+
+    assert run.code == 2
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="the PowerShell shim parses the payload as JSON")
+def test_without_python_a_nested_member_never_stands_in_for_the_top_level_one(
+    rig: PluginRig, no_python: dict[str, str]
+) -> None:
+    (rig.registry / "intents").mkdir(parents=True)
+    (rig.registry / "intents" / HOST).write_text("orchestrator\n", encoding="utf-8")
+    payload = dict(rig.shell_call("echo hi", folder=rig.elsewhere))
+    payload["toolCalls"][0]["args"].update(sessionId="someone-else", cwd=str(rig.elsewhere))
+
+    run = rig.script("saf-hook", "preToolUse", payload=payload, environment=no_python)
+
+    assert run.code == 2
 

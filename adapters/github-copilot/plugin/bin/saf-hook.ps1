@@ -32,7 +32,8 @@ $raw = [Console]::In.ReadToEnd()
 $payload = $null
 try { $payload = $raw | ConvertFrom-Json } catch { $payload = $null }
 $registry = if ($env:SAF_AGENTIC_REGISTRY_DIR) { $env:SAF_AGENTIC_REGISTRY_DIR } else { Join-Path $env:LOCALAPPDATA 'saf-agentic\registry' }
-$session = if ($payload -and $payload.sessionId -is [string] -and $payload.sessionId -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') { $payload.sessionId } else { '' }
+# Named as the adapter names its records: lowercase, [^a-z0-9-] mapped to '-'.
+$session = if ($payload -and $payload.sessionId -is [string] -and $payload.sessionId) { $payload.sessionId.ToLowerInvariant() -replace '[^a-z0-9-]', '-' } else { '' }
 $remedy = 'Python >= 3.10 was not found: install it, or set SAF_HARNESS_PYTHON, then start a new session'
 switch ($hookEvent) {
     { $_ -in 'userPromptSubmitted', 'userPromptTransformed' } {

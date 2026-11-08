@@ -21,13 +21,16 @@ for candidate in "${SAF_HARNESS_PYTHON:-}" python3 python; do
 done
 
 payload=$(cat)
+# The FIRST occurrence of a string member: the host writes its top-level members before the
+# tool arguments, whose nested members must never stand in for them.
 field() {
     printf '%s' "$payload" | tr -d '\r\n' |
-        sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p"
+        grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n 1 |
+        sed "s/^\"$1\"[[:space:]]*:[[:space:]]*\"\(.*\)\"\$/\1/"
 }
 registry=${SAF_AGENTIC_REGISTRY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/saf-agentic/registry}
-session=$(field sessionId)
-case $session in '' | .* | */* | *\\*) session='' ;; esac
+# Named as the adapter names its records: lowercase, [^a-z0-9-] mapped to '-'.
+session=$(field sessionId | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9-]/-/g')
 remedy='Python >= 3.10 was not found: install it, or set SAF_HARNESS_PYTHON, then start a new session'
 agent=''
 shift 2>/dev/null

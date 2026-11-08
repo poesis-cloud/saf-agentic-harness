@@ -25,7 +25,8 @@ jobs:
     verify:
         name: Verify (Python ${{ matrix.python-version }}${{ matrix.os == 'windows-latest' && ', Windows' || '' }})
         runs-on: ${{ matrix.os }}
-        timeout-minutes: 20
+        # Windows runs the plugin suite through real PowerShell processes: allow for it.
+        timeout-minutes: 35
         strategy:
             fail-fast: false
             matrix:

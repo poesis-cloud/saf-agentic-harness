@@ -104,9 +104,23 @@ def test_registry_entries_are_one_line_and_written_by_rename(tmp_path: Path) -> 
     assert LAUNCHER.read_entry(tmp_path / "absent") is None
 
 
-@pytest.mark.parametrize("unsafe", ["", "../x", "a/b", "a\\b", ".hidden", 7, None])
-def test_an_unsafe_host_session_id_names_no_registry_entry(unsafe: object) -> None:
-    assert LAUNCHER.safe_id(unsafe) is None
+@pytest.mark.parametrize("absent", ["", 7, None])
+def test_an_absent_host_session_id_names_no_registry_entry(absent: object) -> None:
+    assert LAUNCHER.safe_id(absent) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "named"),
+    [("../x", "---x"), ("A/b\\C", "a-b-c"), (".hidden", "-hidden"),
+     ("1D793D07-ADC6", "1d793d07-adc6")],
+)
+def test_a_host_session_id_is_named_as_the_adapter_names_its_records(
+    raw: str, named: str
+) -> None:
+    """The launcher, the shims and the adapter's tracker key one host session alike."""
+    from github_copilot_adapter.payload import sanitize_identifier
+
+    assert LAUNCHER.safe_id(raw) == named == sanitize_identifier(raw)
 
 
 class TestProvisioning:
