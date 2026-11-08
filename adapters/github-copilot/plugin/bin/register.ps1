@@ -1,6 +1,7 @@
 # The harness plugin's sessionStart registration (adapter spec, Plugin mode: The registry).
 # PowerShell only, never Python: it records this harness version's root and data folder,
 # installs the stable launcher, and names this version the latest. Every write is a rename.
+$ErrorActionPreference = 'Stop'
 $root = if ($env:PLUGIN_ROOT) { $env:PLUGIN_ROOT } else { Split-Path -Parent $PSScriptRoot }
 $null = [Console]::In.ReadToEnd()
 $registry = if ($env:SAF_AGENTIC_REGISTRY_DIR) { $env:SAF_AGENTIC_REGISTRY_DIR } else { Join-Path $env:LOCALAPPDATA 'saf-agentic\registry' }

@@ -216,9 +216,10 @@ class Adapter:
         Adapter spec, Session identity: "the plugin was updated; start a new session".
         Closure (H7) still runs: core function 11 is exempt from the version check.
         """
-        if self._harness_version is None or not hook.host_id:
+        host_id = hook.dispatcher_host_id if hook.event == SUBAGENT_START else hook.host_id
+        if self._harness_version is None or not host_id:
             return None
-        record = self._tracker.read(hook.host_id)
+        record = self._tracker.read(host_id)
         if record is None or record.harness_version == self._harness_version:
             return None
         self._diagnostic(

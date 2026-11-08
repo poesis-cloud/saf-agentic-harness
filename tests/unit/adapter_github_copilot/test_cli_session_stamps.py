@@ -169,3 +169,20 @@ def test_the_entry_rebuilds_the_adapter_on_the_recorded_workspace(tmp_path: Path
 
     assert code == 0
     assert built == ["/from/arguments", "/fixed/workspace"]
+
+
+def test_a_nested_h1_is_refused_on_its_dispatchers_version(rig: Rig) -> None:
+    """A nested `subagentStart` carries an unrelated `sessionId`: the version check reads
+    the dispatcher (`parentAgentId`), as the workspace lookup does."""
+    _versioned(rig, version="1.0.0-alpha.1").open_turn()
+    rig = _versioned(rig)
+    calls_before = len(rig.runner.calls)
+
+    decision = rig.fire("subagentStart", {
+        "sessionId": "unrelated-nested-id", "parentAgentId": HOST, "agentId": SUBAGENT,
+        "agentType": "builder", "agentName": "builder", "timestamp": 2,
+    })
+
+    assert decision is None
+    assert len(rig.runner.calls) == calls_before
+    assert rig.tracker.read(SUBAGENT) is None

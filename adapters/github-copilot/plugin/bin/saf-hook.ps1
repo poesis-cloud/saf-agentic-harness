@@ -46,13 +46,23 @@ switch ($hookEvent) {
         exit 0
     }
     'preToolUse' {
-        $governed = $session -and (Test-Path -LiteralPath (Join-Path (Join-Path $registry 'intents') $session) -PathType Leaf)
-        $folder = if ($payload -and $payload.cwd) { [string]$payload.cwd } else { (Get-Location).Path }
-        while (-not $governed -and $folder) {
-            if (Test-Path -LiteralPath (Join-Path $folder '.saf\workspace.yaml') -PathType Leaf) { $governed = $true }
-            $parent = Split-Path -Parent $folder
-            if (-not $parent -or $parent -eq $folder) { break }
-            $folder = $parent
+        $governed = $false
+        $state = if ($env:SAF_HARNESS_STATE_DIR) { $env:SAF_HARNESS_STATE_DIR } elseif ($env:PLUGIN_DATA) { Join-Path $env:PLUGIN_DATA 'state' } else { '' }
+        if ($session) {
+            # An orchestrator's intent, or a session the adapter recorded (a worker included).
+            if (Test-Path -LiteralPath (Join-Path (Join-Path $registry 'intents') $session) -PathType Leaf) { $governed = $true }
+            if ($state -and (Test-Path -LiteralPath (Join-Path $state "github-copilot\sessions\$session.json") -PathType Leaf)) { $governed = $true }
+        }
+        $folders = @((Get-Location).Path)
+        if ($payload -and $payload.cwd) { $folders = @([string]$payload.cwd) + $folders }
+        foreach ($start in $folders) {
+            $folder = $start
+            while (-not $governed -and $folder) {
+                if (Test-Path -LiteralPath (Join-Path $folder '.saf\workspace.yaml') -PathType Leaf) { $governed = $true }
+                $parent = Split-Path -Parent $folder
+                if (-not $parent -or $parent -eq $folder) { break }
+                $folder = $parent
+            }
         }
         if ($governed) {
             [Console]::Error.WriteLine("SAFe agentic harness: $remedy")

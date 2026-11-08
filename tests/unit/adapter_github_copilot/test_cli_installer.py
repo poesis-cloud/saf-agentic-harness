@@ -319,3 +319,44 @@ def test_a_refused_first_install_leaves_no_new_ancestor_folder(framework, tmp_pa
     monkeypatch.setattr(Path, "mkdir", failing_mkdir)
     assert _install("--framework-dir", str(framework), "--target-repo", str(repo)) == 1
     assert list(repo.iterdir()) == []
+
+
+def test_an_upgrade_replaces_the_block_the_github_copilot_cli_installer_wrote(
+    framework, bundle
+) -> None:
+    """A developer install made as `github-copilot-cli` upgrades in place: its managed block
+    is recognized and replaced, never refused as an unmanaged `hooks:` key."""
+    argv = ("--framework-dir", str(framework), "--bundle-dir", str(bundle))
+    assert _install(*argv) == 0
+    agent = bundle / "agents" / "scrum-master.agent.md"
+    current = agent.read_text(encoding="utf-8")
+    agent.write_text(
+        current.replace(INSTALL.BLOCK_OPEN, INSTALL.LEGACY_BLOCK_OPEN).replace(
+            INSTALL.BLOCK_CLOSE, INSTALL.LEGACY_BLOCK_CLOSE
+        ),
+        encoding="utf-8",
+    )
+
+    assert _install(*argv) == 0
+
+    upgraded = agent.read_text(encoding="utf-8")
+    assert upgraded == current
+    assert INSTALL.LEGACY_BLOCK_OPEN not in upgraded
+
+
+def test_an_upgrade_retires_the_hook_file_the_github_copilot_cli_installer_wrote(
+    framework, tmp_path
+) -> None:
+    repo = tmp_path / "repo"
+    hooks = repo / ".github" / "hooks"
+    hooks.mkdir(parents=True)
+    legacy = hooks / INSTALL.LEGACY_HOOKS_FILENAME
+    legacy.write_text("{}", encoding="utf-8")
+    unrelated = hooks / "someone-elses.json"
+    unrelated.write_text("{}", encoding="utf-8")
+
+    assert _install("--framework-dir", str(framework), "--target-repo", str(repo),
+                    "--skip-agents") == 0
+
+    assert (hooks / INSTALL.HOOKS_FILENAME).is_file()
+    assert not legacy.exists() and unrelated.is_file()

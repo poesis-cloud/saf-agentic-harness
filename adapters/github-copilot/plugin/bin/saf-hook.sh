@@ -46,14 +46,24 @@ case $event in
         ;;
     preToolUse)
         governed=''
-        if [ -n "$session" ] && [ -f "$registry/intents/$session" ]; then governed=1; fi
-        folder=$(field cwd)
-        [ -n "$folder" ] || folder=$PWD
-        while [ -z "$governed" ] && [ -n "$folder" ]; do
-            if [ -f "$folder/.saf/workspace.yaml" ]; then governed=1; fi
-            parent=$(dirname -- "$folder")
-            [ "$parent" = "$folder" ] && break
-            folder=$parent
+        state=${SAF_HARNESS_STATE_DIR:-${PLUGIN_DATA:+$PLUGIN_DATA/state}}
+        if [ -n "$session" ]; then
+            # An orchestrator's intent, or a session the adapter recorded (a worker included).
+            if [ -f "$registry/intents/$session" ]; then governed=1; fi
+            if [ -n "$state" ] && [ -f "$state/github-copilot/sessions/$session.json" ]; then
+                governed=1
+            fi
+        fi
+        # The payload's folder, its JSON escapes decoded where sh can (`\/`, `\\`), and the
+        # hook's own folder: the session's, so an undecodable path is still scanned.
+        cwd=$(field cwd | sed 's#\\/#/#g; s#\\\\#\\#g')
+        for folder in "$cwd" "$PWD"; do
+            while [ -z "$governed" ] && [ -n "$folder" ]; do
+                if [ -f "$folder/.saf/workspace.yaml" ]; then governed=1; fi
+                parent=$(dirname -- "$folder")
+                [ "$parent" = "$folder" ] && break
+                folder=$parent
+            done
         done
         if [ -n "$governed" ]; then
             printf 'SAFe agentic harness: %s\n' "$remedy" >&2

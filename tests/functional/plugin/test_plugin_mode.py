@@ -485,3 +485,37 @@ def test_without_python_a_selected_orchestrator_still_fails_closed(
                      environment=no_python)
 
     assert run.code == 2
+
+
+def test_without_python_a_recorded_worker_session_still_fails_closed(
+    rig: PluginRig, no_python: dict[str, str]
+) -> None:
+    """A worker the adapter recorded keeps its session governed even when its own folder is
+    unmarked: the shim consults the session's adapter record."""
+    worker = "ecdda9f8-7300-43cc-9fae-ad08c0456604"
+    record = rig.data / "state" / "github-copilot" / "sessions" / f"{worker}.json"
+    record.parent.mkdir(parents=True)
+    record.write_text(json.dumps({"workspace": str(rig.workspace)}), encoding="utf-8")
+
+    run = rig.script("saf-hook", "preToolUse",
+                     payload=dict(rig.shell_call("echo hi", folder=rig.elsewhere),
+                                  sessionId=worker),
+                     environment=no_python)
+
+    assert run.code == 2
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="JSON-escaped POSIX paths")
+def test_without_python_a_json_escaped_folder_is_still_scanned(
+    rig: PluginRig, no_python: dict[str, str]
+) -> None:
+    escaped = json.dumps(str(rig.workspace)).replace("/", "\\/")[1:-1]
+    payload = '{"sessionId": "s1", "cwd": "%s", "toolCalls": []}' % escaped
+    done = subprocess.run(
+        ["sh", str(rig.plugin / "bin" / "saf-hook.sh"), "preToolUse"],
+        input=payload.encode("utf-8"), capture_output=True,
+        env=child_environment(no_python), cwd=rig.elsewhere, timeout=60,
+    )
+
+    assert done.returncode == 2
+
