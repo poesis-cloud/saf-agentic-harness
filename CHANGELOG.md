@@ -6,6 +6,14 @@ GitHub pre-releases.
 
 ## Unreleased (v1.0.0-alpha.2)
 
+### Plugin fix
+
+- **The stable launcher no longer fails the first prompt of a new host session.** Hosts run
+  the first prompt hooks before the `sessionStart` registration has finished. The launcher
+  now waits for the registry (`SAF_AGENTIC_REGISTRY_WAIT_SEC`, 8 s) and, if it stays empty,
+  fails closed only in a SAF workspace; any other folder gets the "not a SAF workspace"
+  guidance.
+
 ### The harness plugin
 
 - **The harness installs as a Copilot plugin**, `poesis-saf-agentic-harness`, in the Agent

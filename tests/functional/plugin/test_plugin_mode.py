@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -72,6 +73,9 @@ class PluginRig:
         """No `SAF_HARNESS_PYTHON` and no provisioned environment: the runtime is missing."""
         return {key: value for key, value in self.environment.items()
                 if key != "SAF_HARNESS_PYTHON"}
+
+    def no_wait(self) -> dict[str, str]:
+        return dict(self.environment, SAF_AGENTIC_REGISTRY_WAIT_SEC="0")
 
     def launcher(self, event: str, payload: Mapping[str, Any], *arguments: str,
                  environment: Mapping[str, str] | None = None) -> Run:
@@ -208,10 +212,55 @@ def test_the_stable_launcher_without_a_registered_harness_fails_with_the_remedy(
     (rig.registry / "harness" / "latest").unlink()
 
     run = rig.script("launcher", "userPromptSubmitted", "--framework", FRAMEWORK, "--agent",
-                     ORCHESTRATOR, payload=rig.payload(), folder=rig.registry / "harness")
+                     ORCHESTRATOR, payload=rig.payload(), folder=rig.registry / "harness",
+                     environment=rig.no_wait())
 
     assert run.code != 0 and "harness plugin is not registered" in run.stderr
 
+
+def test_the_stable_launcher_tells_an_unmarked_folder_before_the_registry_is_populated(
+    rig: PluginRig,
+) -> None:
+    """The first prompt can run before `sessionStart` registers: no hard failure outside a
+    workspace, the guidance instead, and the orchestrator's intent still recorded."""
+    rig.register()
+    (rig.registry / "harness" / "latest").unlink()
+    launcher = rig.registry / "harness"
+    arguments = ("--framework", FRAMEWORK, "--agent", ORCHESTRATOR)
+
+    submitted = rig.script("launcher", "userPromptSubmitted", *arguments,
+                           payload=rig.payload(rig.elsewhere, prompt="hi"), folder=launcher,
+                           environment=rig.no_wait())
+    transformed = rig.script("launcher", "userPromptTransformed", *arguments,
+                             payload=rig.payload(rig.elsewhere, prompt="hi",
+                                                 transformedPrompt='say "hi"\nthen\\stop'),
+                             folder=launcher, environment=rig.no_wait())
+
+    assert (submitted.code, submitted.stdout.strip()) == (0, "")
+    assert transformed.code == 0
+    assert transformed.decision["modifiedTransformedPrompt"] == (
+        f'{NOT_A_WORKSPACE}\n\nsay "hi"\nthen\\stop')
+    assert (rig.registry / "intents" / HOST).read_text("utf-8").strip() == ORCHESTRATOR
+
+
+def test_the_stable_launcher_waits_for_a_registration_in_flight(rig: PluginRig) -> None:
+    """In a workspace, the fallback would fail closed: success proves the launcher waited."""
+    assert rig.hook("sessionStart", rig.payload(), index=0).code == 0
+    latest = rig.registry / "harness" / "latest"
+    version = latest.read_text("utf-8")
+    latest.unlink()
+    timer = threading.Timer(1.5, latest.write_text, (version,), {"encoding": "utf-8"})
+    timer.start()
+    try:
+        run = rig.script("launcher", "userPromptSubmitted", "--framework", FRAMEWORK,
+                         "--agent", ORCHESTRATOR, payload=rig.payload(prompt="go", timestamp=1),
+                         folder=rig.registry / "harness",
+                         environment=dict(rig.environment, SAF_AGENTIC_REGISTRY_WAIT_SEC="20"))
+    finally:
+        timer.join()
+
+    assert run.code == 0, run.stderr
+    assert (rig.data / "state" / "github-copilot" / "sessions" / f"{HOST}.json").is_file()
 
 def test_an_unpopulated_framework_entry_fails_closed_in_a_workspace(rig: PluginRig) -> None:
     shutil.rmtree(rig.registry / "frameworks")
