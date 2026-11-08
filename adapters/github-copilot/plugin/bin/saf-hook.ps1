@@ -4,7 +4,10 @@
 # the untouched payload. Without an interpreter it decides alone, without Git.
 $root = if ($env:PLUGIN_ROOT) { $env:PLUGIN_ROOT } else { Split-Path -Parent $PSScriptRoot }
 $launcher = Join-Path $root 'launcher.py'
-$probe = 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
+# A final (not pre-release), GIL-enabled CPython >= 3.10: the interpreters the lock's wheels
+# cover.
+# No double quote inside: Windows PowerShell 5.1 strips them from native arguments.
+$probe = 'import sys, sysconfig; sys.exit(0 if sys.version_info >= (3, 10) and sys.version_info.releaselevel == ''final'' and not sysconfig.get_config_var(''Py_GIL_DISABLED'') else 1)'
 $candidates = @()
 if ($env:SAF_HARNESS_PYTHON) { $candidates += , @($env:SAF_HARNESS_PYTHON) }
 $candidates += , @('py', '-3')

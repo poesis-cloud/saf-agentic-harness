@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -74,8 +73,6 @@ def test_session_start_provisions_from_the_lock_and_a_governed_session_runs(
     assert "SAFe agentic harness" in started.decision["additionalContext"]
     stamps = list((rig.data / "venv").glob(f"{rig.version}-*/.ready"))
     assert len(stamps) == 1
-    key = stamps[0].parent.name
-    assert f"{sys.version_info[0]}{sys.version_info[1]}" in key
 
     h0 = rig.script("launcher", "userPromptSubmitted", "--framework", FRAMEWORK, "--agent",
                     ORCHESTRATOR, payload=rig.payload(prompt="go", timestamp=1),

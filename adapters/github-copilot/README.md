@@ -60,7 +60,7 @@ opt in; a plugin updated during a session makes that session refuse further gove
 
 **Test it in VS Code** from a checkout: `make plugin` renders the plugin into `build/plugin`
 (it needs [`uv`](https://docs.astral.sh/uv/) to generate the lock), then
-`copilot plugin install build/plugin` makes it visible to VS Code as well, since VS Code loads
+`copilot plugin install ./build/plugin` makes it visible to VS Code as well, since VS Code loads
 the plugins the Copilot CLI installed.
 
 ## Developer install (`install.py`)

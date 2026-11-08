@@ -1,13 +1,15 @@
 #!/bin/sh
 # The harness plugin's hook shim (adapter spec, Plugin mode: Registration and the launcher).
 #   sh saf-hook.sh <event> [--framework <name>] [--agent <slug>]   (payload on stdin)
-# Finds Python >= 3.10 (SAF_HARNESS_PYTHON, python3, python) and runs launcher.py on the
+# Finds a usable Python >= 3.10 (SAF_HARNESS_PYTHON, python3, python) and runs launcher.py on the
 # untouched payload. Without an interpreter it decides alone, in shell and without Git.
 root=${PLUGIN_ROOT:-$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)}
 event=${1:-}
 
+# A final (not pre-release), GIL-enabled CPython >= 3.10: the interpreters the lock's wheels
+# cover.
 usable() {
-    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+    "$1" -c 'import sys, sysconfig; sys.exit(0 if sys.version_info >= (3, 10) and sys.version_info.releaselevel == "final" and not sysconfig.get_config_var("Py_GIL_DISABLED") else 1)' >/dev/null 2>&1
 }
 
 for candidate in "${SAF_HARNESS_PYTHON:-}" python3 python; do

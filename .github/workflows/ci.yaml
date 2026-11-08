@@ -94,6 +94,8 @@ jobs:
               env:
                   SAF_PLUGIN_BOOTSTRAP_ROOT: build/plugin
                   PYTHONDONTWRITEBYTECODE: "1"
+                  # Windows: the shim tries `py -3` first; make it the matrix interpreter.
+                  PY_PYTHON3: ${{ matrix.python-version }}
               run: python -m pytest -p no:cacheprovider tests/functional/plugin -q
 
     plugin-manifest:
@@ -132,7 +134,7 @@ jobs:
                   npm install --global --silent @github/copilot
                   export COPILOT_HOME="$RUNNER_TEMP/copilot-home"
                   copilot --version
-                  copilot plugin install build/plugin
+                  copilot plugin install "$PWD/build/plugin"
                   copilot plugin list | tee "$RUNNER_TEMP/plugins.txt"
                   grep -F "poesis-saf-agentic-harness" "$RUNNER_TEMP/plugins.txt"
 

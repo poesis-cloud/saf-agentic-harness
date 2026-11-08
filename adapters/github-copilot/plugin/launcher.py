@@ -311,11 +311,17 @@ def build_environment(venv: Path) -> None:
         if completed.returncode != 0:
             detail = " / ".join((completed.stderr or completed.stdout).strip().splitlines()[-3:])
             raise Unavailable(
-                f"installing the harness requirements failed ({Path(step[0]).name}): "
-                f"{detail or 'no output'}. Check the network, or set PIP_INDEX_URL / "
-                f"UV_INDEX_URL, then start a new session"
+                f"installing the harness requirements for Python {platform_python()} failed "
+                f"({Path(step[0]).name}): {detail or 'no output'}. Check the network, or set "
+                f"PIP_INDEX_URL / UV_INDEX_URL; if no wheel fits this interpreter, set "
+                f"SAF_HARNESS_PYTHON to another Python >= 3.10; then start a new session"
             )
     check_imports(environment_python(venv))
+
+
+def platform_python() -> str:
+    """This interpreter, as a provisioning failure names it: version and platform."""
+    return f"{sys.version.split()[0]} ({sysconfig.get_platform()})"
 
 
 def check_imports(python: Path) -> None:
