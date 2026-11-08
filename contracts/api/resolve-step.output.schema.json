@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/resolve-step.output/v1",
+  "$ref": "gsmarc://saf/contracts/report/v1",
+  "title": "resolve-step output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "resolve-step",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "step"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "step-resolution",
+              "description": "Success status for resolve-step."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "step": {
+          "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/step",
+          "description": "The resolved step object from the workflow configuration."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "no-next-step"
+            }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-step harness function."
+}

@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/register.sh\"",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\register.ps1\"; exit $LASTEXITCODE",
+        "timeoutSec": 30
+      },
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" sessionStart",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" sessionStart; exit $LASTEXITCODE",
+        "timeoutSec": 300
+      }
+    ],
+    "subagentStart": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" subagentStart",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" subagentStart; exit $LASTEXITCODE",
+        "timeoutSec": 120
+      }
+    ],
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" preToolUse",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" preToolUse; exit $LASTEXITCODE",
+        "timeoutSec": 120
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" postToolUse",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" postToolUse; exit $LASTEXITCODE",
+        "timeoutSec": 120
+      }
+    ],
+    "postToolUseFailure": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" postToolUseFailure",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" postToolUseFailure; exit $LASTEXITCODE",
+        "timeoutSec": 60
+      }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" subagentStop",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" subagentStop; exit $LASTEXITCODE",
+        "timeoutSec": 60
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" agentStop",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" agentStop; exit $LASTEXITCODE",
+        "timeoutSec": 60
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" sessionEnd",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" sessionEnd; exit $LASTEXITCODE",
+        "timeoutSec": 60
+      }
+    ],
+    "errorOccurred": [
+      {
+        "type": "command",
+        "bash": "sh \"$PLUGIN_ROOT/bin/saf-hook.sh\" errorOccurred",
+        "powershell": "powershell -NoProfile -ExecutionPolicy Bypass -File \"$env:PLUGIN_ROOT\\bin\\saf-hook.ps1\" errorOccurred; exit $LASTEXITCODE",
+        "timeoutSec": 15
+      }
+    ]
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/check-step-artifact.output/v1",
+  "$ref": "gsmarc://saf/contracts/report/v1",
+  "title": "check-step-artifact output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "check-step-artifact",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "valid",
+              "description": "Success status for check-step-artifact."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "commitId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{40,64}$",
+          "description": "The Git object id of the one commit that committed the validated set onto the acting step instance's step ref, or null when nothing was committed (every path byte-identical to the step ref tip — function 9, invariant 4)."
+        },
+        "committedPaths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+          },
+          "description": "The artifact paths the commit changed — empty exactly when commitId is null. The session log's own record of what this session committed (function 9, invariant 3)."
+        }
+      },
+      "required": [
+        "commitId",
+        "committedPaths"
+      ],
+      "if": {
+        "properties": {
+          "commitId": {
+            "type": "null"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "committedPaths": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "committedPaths": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    {
+      "required": [
+        "artifactChecks"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "reverted"
+            }
+          }
+        },
+        "artifactChecks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "artifactPath",
+              "failureMessage",
+              "revert"
+            ],
+            "properties": {
+              "artifactPath": {
+                "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath",
+                "description": "The failing path within the staged set."
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Why the artifact failed schema validation."
+              },
+              "revert": {
+                "type": "object",
+                "required": [
+                  "action"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "restored",
+                      "deleted"
+                    ],
+                    "description": "Whether the path was restored (from the step ref tip when the step ref changed it, otherwise from HEAD) or deleted (a new path)."
+                  },
+                  "from": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The ref the path was restored from — the step ref's name or HEAD — when restored."
+                  }
+                },
+                "unevaluatedProperties": false,
+                "description": "The revert action taken on this path."
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One failing path's check and revert record."
+          },
+          "description": "One entry per path that failed validation. The whole staged set is discarded when any path fails — call-level atomicity — so entries for valid siblings never appear: their revert is implied by set membership, recorded here only for the failing paths that caused it."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the check-step-artifact harness function."
+}

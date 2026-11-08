@@ -1,0 +1,414 @@
+"""The store owning the session logs: one session = one writer = one file."""
+
+from __future__ import annotations
+
+import re
+import secrets
+from pathlib import Path
+from typing import Iterator, Sequence
+
+from errors import InquiryError, StateError, SystemFailureError
+from stores.session_log_store.log import Log
+from stores.session_log_store.log_entry import LogEntry
+from stores.session_log_store.step_instance import StepInstance
+from stores.session_log_store.workflow_instance_view import WorkflowInstanceView
+from utils.jsonl_store import JsonlStore
+from utils.schema_validator import SchemaValidator
+
+_CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "contracts"
+_LOG_ENTRY_CONTRACT_ID = "gsmarc://saf/contracts/log-entry/v1"
+_LOG_FILE_SUFFIX = ".log.jsonl"
+_CROCKFORD_BASE32_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_INSTANCE_MINT_LENGTH = 6
+_SESSION_ID_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_INSTANCE_MINT_PATTERN = re.compile(r"^[0-9A-HJKMNP-TV-Z]{4,}$")
+_START_FUNCTION = "start-session"
+_STARTED_STATUS = "started"
+_RESOLVE_STEP_FUNCTION = "resolve-step"
+_STEP_RESOLUTION_STATUS = "step-resolution"
+_POSTCONDITIONS_FUNCTION = "check-step-postconditions"
+_PASS = "pass"
+_FAIL = "fail"
+_IN_FLIGHT = "in-flight"
+
+_default_validator: SchemaValidator | None = None
+
+
+def _load_default_validator() -> SchemaValidator:
+    """Compile the repository contracts once and reuse the validator."""
+    global _default_validator
+    if _default_validator is None:
+        _default_validator = SchemaValidator.compile_contracts(
+            sorted(_CONTRACTS_DIR.rglob("*.schema.json"))
+        )
+    return _default_validator
+
+
+def _log_write_failure(code: str, path: Path, failure: OSError) -> SystemFailureError:
+    """Classify a failing log write as the environment failing (rule 1, `system-error`)."""
+    return SystemFailureError(
+        code,
+        f"Session log 'logs/{path.name}' cannot be written: {failure.strerror or failure}.",
+        True,
+    )
+
+
+class SessionLogStore:
+    """Own the log side of the workspace: create, append, load, and derive."""
+
+    def __init__(
+        self,
+        workspace_dir: str | Path,
+        jsonl_store: JsonlStore | None = None,
+        schema_validator: SchemaValidator | None = None,
+    ) -> None:
+        """Create the store over `<workspace>/logs/`, compiling contracts once."""
+        self._workspace_dir = Path(workspace_dir)
+        self._jsonl = jsonl_store or JsonlStore()
+        self._validator = schema_validator or _load_default_validator()
+
+    def create_session_log(self, entry: LogEntry) -> Log:
+        """Write function 0's registration entry as a new log's first line."""
+        session_id = entry.report.context.session_id
+        # The store cannot name a file for an unsafe id, so the filename
+        # constraint is settled before any entry-shape concern.
+        path = self._resolve_log_path(session_id)
+        self._require_valid_entry(entry)
+        if path.exists():
+            raise StateError(
+                "session-conflict",
+                f"Session log for '{session_id}' already exists.",
+                False,
+            )
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._jsonl.append_entry(path, entry.to_dict())
+        except OSError as failure:
+            raise _log_write_failure("log-creation-failed", path, failure) from failure
+        return Log(session_id=session_id, entries=(entry,))
+
+    def append_log_entry(self, session_id: str, entry: LogEntry) -> None:
+        """Append one contract-bound entry to an existing session log."""
+        path = self._resolve_log_path(session_id)
+        if not path.exists():
+            raise StateError(
+                "session-unregistered",
+                f"No session log exists for '{session_id}'.",
+                False,
+            )
+        self._require_valid_entry(entry)
+        try:
+            self._jsonl.append_entry(path, entry.to_dict())
+        except OSError as failure:
+            raise _log_write_failure("log-append-failed", path, failure) from failure
+
+    def load_session_log(self, session_id: str) -> Log:
+        """Hydrate one session's log in file order."""
+        path = self._resolve_log_path(session_id)
+        if not path.exists():
+            raise StateError(
+                "session-unregistered",
+                f"No session log exists for '{session_id}'.",
+                False,
+            )
+        return Log(session_id=session_id, entries=self._read_log_entries(path))
+
+    def mint_workflow_instance_id(self, workflow_slug: str) -> str:
+        """Mint an instance id: the slug plus an uppercase Crockford-base32 mint."""
+        mint = "".join(
+            secrets.choice(_CROCKFORD_BASE32_ALPHABET)
+            for _ in range(_INSTANCE_MINT_LENGTH)
+        )
+        return f"{workflow_slug}-{mint}"
+
+    @staticmethod
+    def is_instance_of(workflow_instance_id: str, workflow_slug: str) -> bool:
+        """Tell whether an instance id belongs to this workflow — an exact slug match.
+
+        An instance id is `<workflowSlug>-<mint>`; the mint is uppercase Crockford
+        base32 and carries no hyphen, so the slug is everything before the last
+        hyphen. A bare prefix test would let `planning` claim `planning-review-…`.
+        """
+        slug, separator, mint = workflow_instance_id.rpartition("-")
+        return (
+            separator == "-"
+            and slug == workflow_slug
+            and _INSTANCE_MINT_PATTERN.match(mint) is not None
+        )
+
+    def load_workflow_instance_view(self, workflow_instance_id: str) -> WorkflowInstanceView:
+        """Assemble the cross-log instance view, timestamp-ordered."""
+        matching = [
+            entry
+            for entry in self._iter_all_entries()
+            if entry.report.context.workflow_instance_id == workflow_instance_id
+        ]
+        matching.sort(key=lambda entry: entry.timestamp)
+        return WorkflowInstanceView(
+            workflow_instance_id=workflow_instance_id,
+            entries=tuple(matching),
+        )
+
+    def find_latest_open_instance(
+        self,
+        workflow_slug: str,
+        *,
+        workflow_steps: Sequence[str],
+    ) -> str | None:
+        """Find the workflow's most recently active still-open instance, if any.
+
+        Open means at least one authored step is not journaled executed. Among
+        open instances the latest entry `timestamp` wins; an identical latest
+        `timestamp` breaks toward the lexicographically lowest instance id.
+        """
+        grouped: dict[str, list[LogEntry]] = {}
+        for entry in self._iter_all_entries():
+            instance_id = entry.report.context.workflow_instance_id
+            if instance_id is not None and self.is_instance_of(instance_id, workflow_slug):
+                grouped.setdefault(instance_id, []).append(entry)
+
+        open_candidates: list[tuple[str, str]] = []
+        for instance_id, entries in grouped.items():
+            entries.sort(key=lambda entry: entry.timestamp)
+            view = WorkflowInstanceView(
+                workflow_instance_id=instance_id,
+                entries=tuple(entries),
+            )
+            executed = view.list_executed_steps()
+            if any(step not in executed for step in workflow_steps):
+                open_candidates.append((entries[-1].timestamp, instance_id))
+
+        if not open_candidates:
+            return None
+        open_candidates.sort(key=lambda candidate: candidate[1])
+        open_candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+        return open_candidates[0][1]
+
+    def find_worker_session_ids(
+        self, parent_session_id: str, agent: str, since: str
+    ) -> tuple[str, ...]:
+        """Find the worker sessions registered under one step resolution.
+
+        Spec (function 0, invariant 5): a worker session belongs to the resolution its
+        registration correlated to — same parent session, the step's actor as `agent`,
+        registered at or after the resolution's `timestamp` (the cross-log ordering
+        key). Function 3, invariant 9 leaves at most one such resolution in flight.
+        """
+        found: list[str] = []
+        for entry in self._iter_all_entries():
+            report = entry.report
+            if report.context.function != _START_FUNCTION:
+                continue
+            if report.outcome.status != _STARTED_STATUS or entry.timestamp < since:
+                continue
+            session = report.payload.get("session") or {}
+            if (
+                session.get("parentSessionId") == parent_session_id
+                and session.get("agent") == agent
+            ):
+                found.append(str(session["sessionId"]))
+        return tuple(sorted(set(found)))
+
+    def list_workflow_instance_ids(self) -> tuple[str, ...]:
+        """List every workflow instance this machine's logs record, oldest first.
+
+        Function 5, invariant 2: `workflows` — the workflow instances from the
+        logs; ordered by each instance's first entry `timestamp`.
+        """
+        first_seen: dict[str, str] = {}
+        for entry in self._iter_all_entries():
+            instance_id = entry.report.context.workflow_instance_id
+            if instance_id is None:
+                continue
+            seen = first_seen.get(instance_id)
+            if seen is None or entry.timestamp < seen:
+                first_seen[instance_id] = entry.timestamp
+        return tuple(sorted(first_seen, key=lambda key: (first_seen[key], key)))
+
+    def list_step_instances(self) -> tuple[StepInstance, ...]:
+        """List every step instance this machine's logs record, oldest first.
+
+        A step instance IS a worker session (function 0, invariant 5): a
+        registration correlated to an unresolved step resolution of its parent
+        orchestrator session — same actor, registered at or after it. Its
+        outcome is the first function-10 entry the parent journals after that
+        resolution; the function 5, invariant 2 mapping turns it into
+        `pass` / `fail` / `in-flight`.
+        """
+        logs = self._load_all_logs()
+        instances: list[StepInstance] = []
+        for session_id, entries in logs.items():
+            registration = _find_worker_registration(entries)
+            if registration is None:
+                continue
+            session = registration.report.payload["session"]
+            parent_entries = logs.get(str(session["parentSessionId"]))
+            if parent_entries is None:
+                continue
+            resolution, conclusion = _correlate_resolution(
+                parent_entries, str(session["agent"]), registration.timestamp
+            )
+            if resolution is None:
+                continue
+            instance_id = resolution.report.context.workflow_instance_id
+            if instance_id is None:
+                continue
+            outcome, kind, path = _map_step_outcome(conclusion)
+            instances.append(
+                StepInstance(
+                    step_slug=str(resolution.report.payload["step"]["slug"]),
+                    session_id=session_id,
+                    workflow_instance_id=instance_id,
+                    actor=str(session["agent"]),
+                    outcome=outcome,
+                    registered_at=registration.timestamp,
+                    artifact_kind=kind,
+                    artifact_path=path,
+                )
+            )
+        instances.sort(key=lambda instance: (instance.registered_at, instance.session_id))
+        return tuple(instances)
+
+    def find_registration_timestamp(self, session_id: str) -> str | None:
+        """Read when a session was registered — its start entry's `timestamp`."""
+        try:
+            log = self.load_session_log(session_id)
+        except StateError:
+            return None
+        for entry in log.entries:
+            if entry.report.context.function == _START_FUNCTION:
+                return entry.timestamp
+        return None
+
+    def _load_all_logs(self) -> dict[str, tuple[LogEntry, ...]]:
+        """Load every session log, keyed by its session id."""
+        logs_dir = self._workspace_dir / "logs"
+        if not logs_dir.is_dir():
+            return {}
+        return {
+            path.name[: -len(_LOG_FILE_SUFFIX)]: self._read_log_entries(path)
+            for path in sorted(logs_dir.glob(f"*{_LOG_FILE_SUFFIX}"))
+        }
+
+    def _resolve_log_path(self, session_id: str) -> Path:
+        """Resolve one session's log file path under the workspace logs dir.
+
+        Spec (Logging, Sanitization): `sessionId` becomes a log filename, so the safe-slug
+        constraint is the store's — this is the one choke point every read and write funnels
+        through, which is what makes it structural rather than bypassable. The callers'
+        own `_require_inquiry_slugs` stays as fast-fail at the inquiry boundary.
+        """
+        if not isinstance(session_id, str) or _SESSION_ID_PATTERN.match(session_id) is None:
+            raise InquiryError(
+                "invalid-inquiry",
+                f"Session id '{session_id}' is not a safe slug and cannot name a log file.",
+                False,
+            )
+        return self._workspace_dir / "logs" / f"{session_id}{_LOG_FILE_SUFFIX}"
+
+    def _iter_all_entries(self) -> Iterator[LogEntry]:
+        """Iterate every entry across every session log, in file order per log."""
+        logs_dir = self._workspace_dir / "logs"
+        if not logs_dir.is_dir():
+            return
+        for path in sorted(logs_dir.glob(f"*{_LOG_FILE_SUFFIX}")):
+            yield from self._read_log_entries(path)
+
+    def _read_log_entries(self, path: Path) -> tuple[LogEntry, ...]:
+        """Read one log file's entries, or fail as the environment failing.
+
+        Spec (Outcomes rule 1): an unreadable log is `system-error`. This is the one
+        seam every log read funnels through, so no raw I/O or parse exception escapes
+        the store: a file the process cannot open is retryable, bytes that are not
+        JSONL log entries are not.
+        """
+        name = f"logs/{path.name}"
+        try:
+            return tuple(LogEntry.from_dict(raw) for raw in self._jsonl.load_entries(path))
+        except OSError as failure:
+            raise SystemFailureError(
+                "log-unreadable",
+                f"Session log '{name}' cannot be read: {failure.strerror or failure}.",
+                True,
+            ) from failure
+        except (ValueError, KeyError, TypeError, AttributeError) as failure:
+            raise SystemFailureError(
+                "log-unreadable",
+                f"Session log '{name}' does not hold well-formed JSONL log entries: "
+                f"{type(failure).__name__}: {failure}.",
+                False,
+            ) from failure
+
+    def _require_valid_entry(self, entry: LogEntry) -> None:
+        """Reject an entry the log-entry contract does not admit."""
+        records = self._validator.validate_instance(_LOG_ENTRY_CONTRACT_ID, entry.to_dict())
+        if records:
+            first = records[0]
+            location = f" at '{first.path}'" if first.path else ""
+            raise StateError(
+                "invalid-log-entry",
+                f"Log entry violates the log-entry contract{location}: {first.message}",
+                False,
+            )
+
+
+def _find_worker_registration(entries: Sequence[LogEntry]) -> LogEntry | None:
+    """Find a log's start entry when it registers a worker (parented) session."""
+    for entry in entries:
+        report = entry.report
+        if report.context.function != _START_FUNCTION:
+            continue
+        session = report.payload.get("session") or {}
+        if report.outcome.status == _STARTED_STATUS and session.get("parentSessionId"):
+            return entry
+        return None
+    return None
+
+
+def _correlate_resolution(
+    parent_entries: Sequence[LogEntry], agent: str, registered_at: str
+) -> tuple[LogEntry | None, LogEntry | None]:
+    """Find the resolution a worker registration correlates to, and what concluded it.
+
+    The correlated resolution is the parent's latest step resolution at or
+    before the registration, unresolved at that moment, naming the agent as its
+    actor; its conclusion is the first function-10 entry journaled after it.
+    """
+    resolution: LogEntry | None = None
+    for entry in parent_entries:
+        if entry.timestamp > registered_at:
+            break
+        function = entry.report.context.function
+        if (
+            function == _RESOLVE_STEP_FUNCTION
+            and entry.report.outcome.status == _STEP_RESOLUTION_STATUS
+        ):
+            resolution = entry
+        elif function == _POSTCONDITIONS_FUNCTION:
+            resolution = None
+    if resolution is None or resolution.report.payload["step"].get("actor") != agent:
+        return None, None
+    seen = False
+    for entry in parent_entries:
+        if entry is resolution:
+            seen = True
+            continue
+        if seen and entry.report.context.function == _POSTCONDITIONS_FUNCTION:
+            return resolution, entry
+    return resolution, None
+
+
+def _map_step_outcome(
+    conclusion: LogEntry | None,
+) -> tuple[str, str | None, str | None]:
+    """Map a step instance's concluding function-10 entry to its outcome and artifact."""
+    if conclusion is None:
+        return _IN_FLIGHT, None, None
+    status = conclusion.report.outcome.status
+    delivery = conclusion.report.payload.get("artifactDelivery") or {}
+    path = delivery.get("artifactPath")
+    kind = delivery.get("artifact") if path else None
+    return (_PASS if status == _PASS else _FAIL), kind, path
+
+
+__all__ = ["SessionLogStore"]

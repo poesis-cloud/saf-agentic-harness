@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/resolve-workflow-instructions.output/v1",
+  "$ref": "gsmarc://saf/contracts/report/v1",
+  "title": "resolve-workflow-instructions output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "resolve-workflow-instructions",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "instructions"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "resolved",
+              "description": "Success status for resolve-workflow-instructions."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "instructions": {
+          "type": "array",
+          "items": {
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/instructionSlug",
+            "description": "One instruction slug."
+          },
+          "minItems": 1,
+          "description": "Ordered instruction slugs injected into the agent's session context."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the resolve-workflow-instructions harness function."
+}

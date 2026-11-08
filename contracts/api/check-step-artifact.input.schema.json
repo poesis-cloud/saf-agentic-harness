@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/check-step-artifact.input/v1",
+  "$ref": "gsmarc://saf/contracts/inquiry/v1",
+  "title": "check-step-artifact input contract",
+  "required": [
+    "artifactPaths"
+  ],
+  "properties": {
+    "artifactPaths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+      },
+      "description": "Every artifact path the just-landed write staged — the whole set of one tool call, validated and committed (or discarded) atomically as one unit. A single-path write is a set of one."
+    }
+  },
+  "unevaluatedProperties": false,
+  "description": "Input contract for the check-step-artifact harness function."
+}

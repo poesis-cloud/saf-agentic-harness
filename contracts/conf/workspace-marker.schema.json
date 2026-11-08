@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/conf/workspace-marker/v1",
+  "title": "SAF workspace marker schema",
+  "description": "Validation schema for .saf/workspace.yaml, committed at the Git top-level of a governed workspace (adapter spec github-copilot, Plugin mode: Workspace resolution). A folder whose Git top-level holds this marker, committed in HEAD, is a SAF workspace of the framework plugin it names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "framework",
+    "root"
+  ],
+  "properties": {
+    "framework": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$",
+      "description": "The framework plugin's name, as it registers itself in the per-user registry."
+    },
+    "root": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,62}[a-z0-9])?$",
+      "description": "The workspace root: a top-level node slug of the framework's workspace layout (conf/workspace.conf.yaml)."
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://saf/contracts/inquiry/v1",
+    "title": "Harness inquiry envelope contract",
+    "description": "Generic inquiry envelope shared by every harness function — the input counterpart of report.schema.json: every function is asked something about a session and answers with a report. Function inquiry contracts extend this envelope with function-specific properties. Session attribution is always observed or minted by the surrounding mechanism and never model-authored, so it is the one thing every inquiry carries — the session id exists before the session record does (function 0 registers a pre-minted id, it never creates one).",
+    "type": "object",
+    "required": [
+        "sessionId"
+    ],
+    "properties": {
+        "sessionId": {
+            "$ref": "gsmarc://saf/contracts/context/v1#/$defs/sessionId",
+            "description": "The session this inquiry runs in."
+        },
+        "parentSessionId": {
+            "$ref": "gsmarc://saf/contracts/context/v1#/$defs/parentSessionId",
+            "description": "The parent session that opened this session, if any."
+        }
+    }
+}

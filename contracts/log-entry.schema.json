@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/log-entry/v1",
+  "title": "Harness log entry contract",
+  "description": "One append-only log entry for one completed harness function invocation. The persisted log entry integrates the function report with its wall-clock write time; the report contains its session context and function-specific payload. The envelope (timestamp + report) is declared once; the report's oneOf selects exactly one concrete report contract — each output contract pins context.function to its own const, so the branches are mutually exclusive by discriminator.",
+  "type": "object",
+  "required": [
+    "timestamp",
+    "report"
+  ],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Wall-clock time the log entry was appended."
+    },
+    "report": {
+      "oneOf": [
+        {
+          "$ref": "gsmarc://saf/contracts/api/start-session.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-workflow-instructions.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-workflow-skills.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-model.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-preconditions.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-instructions.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/resolve-step-skills.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-authorization.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-artifact.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/check-step-postconditions.output/v1"
+        },
+        {
+          "$ref": "gsmarc://saf/contracts/api/end-session.output/v1"
+        }
+      ],
+      "description": "The function report persisted by this entry — exactly one of the twelve function output contracts, selected by its context.function discriminator."
+    }
+  },
+  "unevaluatedProperties": false
+}

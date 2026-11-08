@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/resolve-step.input/v1",
+  "$ref": "gsmarc://saf/contracts/inquiry/v1",
+  "title": "resolve-step input contract",
+  "required": [
+    "workflowSlug"
+  ],
+  "properties": {
+    "workflowSlug": {
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/workflowSlug",
+      "description": "The workflow identifier to resolve the next step for. Never an instance id — the instance is deduced (function 3, invariant 8)."
+    }
+  },
+  "unevaluatedProperties": false,
+  "description": "Input contract for the resolve-step harness function."
+}

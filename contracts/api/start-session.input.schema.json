@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/start-session.input/v1",
+  "$ref": "gsmarc://saf/contracts/inquiry/v1",
+  "title": "start-session input contract",
+  "required": [
+    "agent"
+  ],
+  "properties": {
+    "agent": {
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
+      "description": "The framework-agent identity. The harness opens agent sessions — this is always required."
+    }
+  },
+  "unevaluatedProperties": false,
+  "description": "Input contract for the start-session harness function."
+}

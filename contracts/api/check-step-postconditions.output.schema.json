@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/check-step-postconditions.output/v1",
+  "$ref": "gsmarc://saf/contracts/report/v1",
+  "title": "check-step-postconditions output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "check-step-postconditions",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on, and what makes this contract distinct from the check-step-preconditions output, which shares its conditionChecks payload."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "not-applicable",
+              "description": "The invoking session has no in-flight step — including a duplicate step-ended delivery: after the first outcome journals, the step is no longer in flight. Returned, never journaled; hook planes render it as pass-through."
+            }
+          },
+          "description": "The function outcome."
+        }
+      }
+    },
+    {
+      "required": [
+        "conditionChecks",
+        "artifactDelivery",
+        "promotion"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "pass",
+              "description": "Success status for check-step-postconditions."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "oneOf": [
+                  {
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stepCondition"
+                  },
+                  {
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stateCondition"
+                  }
+                ],
+                "description": "The condition that was checked."
+              },
+              "outcome": {
+                "const": "pass",
+                "description": "Whether the condition passed or failed."
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One condition outcome; failure requires a failureMessage."
+          },
+          "description": "One outcome entry per condition checked."
+        },
+        "artifactDelivery": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/artifactDelivery"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "pass"
+                }
+              }
+            }
+          ],
+          "description": "The step delivered its artifact — required for a passing outcome."
+        },
+        "promotion": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/promotion"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "promoted"
+                }
+              }
+            }
+          ],
+          "description": "The step ref was promoted: the workspace branch fast-forwarded to the evaluated step state — required for a passing outcome."
+        }
+      }
+    },
+    {
+      "required": [
+        "conditionChecks",
+        "artifactDelivery",
+        "promotion"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "fail"
+            }
+          }
+        },
+        "conditionChecks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "condition",
+              "outcome"
+            ],
+            "properties": {
+              "condition": {
+                "oneOf": [
+                  {
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stepCondition"
+                  },
+                  {
+                    "$ref": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1#/$defs/stateCondition"
+                  }
+                ],
+                "description": "The condition that was checked."
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail"
+                ],
+                "description": "Whether the condition passed or failed."
+              },
+              "failureMessage": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Explanation when the condition failed."
+              }
+            },
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "required": [
+                "failureMessage"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "failureMessage"
+                ]
+              }
+            },
+            "unevaluatedProperties": false,
+            "description": "One condition outcome."
+          },
+          "description": "One outcome entry per condition checked."
+        },
+        "artifactDelivery": {
+          "$ref": "#/$defs/artifactDelivery",
+          "description": "The delivery verdict; a failed delivery fails the aggregate."
+        },
+        "promotion": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/promotion"
+            },
+            {
+              "properties": {
+                "outcome": {
+                  "const": "withheld"
+                }
+              }
+            }
+          ],
+          "description": "The step ref was withheld: the workspace branch is untouched."
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "conditionChecks": {
+              "contains": {
+                "properties": {
+                  "outcome": {
+                    "const": "fail"
+                  }
+                },
+                "required": [
+                  "outcome"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "artifactDelivery": {
+              "properties": {
+                "outcome": {
+                  "const": "fail"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "A failing step outcome: at least one condition failed, or the artifact was not delivered."
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "artifactDelivery": {
+      "type": "object",
+      "required": [
+        "artifact",
+        "artifactPath",
+        "outcome"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
+          "description": "The step's declared artifact kind."
+        },
+        "artifactPath": {
+          "oneOf": [
+            {
+              "$ref": "gsmarc://saf/contracts/artifact/v1#/$defs/artifactPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The one artifact instance of the declared kind the step state changes, or null when it changes zero or more than one, or the worker session's own commits do not change it."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "description": "Whether the step delivered its artifact."
+        },
+        "failureMessage": {
+          "type": "string",
+          "minLength": 1,
+          "description": "On failure: names the step, the kind, and why — zero instances, more than one, or none the worker session's own commits change."
+        }
+      },
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "fail"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "failureMessage"
+        ],
+        "properties": {
+          "artifactPath": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "not": {
+          "required": [
+            "failureMessage"
+          ]
+        },
+        "properties": {
+          "artifactPath": {
+            "type": "string"
+          }
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Function 10, invariant 5: the delivery verdict — a harness invariant, not a condition: no slug, never configurable. Read from the diff between the worker session's step ref and its base (the workspace branch tip, after any rebase) and from the worker session's function-9 `valid` entries (`committedPaths`)."
+    },
+    "promotion": {
+      "type": "object",
+      "required": [
+        "outcome",
+        "workspaceCommit"
+      ],
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "promoted",
+            "withheld"
+          ],
+          "description": "Whether the step ref was promoted into workspace state (function 10, invariant 6)."
+        },
+        "workspaceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40,64}$",
+          "description": "The workspace branch tip the invocation leaves: the evaluated step state's commit when promoted, the unchanged tip when withheld."
+        }
+      },
+      "unevaluatedProperties": false,
+      "description": "Function 10, invariant 6: the acceptance verdict — whether the step instance's step ref was promoted by one compare-and-swap fast-forward of the workspace branch, and the tip it leaves."
+    }
+  },
+  "description": "Output contract for the check-step-postconditions harness function."
+}

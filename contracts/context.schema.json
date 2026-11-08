@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/context/v1",
+  "title": "Harness context contract",
+  "description": "The replay and correlation context carried by every function report. Every invocation is session-bound; report context identifies the harness function plus the session and workflow-instance correlation needed to replay the invocation and join back to the session start. Session origin is recorded by start-session and recovered through sessionId when needed.",
+  "$defs": {
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9-]+$",
+      "description": "The session identifier observed or minted by the surrounding mechanism, normalized to a safe slug before it reaches the harness — the id becomes a log filename, so a raw host id is a path-traversal vector the contract rejects."
+    },
+    "parentSessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9-]+$",
+      "description": "The parent session identifier when this session was opened by another session; null for top-level sessions. Same safe-slug form as sessionId."
+    }
+  },
+  "type": "object",
+  "required": [
+    "function",
+    "sessionId"
+  ],
+  "properties": {
+    "function": {
+      "type": "string",
+      "enum": [
+        "start-session",
+        "resolve-workflow-instructions",
+        "resolve-workflow-skills",
+        "resolve-step",
+        "resolve-step-model",
+        "check-step-preconditions",
+        "resolve-step-instructions",
+        "resolve-step-skills",
+        "check-step-authorization",
+        "check-step-artifact",
+        "check-step-postconditions",
+        "end-session"
+      ],
+      "description": "The harness function that produced this report."
+    },
+    "sessionId": {
+      "$ref": "#/$defs/sessionId",
+      "description": "The session this invocation ran in."
+    },
+    "parentSessionId": {
+      "$ref": "#/$defs/parentSessionId",
+      "description": "The parent session that opened this session, if any."
+    },
+    "workflowInstanceId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-z0-9-]+-[0-9A-HJKMNP-TV-Z]{4,}$",
+      "description": "The workflow instance this invocation belongs to, if any. Always prefixed by its workflowSlug followed by an uppercase Crockford-base32 mint of at least four characters (e.g. verification-01J9XQ) — the prefix is load-bearing: function 3's latest-open-instance deduction filters candidate entries by it."
+    }
+  },
+  "unevaluatedProperties": false
+}

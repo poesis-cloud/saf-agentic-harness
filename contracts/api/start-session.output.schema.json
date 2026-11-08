@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/api/start-session.output/v1",
+  "$ref": "gsmarc://saf/contracts/report/v1",
+  "title": "start-session output contract",
+  "properties": {
+    "context": {
+      "properties": {
+        "function": {
+          "const": "start-session",
+          "description": "Pins this report to its function — the discriminator the log-entry envelope selects on."
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "not-applicable",
+              "description": "Persisted state names no target: a worker session with no correlated unresolved step resolution, or a root session whose agent names no framework agent. Returned, never journaled; hook planes render it as pass-through (C7)."
+            }
+          },
+          "description": "The function outcome."
+        }
+      }
+    },
+    {
+      "required": [
+        "session"
+      ],
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "const": "started",
+              "description": "Success status for start-session."
+            }
+          },
+          "description": "The function outcome."
+        },
+        "session": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "agent"
+          ],
+          "properties": {
+            "agent": {
+              "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
+              "description": "The framework-agent identity. The harness opens agent sessions — this is always present."
+            },
+            "sessionId": {
+              "$ref": "gsmarc://saf/contracts/context/v1#/$defs/sessionId",
+              "description": "The opened session id."
+            },
+            "parentSessionId": {
+              "$ref": "gsmarc://saf/contracts/context/v1#/$defs/parentSessionId",
+              "description": "The opened session's parent session id, if any."
+            },
+            "harnessVersion": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The harness version that started the session (core spec, Harness compatibility). Every later call of functions 0-10 by another harness version is refused with harness-version-changed."
+            }
+          },
+          "unevaluatedProperties": false,
+          "description": "The opened session metadata."
+        }
+      }
+    },
+    {
+      "properties": {
+        "outcome": {
+          "properties": {
+            "status": {
+              "$ref": "gsmarc://saf/contracts/report/v1#/$defs/errorStatus",
+              "description": "Error status."
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "description": "The function outcome on error."
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false,
+  "description": "Output contract for the start-session harness function."
+}

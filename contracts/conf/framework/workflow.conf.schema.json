@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/conf/framework/workflow.conf/v1",
+  "title": "harness workflow configuration schema",
+  "description": "Defines the canonical shape of a workflow configuration. The schema root IS the workflow object: it declares `slug`, `orchestrator`, optional `description`, optional advisory `predecessors`, and the `steps` that constitute the flow. Workflows and steps are identified by slugs. Each step declares exactly one `artifact`; multi-artifact work is modeled as several steps. Each step's obligations are ONE flat `conditions` list, of two dedicated entry types: `stepCondition` binds another step by slug (`step` is the predecessor for `kind: precondition`, the successor for `kind: postcondition`); `stateCondition` binds a `setSelector` + `setPredicate` — `setSelector.setQuery` is a CEL expression over the condition language (`workspace`, `workflows`, `steps`, `workflow`, `step`) that yields `selected`, and `setPredicate` a CEL boolean over it (core spec, function 5, invariant 2). Behavioral guidance lives at the step level via `step.instructions`. Optional `description` on the workflow and on each step is prose for orchestrator selection and for distinguishing main delivery artifacts from challenge/mediation packets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "slug",
+    "orchestrator",
+    "steps"
+  ],
+  "properties": {
+    "slug": {
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/workflowSlug",
+      "description": "URL-safe workflow identifier."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable purpose of this workflow: the user concern it answers, the orchestrator who should select it, and which artifacts are main (must be challenged before owner commit) versus challenge/mediation (required by 1-step-1-artifact, not themselves challenged)."
+    },
+    "predecessors": {
+      "description": "Advisory predecessors: the workflow slugs that NATURALLY come before this one. Shapes the harness's `propose` action only \u2014 never a hard gate.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/workflowSlug",
+        "description": "One advisory predecessor workflow slug."
+      }
+    },
+    "orchestrator": {
+      "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
+      "description": "The orchestrator agent that drives instances of this workflow."
+    },
+    "skills": {
+      "description": "The ordered skill slugs the orchestrator loads for this workflow (workflow-level skills, independent of per-step skills).",
+      "oneOf": [
+        {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/skillSlug",
+          "description": "A single workflow-level skill slug."
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/skillSlug",
+            "description": "One workflow-level skill slug."
+          },
+          "description": "An array of workflow-level skill slugs."
+        }
+      ]
+    },
+    "instructions": {
+      "description": "Workflow-level guidance injected to the orchestrator at session-open. A single instruction slug or array of slugs, each the stem of an `.instructions.md` file under `FRAMEWORK_INSTRUCTIONS_DIR`.",
+      "oneOf": [
+        {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/instructionSlug",
+          "description": "A single workflow-level instruction slug."
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/instructionSlug",
+            "description": "One workflow-level instruction slug."
+          },
+          "description": "An array of workflow-level instruction slugs."
+        }
+      ]
+    },
+    "steps": {
+      "description": "The structurant steps constituting this workflow (one actor per step; fork/merge/loop via `stepCondition` entries).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step",
+        "description": "One step (one actor's turn)."
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "description": "One structurant step (one actor's turn). Its conditions are ONE flat `conditions` list of `stepCondition` (binds another step by slug for structural dependencies) and `stateCondition` (binds `setSelector` + `setPredicate` for state assertions over artifacts and logs) entries. Behavioral guidance (`instructions`) is attached at the step level. Exactly one `actor` and exactly one `artifact` per step: multi-actor or multi-artifact work is modeled as several steps. 1 step = 1 agent = 1 session = 1 artifact. Optional `description` names whether this step authors a main artifact, a challenge/mediation packet, or an owner rewrite after challenge.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "actor",
+        "artifact",
+        "instructions",
+        "capabilities"
+      ],
+      "properties": {
+        "slug": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/stepSlug",
+          "description": "URL-safe step identifier."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable purpose of this step: whether it authors a main artifact, a challenge/mediation packet, or an owner rewrite after challenge."
+        },
+        "actor": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/agentSlug",
+          "description": "The agent filename (or normalized identity) that acts this step."
+        },
+        "artifact": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/artifactSlug",
+          "description": "The single artifact kind this step produces or updates, identified by its schema slug."
+        },
+        "skills": {
+          "description": "The ordered skill slugs the dispatched agent loads for THIS step (per-step, not per-workflow). The harness injects them as deterministic context at sessionStart (inject-skills); a sub-orchestration is a step, so its procedure skill rides here.",
+          "oneOf": [
+            {
+              "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/skillSlug",
+              "description": "A single skill slug for this step."
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/skillSlug",
+                "description": "One skill slug for this step."
+              },
+              "description": "An array of skill slugs for this step."
+            }
+          ]
+        },
+        "instructions": {
+          "description": "Step-level guidance injected to the agent at session-open (once preconditions pass). Carries behavioral guidance refs (e.g., authority obligations, discovery lenses). A single instruction slug or array of slugs, each the stem of an `.instructions.md` file under `FRAMEWORK_INSTRUCTIONS_DIR`.",
+          "oneOf": [
+            {
+              "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/instructionSlug",
+              "description": "A single instruction slug."
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/instructionSlug",
+                "description": "One instruction slug."
+              },
+              "description": "An array of instruction slugs."
+            }
+          ]
+        },
+        "capabilities": {
+          "description": "Weighted capability demand for THIS step's dispatch: map of capability tag -> weight (0-10), every tag explicit. Static per step \u2014 the step's kind of work fixes both WHICH tags matter and HOW MUCH. The harness ModelRouter multiplies these weights against the model catalog's capabilities and picks the highest-scoring model; ties break toward lower costRank. The canonical tag vocabulary and value shape are owned by model-profiles.conf.schema.json#/$defs/capabilities.",
+          "$ref": "gsmarc://saf/contracts/conf/framework/model-profiles.conf/v1#/$defs/capabilities"
+        },
+        "conditions": {
+          "description": "The step's flat obligations list — each entry is a `stepCondition` (binds another step by slug) or a `stateCondition` (binds a state assertion over artifacts and logs).",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/stepCondition",
+                "description": "One step-binding condition."
+              },
+              {
+                "$ref": "#/$defs/stateCondition",
+                "description": "One state-binding condition."
+              }
+            ]
+          }
+        }
+      }
+    },
+    "stepCondition": {
+      "description": "One entry in a step's flat `conditions` list binding another step by slug. `kind` = WHEN it holds (precondition / postcondition) and also determines the DIRECTION of `step`: for `kind: precondition`, `step` is the predecessor that must be journaled executed before this step starts (the hard structural gate). For `kind: postcondition`, `step` is the successor this step's completion is declared to unblock \u2014 an advisory cross-reference mirroring that successor's own `kind: precondition` declaration; the harness enforces the DAG edge once, from the successor's side.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "slug",
+        "step"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "precondition",
+            "postcondition"
+          ],
+          "description": "WHEN the condition holds, and the direction of `step`: precondition (before the step acts; `step` is the predecessor) or postcondition (after; `step` is the successor)."
+        },
+        "slug": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/conditionSlug",
+          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step."
+        },
+        "step": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/stepSlug",
+          "description": "The referenced step slug: the predecessor that must be journaled executed (kind: precondition), or the successor this step unblocks (kind: postcondition)."
+        }
+      }
+    },
+    "stateCondition": {
+      "description": "One entry in a step's flat `conditions` list binding a state assertion. `kind` = WHEN it holds (precondition / postcondition): a precondition is evaluated over the workspace branch, a postcondition over the step state being promoted. `setSelector.setQuery` is a CEL expression over the condition language that yields `selected`; `setPredicate` is a CEL boolean over `selected` (core spec, function 5, invariant 2).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "slug",
+        "setSelector",
+        "setPredicate"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "precondition",
+            "postcondition"
+          ],
+          "description": "WHEN the condition holds: precondition (before the step acts) or postcondition (after)."
+        },
+        "slug": {
+          "$ref": "gsmarc://saf/contracts/slugs/v1#/$defs/conditionSlug",
+          "description": "Stable slug, required on EVERY condition \u2014 the handle in the run log, findings, and check-step."
+        },
+        "setSelector": {
+          "description": "The selector: `setQuery` (CEL) yields the `selected` list to assert on. It reads `workspace` (the artifact instances in the evaluated state: `kind`, `path`, `data`), `workflows` (workflow instances from the logs: `slug`, `id`), `steps` (step instances from the logs, oldest first: `slug`, `id`, `workflow`, `actor`, `outcome`, `artifact`), `workflow` (the current workflow instance) and `step` (the current step instance; in a precondition, the step instance about to start, not yet in `steps`, with a null `id` and `artifact.path`). A read of `a.data.<p>` must be guarded in the same macro by `a.kind == '<literal>'` or by a path join with a step instance of a literal step of a known workflow; the configuration load rejects an unguarded read, an unknown kind, step or workflow slug, and, in a precondition, a reference to a current-workflow step that is not a declared predecessor or a path join with `step`.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "setQuery"
+          ],
+          "properties": {
+            "setQuery": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A CEL query over the condition language yielding the `selected` list, e.g. `workspace.filter(a, a.path == step.artifact.path && a.data.status == 'approved')` or `steps.filter(s, s.workflow == workflow.id && s.slug == 'discovery-and-draft' && s.outcome == 'pass')`."
+            }
+          }
+        },
+        "setPredicate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A CEL boolean expression over `selected` (the result of `setQuery`), e.g. `selected.size() == 1`; it reads the same variables as `setQuery`. A runtime evaluation error is `state-error` (`condition-evaluation-failed`); a false predicate is a normal `fail`."
+        }
+      }
+    }
+  }
+}
