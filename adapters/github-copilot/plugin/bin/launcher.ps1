@@ -68,6 +68,8 @@ if ($agent -and $session) {
 if ($hookEvent -eq 'userPromptTransformed') {
     $notice = 'this folder is not a SAF workspace; ask me to initialise it'
     $prompt = if ($payload -and $payload.transformedPrompt -is [string] -and $payload.transformedPrompt) { "$notice`n`n$($payload.transformedPrompt)" } else { $notice }
-    [Console]::Out.WriteLine((@{ modifiedTransformedPrompt = $prompt } | ConvertTo-Json -Compress))
+    # ASCII only: the host's pipe encoding is not ours to know.
+    $json = @{ modifiedTransformedPrompt = $prompt } | ConvertTo-Json -Compress
+    [Console]::Out.WriteLine([regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value }))
 }
 exit 0

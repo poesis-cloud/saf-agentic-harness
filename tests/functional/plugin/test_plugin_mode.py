@@ -244,25 +244,23 @@ def test_the_stable_launcher_tells_an_unmarked_folder_before_the_registry_is_pop
 
 
 def test_the_stable_launcher_waits_for_a_registration_in_flight(rig: PluginRig) -> None:
-    rig.register()
+    """In a workspace, the fallback would fail closed: success proves the launcher waited."""
+    assert rig.hook("sessionStart", rig.payload(), index=0).code == 0
     latest = rig.registry / "harness" / "latest"
     version = latest.read_text("utf-8")
     latest.unlink()
     timer = threading.Timer(1.5, latest.write_text, (version,), {"encoding": "utf-8"})
     timer.start()
     try:
-        run = rig.script("launcher", "userPromptTransformed", "--framework", FRAMEWORK,
-                         "--agent", ORCHESTRATOR,
-                         payload=rig.payload(rig.elsewhere, prompt="go", transformedPrompt="go",
-                                             timestamp=1),
+        run = rig.script("launcher", "userPromptSubmitted", "--framework", FRAMEWORK,
+                         "--agent", ORCHESTRATOR, payload=rig.payload(prompt="go", timestamp=1),
                          folder=rig.registry / "harness",
                          environment=dict(rig.environment, SAF_AGENTIC_REGISTRY_WAIT_SEC="20"))
     finally:
         timer.join()
 
-    assert run.code == 0
-    assert run.decision["modifiedTransformedPrompt"].startswith(NOT_A_WORKSPACE)
-
+    assert run.code == 0, run.stderr
+    assert (rig.data / "state" / "github-copilot" / "sessions" / f"{HOST}.json").is_file()
 
 def test_an_unpopulated_framework_entry_fails_closed_in_a_workspace(rig: PluginRig) -> None:
     shutil.rmtree(rig.registry / "frameworks")
