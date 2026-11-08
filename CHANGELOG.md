@@ -4,6 +4,74 @@ All notable changes to this project are documented here. Versions follow
 [SemVer](https://semver.org/); pre-release tags (`-alpha`, `-beta`, `-rc`) are published as
 GitHub pre-releases.
 
+## Unreleased (v1.0.0-alpha.2)
+
+### The harness plugin
+
+- **The harness installs as a Copilot plugin**, `poesis-saf-agentic-harness`, in the Agent
+  Plugins 1.0 format: a closed `plugin.json`, and the hooks in
+  `com.github.copilot/hooks/hooks.json`. It serves the three hosts of the GitHub Copilot agent
+  runtime: the Copilot CLI, the Copilot app, and VS Code with **Session Target: Copilot**.
+  `make plugin` renders it (`adapters/github-copilot/render_plugin.py`).
+- **No machine paths.** Hooks are shell strings that reach the plugin through `PLUGIN_ROOT`.
+  A shell shim finds Python ≥ 3.10 and runs a stdlib-only `launcher.py`, which derives every
+  path at runtime.
+- **Two plugins, one registry.** The harness plugin and a framework plugin find each other
+  through a per-user registry, written by shell-only `sessionStart` scripts. A framework
+  orchestrator's scoped H0 calls the stable launcher in the registry, and the launcher routes
+  each firing to the harness version serving its session.
+- **Automatic provisioning** at `sessionStart`: a virtual environment in `PLUGIN_DATA`, keyed
+  by harness version, lock hash, Python ABI and platform. It installs from a hash-locked,
+  multi-platform `requirements.lock` (`uv` when present, else `pip`; binaries only), honors
+  `PIP_INDEX_URL` / `UV_INDEX_URL`, and writes a `.ready` stamp last. `SAF_HARNESS_PYTHON`
+  skips it.
+- **Runtime workspace resolution.** A folder is governed when its Git top-level holds a
+  committed `.saf/workspace.yaml` (`framework`, `root`;
+  `contracts/conf/workspace-marker.schema.json`). The workspace is fixed per session in its
+  record.
+- **Fail closed only where governance applies.** Outside a SAF workspace, and with no
+  orchestrator selected, every tool call passes, with a one-time `sessionStart` warning when
+  the runtime is missing. In a workspace, or once an orchestrator was selected, a missing
+  runtime, Git < 2.38 or an unregistered framework denies with the exact remedy. The
+  developer install (`install.py`) keeps the stricter rule.
+- **VS Code's Local runtime** is detected by its payload family and refused in a governed
+  folder: "select Session Target: Copilot".
+- **Release:** CD attaches the plugin zip to the GitHub Release, publishes the plugin at the
+  root of the orphan branch `copilot-plugin` tagged `plugin-v<version>`, and opens an
+  auto-merging PR on `poesis-cloud/saf-marketplace` (`main` for releases, `preview` for
+  pre-releases) when its GitHub App secrets are set. CI bootstraps the plugin from its lock
+  on Ubuntu, macOS and Windows with Python 3.10 and 3.13, validates the manifest against the
+  official Agent Plugins schema, and installs it with the Copilot CLI.
+
+### Harness compatibility
+
+- **The framework declares the harness versions it supports** in `conf/harness.conf.yaml`
+  (`require`, a PEP 440 range; required). The configuration load refuses another version:
+  "requires harness <range>; installed <version>" (exit 3). The harness version is `VERSION`.
+- **Function 0 stamps `harnessVersion`** into every session it starts. A later call of
+  functions 0–10 by another harness version is refused with `state-error` /
+  `harness-version-changed`, unjournaled; function 11 still ends the session. The adapter
+  stamps its records too, and denies a firing of a session another version opened ("the
+  plugin was updated; start a new session").
+
+### Renamed
+
+- **The `github-copilot-cli` adapter is now `github-copilot`**: `adapters/github-copilot/`,
+  the package `github_copilot_adapter`, `def/adapter/github-copilot/`, its contract ids, its
+  state folder and the developer-install file names. `make install-hooks-copilot-cli` is now
+  `make install-hooks`.
+
+### Removed
+
+- **The `vscode-github-copilot-chat` adapter** (VS Code's Local runtime): its code, spec,
+  contracts and tests, `adapters/render_hooks.py`, `adapters/dispatch.sh`, and the VS Code
+  `make install-hooks`. VS Code is served by `github-copilot` through Session Target: Copilot.
+
+### Documentation fixes
+
+- The adapter README showed `resolve-step-model` as if it took `--workflow-slug`; it takes no
+  flag at all.
+
 ## v1.0.0-alpha.1
 
 The first pinnable pre-release of the SAFe agentic orchestration harness.

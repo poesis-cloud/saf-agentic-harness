@@ -1,19 +1,23 @@
----
-# CD — publish a versioned harness source archive.
-#
-# The harness has no image and no Helm chart: it is a pure-Python library that embedding
-# frameworks consume from a checkout. What CD ships is therefore a PINNABLE VERSION —
-# today the framework's own cd.yml checks this repository out at the default branch, so a
-# release tag is what lets it pin instead.
+# CD — publish a versioned harness source archive and the harness PLUGIN.
 #
 # The gate runs first and in full: a tag never publishes an unverified tree.
 #
 # Triggers:
-#   - push a tag v*      → gate, then publish a GitHub Release asset
-#                          (marked as a pre-release when the tag is a SemVer
-#                          pre-release: it contains -alpha, -beta, or -rc,
-#                          e.g. v1.0.0-alpha.1)
-#   - workflow_dispatch  → gate + build, upload a workflow artifact only
+#   - push a tag v*      → gate, then:
+#                          - a GitHub Release with the source archive and the harness plugin
+#                            (Agent Plugins 1.0) zip, each with its .sha256 — marked as a
+#                            pre-release when the tag is a SemVer pre-release (it contains
+#                            -alpha, -beta, or -rc, e.g. v1.0.0-alpha.2);
+#                          - the plugin, at the root of the orphan branch `copilot-plugin`,
+#                            tagged `plugin-v<version>`;
+#                          - a PR on poesis-cloud/saf-marketplace bumping the plugin entry's
+#                            version, ref and sha: on `main` (marketplace poesis-saf) for a
+#                            final release, on `preview` (poesis-saf-preview) for a
+#                            pre-release. It auto-merges once its validation passes. Skipped,
+#                            with a notice, when the GitHub App secrets are absent.
+#   - workflow_dispatch  → gate + build, upload workflow artifacts only
+#
+# The tag must match VERSION (`v` + VERSION): the plugin's version is the harness version.
 
 name: cd
 
@@ -57,9 +61,47 @@ jobs:
         timeout-minutes: 10
         outputs:
             archive: ${{ steps.build.outputs.archive }}
+            plugin-zip: ${{ steps.plugin.outputs.zip }}
+            version: ${{ steps.plugin.outputs.version }}
         steps:
             - name: Checkout
               uses: actions/checkout@v4
+
+            - name: Check the tag against VERSION
+              if: startsWith(github.ref, 'refs/tags/v')
+              run: |
+                  VERSION="$(tr -d '[:space:]' < VERSION)"
+                  if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+                      echo "::error::tag ${GITHUB_REF_NAME} does not match VERSION ${VERSION}"
+                      exit 1
+                  fi
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install the plugin renderer's dependencies
+              run: python -m pip install --quiet -r requirements.txt uv
+
+            - name: Build the harness plugin
+              id: plugin
+              run: |
+                  VERSION="$(tr -d '[:space:]' < VERSION)"
+                  NAME="poesis-saf-agentic-harness-plugin-v${VERSION}"
+                  python adapters/github-copilot/render_plugin.py --dest build/plugin
+                  (cd build/plugin && zip -qr "../../${NAME}.zip" .)
+                  sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+                  echo "zip=${NAME}.zip" >> "$GITHUB_OUTPUT"
+                  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+            - name: Upload the plugin
+              uses: actions/upload-artifact@v4
+              with:
+                  name: harness-plugin
+                  path: build/plugin
+                  include-hidden-files: true
+                  retention-days: 14
 
             - name: Build the source archive
               id: build
@@ -79,6 +121,8 @@ jobs:
                   path: |
                       ${{ steps.build.outputs.archive }}
                       ${{ steps.build.outputs.archive }}.sha256
+                      ${{ steps.plugin.outputs.zip }}
+                      ${{ steps.plugin.outputs.zip }}.sha256
                   retention-days: 14
 
     publish:
@@ -101,6 +145,8 @@ jobs:
                   files: |
                       ${{ needs.package.outputs.archive }}
                       ${{ needs.package.outputs.archive }}.sha256
+                      ${{ needs.package.outputs.plugin-zip }}
+                      ${{ needs.package.outputs.plugin-zip }}.sha256
                   generate_release_notes: true
                   # SemVer pre-release tags (-alpha / -beta / -rc) publish
                   # as GitHub pre-releases, never as the latest release.
@@ -108,3 +154,132 @@ jobs:
                       ${{ contains(github.ref_name, '-alpha')
                       || contains(github.ref_name, '-beta')
                       || contains(github.ref_name, '-rc') }}
+
+    plugin-branch:
+        # The plugin at the root of the orphan branch `copilot-plugin`, one commit per release
+        # (its parent is the previous release's), tagged `plugin-v<version>`.
+        name: Publish the plugin branch
+        needs: package
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        outputs:
+            sha: ${{ steps.commit.outputs.sha }}
+            ref: ${{ steps.commit.outputs.ref }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Download the plugin
+              uses: actions/download-artifact@v4
+              with:
+                  name: harness-plugin
+                  path: ${{ runner.temp }}/plugin
+
+            - name: Commit and tag the plugin
+              id: commit
+              env:
+                  VERSION: ${{ needs.package.outputs.version }}
+              run: |
+                  REF="plugin-v${VERSION}"
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  export GIT_INDEX_FILE="$RUNNER_TEMP/plugin.index"
+                  git --work-tree="$RUNNER_TEMP/plugin" add --all .
+                  TREE="$(git write-tree)"
+                  PARENT=""
+                  if git fetch --quiet origin copilot-plugin; then
+                      PARENT="-p $(git rev-parse FETCH_HEAD)"
+                  fi
+                  # shellcheck disable=SC2086
+                  SHA="$(git commit-tree "$TREE" $PARENT -m "Harness plugin ${VERSION} (from ${GITHUB_SHA})")"
+                  git tag -a "$REF" "$SHA" -m "Harness plugin ${VERSION}"
+                  git push origin "${SHA}:refs/heads/copilot-plugin" "refs/tags/${REF}"
+                  echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+                  echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
+    marketplace:
+        # A PR on the marketplace catalogue branch of the release's channel, auto-merging once
+        # its validation passes. Credentials: a GitHub App installed on saf-marketplace only.
+        name: Bump the marketplace entry
+        needs: [package, plugin-branch]
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        steps:
+            - name: Check the marketplace credentials
+              id: credentials
+              env:
+                  APP_ID: ${{ secrets.SAF_MARKETPLACE_APP_ID }}
+                  APP_KEY: ${{ secrets.SAF_MARKETPLACE_APP_PRIVATE_KEY }}
+              run: |
+                  if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+                      echo "::notice::SAF_MARKETPLACE_APP_ID / SAF_MARKETPLACE_APP_PRIVATE_KEY are not set: the marketplace PR is skipped."
+                      echo "enabled=false" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "enabled=true" >> "$GITHUB_OUTPUT"
+                  fi
+
+            - name: Choose the channel
+              if: steps.credentials.outputs.enabled == 'true'
+              id: channel
+              run: |
+                  case "${GITHUB_REF_NAME}" in
+                      *-alpha* | *-beta* | *-rc*) echo "branch=preview" >> "$GITHUB_OUTPUT"; echo "name=poesis-saf-preview" >> "$GITHUB_OUTPUT" ;;
+                      *) echo "branch=main" >> "$GITHUB_OUTPUT"; echo "name=poesis-saf" >> "$GITHUB_OUTPUT" ;;
+                  esac
+
+            - name: Create the GitHub App token
+              if: steps.credentials.outputs.enabled == 'true'
+              id: token
+              uses: actions/create-github-app-token@v1
+              with:
+                  app-id: ${{ secrets.SAF_MARKETPLACE_APP_ID }}
+                  private-key: ${{ secrets.SAF_MARKETPLACE_APP_PRIVATE_KEY }}
+                  owner: poesis-cloud
+                  repositories: saf-marketplace
+
+            - name: Checkout the harness scripts
+              if: steps.credentials.outputs.enabled == 'true'
+              uses: actions/checkout@v4
+              with:
+                  path: harness
+                  sparse-checkout: .github/scripts
+
+            - name: Checkout the marketplace
+              if: steps.credentials.outputs.enabled == 'true'
+              uses: actions/checkout@v4
+              with:
+                  repository: poesis-cloud/saf-marketplace
+                  ref: ${{ steps.channel.outputs.branch }}
+                  token: ${{ steps.token.outputs.token }}
+                  path: marketplace
+
+            - name: Open the PR and enable auto-merge
+              if: steps.credentials.outputs.enabled == 'true'
+              working-directory: marketplace
+              env:
+                  GH_TOKEN: ${{ steps.token.outputs.token }}
+                  VERSION: ${{ needs.package.outputs.version }}
+                  REF: ${{ needs.plugin-branch.outputs.ref }}
+                  SHA: ${{ needs.plugin-branch.outputs.sha }}
+                  BASE: ${{ steps.channel.outputs.branch }}
+                  MARKETPLACE: ${{ steps.channel.outputs.name }}
+              run: |
+                  BRANCH="bump/poesis-saf-agentic-harness-${VERSION}"
+                  git config user.name "saf-marketplace-bot"
+                  git config user.email "saf-marketplace-bot@users.noreply.github.com"
+                  git switch -c "$BRANCH"
+                  python3 ../harness/.github/scripts/bump_marketplace.py \
+                      .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
+                  git add .github/plugin/marketplace.json
+                  git commit -m "Bump poesis-saf-agentic-harness to ${VERSION}"
+                  git push --force origin "$BRANCH"
+                  gh pr create --base "$BASE" --head "$BRANCH" \
+                      --title "Bump poesis-saf-agentic-harness to ${VERSION}" \
+                      --body "Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
+                  gh pr merge "$BRANCH" --auto --squash

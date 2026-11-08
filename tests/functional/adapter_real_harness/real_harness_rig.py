@@ -74,6 +74,7 @@ def build_real_harness(tmp_path: Path, adapter: str) -> RealHarness:
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
     shutil.copy2(REPO_ROOT / "harness.py", harness_root / "harness.py")
+    shutil.copy2(REPO_ROOT / "VERSION", harness_root / "VERSION")
     models = harness_root / "adapters" / adapter / "models.yaml"
     profiles = [
         {"slug": slug, "costRank": min(rank, 10), "capabilities": build_capabilities(coding=5)}

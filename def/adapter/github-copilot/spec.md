@@ -496,7 +496,7 @@ which the Copilot CLI, the app and VS Code all read. Its root (`PLUGIN_ROOT`) ho
 
 | Path | Content |
 | --- | --- |
-| `plugin.json` | the manifest: `$schema: https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`, `name: saf-agentic-harness`, the harness `version`, `description`, `license`, `repository`. The schema is closed: no component path keys, no other top-level field. |
+| `plugin.json` | the manifest: `$schema: https://agent-plugins.org/schemas/1.0.0/plugin.schema.json`, `name: poesis-saf-agentic-harness`, the harness `version`, `description`, `license`, `repository`. The schema is closed: no component path keys, no other top-level field. |
 | `com.github.copilot/hooks/hooks.json` | the global hooks, as shell strings only (below), in the Copilot extension directory |
 | `VERSION` | the harness version, one line |
 | `requirements.lock` | the runtime requirements, hash-locked for every supported platform |
@@ -505,7 +505,7 @@ which the Copilot CLI, the app and VS Code all read. Its root (`PLUGIN_ROOT`) ho
 | `bin/register.sh`, `bin/register.ps1` | the `sessionStart` registration, shell only |
 | `bin/launcher.sh`, `bin/launcher.ps1` | the stable launcher, copied into the registry |
 | `harness.py`, `src/`, `contracts/`, `adapters/github-copilot/`, `adapters/binding_contract.py` | the harness runtime |
-| `LICENSE`, `README.md` | the license and the install instructions |
+| `LICENSE`, `NOTICE`, `README.md` | the license, its notice, and the install instructions |
 
 The manifest validates against the official schema
 (`schemas/1.0.0/plugin.schema.json` of the specification) in the harness CI.

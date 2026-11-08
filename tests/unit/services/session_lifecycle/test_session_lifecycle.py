@@ -6,6 +6,7 @@ import json
 import subprocess
 import threading
 import time
+from harness_version import HARNESS_VERSION
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,7 @@ def _start_entry(
                 "agent": agent,
                 "sessionId": session_id,
                 "parentSessionId": parent_session_id,
+                "harnessVersion": HARNESS_VERSION,
             }
         },
     )

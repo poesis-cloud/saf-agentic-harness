@@ -28,6 +28,8 @@ from utils.schema_validator import SchemaValidator, ValidationErrorRecord
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_ROOT = REPO_ROOT / "contracts"
 ENTRY_SHIM = REPO_ROOT / "harness.py"
+# Every fixture framework admits the installed harness (core spec, Harness compatibility).
+HARNESS_REQUIRE = ">=1.0.0a1"
 
 LOG_ENTRY_CONTRACT_ID = "gsmarc://saf/contracts/log-entry/v1"
 LOG_FILE_SUFFIX = ".log.jsonl"
@@ -527,6 +529,7 @@ def build_framework(
 
     conf_dir = framework_dir / "conf"
     _write_yaml(conf_dir / "access-control-list.conf.yaml", acl)
+    _write_yaml(conf_dir / "harness.conf.yaml", {"require": HARNESS_REQUIRE})
     _write_yaml(conf_dir / "model-profiles.conf.yaml", {"modelProfiles": list(profiles)})
     _write_yaml(conf_dir / "workspace.conf.yaml", layout)
     for slug, workflow in catalog.items():

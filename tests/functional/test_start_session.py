@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from harness_version import HARNESS_VERSION
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ class TestStartSession:
             "agent": "orchestrator",
             "sessionId": "root-session",
             "parentSessionId": None,
+            "harnessVersion": HARNESS_VERSION,
         }
         assert report["context"] == {
             "function": FUNCTION,
@@ -147,6 +149,7 @@ class TestStartSession:
             "agent": "builder",
             "sessionId": "step-session",
             "parentSessionId": orchestrator_session,
+            "harnessVersion": HARNESS_VERSION,
         }
         assert len(assert_journal_contract(harness, "step-session")) == 1
 

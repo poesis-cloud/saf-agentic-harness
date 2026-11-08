@@ -7,6 +7,8 @@ from typing import Any, Mapping
 
 from config.access_control_list import AccessControlList
 from errors import HarnessError, InquiryError, StateError
+from harness_version import HARNESS_VERSION
+from services.harness_compatibility import refuse_other_harness_version
 from services.session_lifecycle.session_end_report import SessionEndReport
 from services.session_lifecycle.session_ref import SessionRef
 from services.session_lifecycle.session_start_report import SessionStartReport
@@ -206,6 +208,11 @@ class SessionLifecycle:
                     ),
                 ),
             )
+        try:
+            refuse_other_harness_version(log)
+        except StateError as error:
+            # Not journaled: one harness version never writes into another's log.
+            return SessionStartReport(context=context, outcome=_error_outcome(error))
         registered = _find_session_ref(log)
         if registered is not None and registered["agent"] != agent:
             report = SessionStartReport(
@@ -235,6 +242,7 @@ class SessionLifecycle:
                 parent_session_id=(
                     registered["parentSessionId"] if registered else context.parent_session_id
                 ),
+                harness_version=HARNESS_VERSION,
             ),
         )
 
@@ -340,6 +348,7 @@ class SessionLifecycle:
                 agent=agent,
                 session_id=context.session_id,
                 parent_session_id=context.parent_session_id,
+                harness_version=HARNESS_VERSION,
             ),
         )
         try:

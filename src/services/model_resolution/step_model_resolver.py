@@ -6,6 +6,7 @@ import re
 
 from config import ModelProfiles, Step, WorkflowCatalog
 from errors import ConfigurationError, HarnessError, InquiryError, StateError, SystemFailureError
+from services.harness_compatibility import refuse_other_harness_version
 from services.model_resolution.model_profile_binding import ModelProfileBinding
 from services.model_resolution.model_profile_report import ModelProfileReport
 from stores.session_log_store import (
@@ -135,6 +136,7 @@ class StepModelResolver:
                 f"Session '{session_id}' carries an ending entry and accepts no invocation.",
                 False,
             )
+        refuse_other_harness_version(log)
         return log
 
     def _find_in_flight_resolution(self, log: Log) -> LogEntry | None:

@@ -1,9 +1,7 @@
-"""Run the harness's POSIX shell entries (`dispatch.sh`, fake interpreters) on every OS.
+"""Run POSIX shell scripts (the plugin's `sh` shims, fake interpreters) on every OS.
 
-The VS Code adapter's host entry is a bash script (its README lists `bash` as a
-prerequisite). POSIX hosts exec it directly through its shebang; Windows cannot exec a
-shebang script, so there the suite runs it through Git for Windows' bash — the one a
-Windows VS Code user installs — and skips when no such bash is present. WSL's
+POSIX hosts exec a script directly through its shebang; Windows cannot, so there the suite
+runs it through Git for Windows' bash, and skips when no such bash is present. WSL's
 `System32\\bash.exe` is never used: it runs a different filesystem and interpreter.
 """
 

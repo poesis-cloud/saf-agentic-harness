@@ -30,9 +30,11 @@ from config.artifact_node import ArtifactNode
 from config.config_loader import ConfigLoader
 from config.folder_node import FolderNode
 from config.framework_layout import FrameworkLayout
+from config.harness_requirement import HarnessRequirement
 from config.workflow_catalog import WorkflowCatalog
 from config.workspace_layout import WorkspaceLayout
 from errors import ConfigurationError, InquiryError
+from harness_version import HARNESS_VERSION
 from services.checking.condition_evaluator import ConditionEvaluator
 from services.checking.step_artifact_checker import StepArtifactChecker
 from services.checking.step_authorization_checker import StepAuthorizationChecker
@@ -189,6 +191,20 @@ def _resolve_artifact_schemas(
     return MappingProxyType(schemas)
 
 
+def _require_compatible_harness(requirement: HarnessRequirement) -> None:
+    """Refuse a framework whose `require` excludes the installed harness version.
+
+    Spec (core, Harness compatibility): configuration validity, so it fails the load
+    before any function runs (exit 3).
+    """
+    if not requirement.admits(HARNESS_VERSION):
+        raise ConfigurationError(
+            "incompatible-harness",
+            f"requires harness {requirement.require}; installed {HARNESS_VERSION}",
+            False,
+        )
+
+
 def _require_coherent_configuration(
     layout: FrameworkLayout,
     acl: AccessControlList,
@@ -247,6 +263,7 @@ class Application:
         loader = config_loader or ConfigLoader(EnvLoader(), YamlLoader(), validator)
 
         layout = loader.load_framework_layout(framework_root)
+        _require_compatible_harness(loader.load_harness_requirement(framework_root))
         acl = loader.load_access_control_list(framework_root)
         profiles = loader.load_model_profiles(framework_root)
         workspace_layout = loader.load_workspace_layout(framework_root)

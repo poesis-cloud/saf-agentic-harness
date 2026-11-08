@@ -2,9 +2,9 @@
 # CI baseline for saf-agentic-harness.
 #
 # The gate is `make verify` — the SAME entry point the inner dev loop uses, so a green
-# CI and a green desk mean the same thing. The harness is a pure-Python library with no
-# deployable artifact, so CI proves portability across the supported interpreters rather
-# than building an image.
+# CI and a green desk mean the same thing. CI also renders the harness plugin, bootstraps it
+# from its hash-locked lock on every supported OS, validates its manifest against the
+# official Agent Plugins schema, and installs it with the Copilot CLI.
 
 name: ci
 
@@ -58,6 +58,83 @@ jobs:
               env:
                   PYTHONDONTWRITEBYTECODE: "1"
               run: python -m pytest -p no:cacheprovider tests -q
+
+    plugin-bootstrap:
+        # The harness plugin bootstraps from its hash-locked lock on every supported OS and on
+        # the oldest and newest supported Python (adapter spec, Plugin mode). Python 3.10
+        # provisions with pip, 3.13 with uv.
+        name: Plugin bootstrap (${{ matrix.os }}, Python ${{ matrix.python-version }})
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 25
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                python-version: ["3.10", "3.13"]
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: ${{ matrix.python-version }}
+
+            - name: Install dependencies
+              run: python -m pip install --quiet -r requirements-dev.txt uv
+
+            - name: Render the plugin with its lock
+              run: python adapters/github-copilot/render_plugin.py --dest build/plugin
+
+            - name: Provision with pip (uv off PATH)
+              if: matrix.python-version == '3.10'
+              run: python -m pip uninstall --quiet --yes uv
+
+            - name: Bootstrap from the lock and run a governed session
+              env:
+                  SAF_PLUGIN_BOOTSTRAP_ROOT: build/plugin
+                  PYTHONDONTWRITEBYTECODE: "1"
+              run: python -m pytest -p no:cacheprovider tests/functional/plugin -q
+
+    plugin-manifest:
+        name: Plugin manifest and install
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: python -m pip install --quiet -r requirements.txt uv
+
+            - name: Render the plugin with its lock
+              run: python adapters/github-copilot/render_plugin.py --dest build/plugin
+
+            - name: Validate the manifest against the official Agent Plugins schema
+              run: |
+                  curl -sSfL -o "$RUNNER_TEMP/plugin.schema.json" \
+                      https://raw.githubusercontent.com/agentplugins/agent-plugins-spec/main/schemas/1.0.0/plugin.schema.json
+                  python .github/scripts/validate_plugin_manifest.py build/plugin/plugin.json \
+                      "$RUNNER_TEMP/plugin.schema.json"
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
+            - name: Install the plugin with the Copilot CLI (unauthenticated)
+              run: |
+                  npm install --global --silent @github/copilot
+                  export COPILOT_HOME="$RUNNER_TEMP/copilot-home"
+                  copilot --version
+                  copilot plugin install build/plugin
+                  copilot plugin list | tee "$RUNNER_TEMP/plugins.txt"
+                  grep -F "poesis-saf-agentic-harness" "$RUNNER_TEMP/plugins.txt"
 
     lint-markdown:
         name: Lint Markdown

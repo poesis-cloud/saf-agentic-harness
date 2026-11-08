@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from harness_version import HARNESS_VERSION
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -111,7 +112,11 @@ def build_registration_entry(
     timestamp: str = "2026-01-01T00:00:00Z",
 ) -> LogEntry:
     """Build function 0's registration entry — the log's first line."""
-    session: dict[str, Any] = {"sessionId": session_id, "agent": agent}
+    session: dict[str, Any] = {
+        "sessionId": session_id,
+        "agent": agent,
+        "harnessVersion": HARNESS_VERSION,
+    }
     if parent_session_id is not None:
         session["parentSessionId"] = parent_session_id
     return build_entry(

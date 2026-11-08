@@ -10,6 +10,10 @@ from typing import Any, ClassVar, Iterable, Mapping
 from config.step import Step
 from config.workflow_catalog import WorkflowCatalog
 from errors import ConfigurationError, HarnessError, InquiryError, StateError
+from services.harness_compatibility import (
+    HARNESS_VERSION_CHANGED,
+    refuse_other_harness_version,
+)
 from stores.session_log_store.context import Context
 from stores.session_log_store.error import Error
 from stores.session_log_store.log import Log
@@ -25,7 +29,7 @@ _RESOLVE_STEP_FUNCTION = "resolve-step"
 _STEP_RESOLUTION_STATUS = "step-resolution"
 _POSTCONDITIONS_FUNCTION = "check-step-postconditions"
 _SESSION_UNREGISTERED = "session-unregistered"
-_UNJOURNALED_CODES = frozenset({"session-ended", _SESSION_UNREGISTERED})
+_UNJOURNALED_CODES = frozenset({"session-ended", _SESSION_UNREGISTERED, HARNESS_VERSION_CHANGED})
 _SLUG_PATTERN = re.compile(r"^[a-z0-9-]+$")
 
 
@@ -189,6 +193,7 @@ class ContextResolver(ABC):
                 f"Session '{session_id}' carries no registration entry.",
                 False,
             )
+        refuse_other_harness_version(log)
         return session_ref
 
     def _refuse_worker_session(self, session_ref: Mapping[str, Any]) -> None:

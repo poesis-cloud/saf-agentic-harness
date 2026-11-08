@@ -9,6 +9,7 @@ from typing import Mapping, Sequence
 
 from config import Step, StepCondition, Workflow, WorkflowCatalog
 from errors import HarnessError, InquiryError, StateError, SystemFailureError
+from services.harness_compatibility import refuse_other_harness_version
 from services.step_resolution.step_resolution_report import StepResolutionReport
 from stores.session_log_store import (
     Context,
@@ -215,6 +216,7 @@ class StepResolver:
                 f"Session '{session_id}' carries an ending entry and accepts no invocation.",
                 False,
             )
+        refuse_other_harness_version(log)
         return log
 
     def _find_facilitated_workflow(self, log: Log, workflow_slug: str) -> Workflow:
