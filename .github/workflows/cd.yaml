@@ -292,10 +292,13 @@ jobs:
                       if [ -z "$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[].number')" ]; then
                           gh pr create --base "$BASE" --head "$BRANCH" --title "$TITLE" --body "$BODY"
                       fi
-                      # Auto-merge is unavailable without branch protection rules: merge directly.
-                      if gh pr merge "$BRANCH" --auto --squash || gh pr merge "$BRANCH" --squash; then
-                          break
-                      fi
+                      # Merge directly; when checks are required and pending, enable auto-merge
+                      # instead (unavailable without branch protection rules, hence direct first).
+                      gh pr merge "$BRANCH" --squash || gh pr merge "$BRANCH" --auto --squash || true
+                      for WAIT in $(seq 1 30); do
+                          [ "$(gh pr view "$BRANCH" --json state --jq .state)" = MERGED ] && break 2
+                          sleep 10
+                      done
                       if [ "$ATTEMPT" = 5 ]; then
                           echo "::error::could not merge the marketplace PR after ${ATTEMPT} attempts"
                           exit 1
