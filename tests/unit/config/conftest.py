@@ -12,6 +12,8 @@ from utils import EnvLoader, SchemaValidator, YamlLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACTS_ROOT = REPO_ROOT / "contracts"
+# Every fixture framework admits the installed harness (core spec, Harness compatibility).
+HARNESS_CONF = "require: \">=1.0.0a1\"\n"
 
 CAPABILITY_KEYS = (
     "deep-reasoning",
@@ -85,6 +87,7 @@ def framework_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     write_artifact_schema(root, "epic")
     write_yaml(root / "conf" / "access-control-list.conf.yaml", access_control_yaml())
+    write_yaml(root / "conf" / "harness.conf.yaml", HARNESS_CONF)
     return root
 
 
@@ -249,6 +252,7 @@ steps:
 def write_standard_configs(root: Path, workflow: str | None = None) -> None:
     """Write all non-env config fixtures used by happy-path loader tests."""
     write_yaml(root / "conf" / "access-control-list.conf.yaml", access_control_yaml())
+    write_yaml(root / "conf" / "harness.conf.yaml", HARNESS_CONF)
     write_yaml(root / "conf" / "model-profiles.conf.yaml", model_profiles_yaml())
     write_yaml(root / "conf" / "workspace.conf.yaml", workspace_yaml())
     write_yaml(root / "conf" / "workflows" / "planning.workflow.conf.yaml", workflow or workflow_yaml())

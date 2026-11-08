@@ -38,9 +38,8 @@ def _cp1252_environment(tmp_path: Path) -> dict[str, str]:
 @pytest.mark.parametrize(
     "arguments",
     [
-        ("adapters/vscode-github-copilot-chat/adapter.py", "hook", "--event", "PreToolUse"),
         (
-            "adapters/github-copilot-cli/adapter.py",
+            "adapters/github-copilot/adapter.py",
             "hook",
             "--event",
             "preToolUse",
@@ -48,7 +47,7 @@ def _cp1252_environment(tmp_path: Path) -> dict[str, str]:
             "missing-framework",
         ),
     ],
-    ids=["vscode-github-copilot-chat", "github-copilot-cli"],
+    ids=["github-copilot"],
 )
 def test_a_hook_diagnostic_is_utf8_under_a_legacy_codepage(
     tmp_path: Path, arguments: tuple[str, ...]

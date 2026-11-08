@@ -15,6 +15,7 @@ from config.condition_type_checker import ConditionTypeChecker
 from config.artifact_node import ArtifactNode
 from config.folder_node import FolderNode
 from config.framework_layout import FrameworkLayout
+from config.harness_requirement import HarnessRequirement
 from config.model_profile import ModelProfile
 from config.model_profiles import ModelProfiles
 from config.privilege import Privilege
@@ -35,12 +36,14 @@ _CONF_DIR_NAME = "conf"
 _ACCESS_CONTROL_LIST_FILENAME = "access-control-list.conf.yaml"
 _MODEL_PROFILES_FILENAME = "model-profiles.conf.yaml"
 _WORKSPACE_FILENAME = "workspace.conf.yaml"
+_HARNESS_FILENAME = "harness.conf.yaml"
 _WORKFLOW_FILENAME_SUFFIX = ".workflow.conf.yaml"
 
 _ACCESS_CONTROL_LIST_CONTRACT = "gsmarc://saf/contracts/conf/framework/access-control-list.conf/v1"
 _MODEL_PROFILES_CONTRACT = "gsmarc://saf/contracts/conf/framework/model-profiles.conf/v1"
 _WORKSPACE_CONTRACT = "gsmarc://saf/contracts/conf/framework/workspace.conf/v1"
 _WORKFLOW_CONTRACT = "gsmarc://saf/contracts/conf/framework/workflow.conf/v1"
+_HARNESS_CONTRACT = "gsmarc://saf/contracts/conf/framework/harness.conf/v1"
 
 _FRAMEWORK_DIR_KEY = "FRAMEWORK_DIR"
 _REQUIRED_LAYOUT_KEYS = (
@@ -270,6 +273,19 @@ class ConfigLoader:
         nodes = tuple(self._build_node(node) for node in data["nodes"])
         self._require_unambiguous_artifact_paths(nodes)
         return WorkspaceLayout(nodes=nodes)
+
+    def load_harness_requirement(self, framework_root: str | Path) -> HarnessRequirement:
+        """Load the harness versions the framework supports (`require`, PEP 440)."""
+        path = self._resolve_conf_dir(framework_root) / _HARNESS_FILENAME
+        data = self._load_source(path, _HARNESS_CONTRACT)
+        try:
+            return HarnessRequirement(require=data["require"])
+        except ValueError as failure:
+            raise ConfigurationError(
+                "invalid-configuration-source",
+                f"Configuration source '{path}': {failure}.",
+                False,
+            ) from failure
 
     def load_workflow_catalog(self, framework_root: str | Path) -> WorkflowCatalog:
         """Load every workflow configuration and validate the catalog's advisory graph."""

@@ -6,6 +6,10 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from errors import HarnessError, StateError
+from services.harness_compatibility import (
+    HARNESS_VERSION_CHANGED,
+    refuse_other_harness_version,
+)
 from stores.session_log_store import (
     Context,
     Error,
@@ -22,7 +26,9 @@ _SESSION_ENDED_CODE = "session-ended"
 _SESSION_UNREGISTERED_CODE = "session-unregistered"
 
 # Rule 3 (the C8 refusal) and rule 4 (`session-unregistered` has no log to journal to).
-_NON_JOURNALABLE_CODES = frozenset({_SESSION_ENDED_CODE, _SESSION_UNREGISTERED_CODE})
+_NON_JOURNALABLE_CODES = frozenset(
+    {_SESSION_ENDED_CODE, _SESSION_UNREGISTERED_CODE, HARNESS_VERSION_CHANGED}
+)
 
 # Rule 1 assigns `session-unregistered` to `inquiry-error` — the mediated backstop —
 # while the store raises it as a state failure, so the seam re-assigns it by code.
@@ -68,6 +74,7 @@ class CheckingService(ABC):
         try:
             log = self._session_log_store.load_session_log(session_id)
             self._refuse_ended_session(log)
+            refuse_other_harness_version(log)
             workflow_instance_id = self._find_workflow_instance_id(log)
             return self._check_open_session(
                 session_id, parent_session_id, log, workflow_instance_id, **request

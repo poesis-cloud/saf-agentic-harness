@@ -59,6 +59,11 @@
             "parentSessionId": {
               "$ref": "gsmarc://saf/contracts/context/v1#/$defs/parentSessionId",
               "description": "The opened session's parent session id, if any."
+            },
+            "harnessVersion": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The harness version that started the session (core spec, Harness compatibility). Every later call of functions 0-10 by another harness version is refused with harness-version-changed."
             }
           },
           "unevaluatedProperties": false,

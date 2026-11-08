@@ -15,10 +15,25 @@ The canonical harness-core specification — terminology, invariants, the twelve
 contract, design, and implementation — lives in **[`def/core/spec.md`](def/core/spec.md)**.
 Read that first; this file is
 only an orientation pointer. Each host binding has its own specification under
-`def/adapter/<host>/spec.md`:
-[`vscode-github-copilot-chat`](def/adapter/vscode-github-copilot-chat/spec.md) (VS Code +
-Copilot Chat) and [`github-copilot-cli`](def/adapter/github-copilot-cli/spec.md) (the GitHub
-Copilot app and the Copilot CLI — install: [`adapters/github-copilot-cli/README.md`](adapters/github-copilot-cli/README.md)).
+`def/adapter/<host>/spec.md`. Today there is one,
+[`github-copilot`](def/adapter/github-copilot/spec.md): the GitHub Copilot agent runtime that
+the Copilot CLI, the Copilot app and VS Code (Session Target: Copilot) share.
+
+## Install
+
+Users install the harness as the Copilot plugin **`poesis-saf-agentic-harness`** (Agent Plugins
+1.0), beside their framework's plugin, from the marketplace `poesis-cloud/saf-marketplace`:
+
+```bash
+copilot plugin marketplace add poesis-cloud/saf-marketplace
+copilot plugin install poesis-saf-agentic-harness@poesis-saf
+```
+
+The Copilot app and VS Code install from the same marketplace; VS Code needs **Session Target:
+Copilot**. The first session provisions the harness requirements from the plugin's hash-locked
+`requirements.lock`. A folder is governed when its Git top-level holds a committed
+`.saf/workspace.yaml` naming the framework. Full steps, settings and the developer install are
+in [`adapters/github-copilot/README.md`](adapters/github-copilot/README.md).
 
 ## SAF context
 
@@ -41,19 +56,19 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
 - `def/core/` — the harness-core specification (`spec.md`) and its class diagram
   (`harness-src-classes.puml`) — `src/` only, host-blind.
 - `def/adapter/<host>/` — one specification + class diagram per host binding
-  (`vscode-github-copilot-chat/`, `github-copilot-cli/`).
-- `adapters/` — host-specific bindings (`vscode-github-copilot-chat/`, `github-copilot-cli/`).
+  (`github-copilot/`).
+- `adapters/` — host-specific bindings (`github-copilot/`, with its plugin renderer).
 - `contracts/` — JSON Schema contracts for configuration, artifacts, and the journal.
 - `src/` — the Python implementation; `harness.py` at the root is its entry point
   (`python3 harness.py <function> [flags]`).
-- `tests/` — the unit (`tests/unit/`), functional (`tests/functional/`), and adapter
-  (`tests/adapter/`) planes.
+- `tests/` — the unit (`tests/unit/`) and functional (`tests/functional/`) planes; the adapter
+  and its plugin are tested in both.
 
 ## Requirements
 
-- Python 3.10–3.12.
-- Runtime: `pip install -r requirements.txt` (cel-python, jsonschema, PyYAML). Tests
-  additionally need `pip install -r requirements-dev.txt`.
+- Python 3.10 or newer (CI runs 3.10–3.13).
+- Runtime: `pip install -r requirements.txt` (cel-python, jsonschema, PyYAML, packaging). Tests
+  additionally need `pip install -r requirements-dev.txt`. The plugin provisions these itself.
 - **Git ≥ 2.38** on `PATH`: step transactions rebase in memory with
   `git merge-tree --write-tree` ([Workspace Git plane](def/core/spec.md#workspace-git-plane)).
 - **A Git identity in the governed workspace** (`git config user.name` and
@@ -61,23 +76,27 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
   every validated write onto its step ref and replays step commits on promotion, so Git must
   be able to name the committer. The harness's `refs/harness/*` refs (step refs, artifact
   locks) are local-only: Git's default refspecs never push or fetch them.
-- The interpreter that runs the hooks must have `requirements.txt` installed:
-  `make install-hooks` records that absolute interpreter (`HARNESS_PYTHON`, defaulting to the
-  interpreter running the renderer, i.e. `PYTHON`) and `FRAMEWORK_DIR` into every rendered
-  hook entry's `env`, and refuses to render if the interpreter cannot import the requirements.
+- **A compatible framework:** the framework declares the harness versions it supports in
+  `conf/harness.conf.yaml` (`require: ">=1.0.0a2,<1.1"`, a PEP 440 range); the harness refuses
+  any other version at load ("requires harness <range>; installed <version>"). The installed
+  version is [`VERSION`](VERSION).
+- Developer install only: the interpreter that runs the hooks must have `requirements.txt`
+  installed. `make install-hooks` records that absolute interpreter (`HARNESS_PYTHON`,
+  defaulting to the interpreter running the installer, i.e. `PYTHON`) into every rendered
+  hook entry, and refuses to render if the interpreter cannot import the requirements.
 
 ## Validation
 
 ```bash
-make verify       # the full pytest suite (unit + functional + adapter planes); CI runs this
+make verify       # the full pytest suite (unit + functional planes); CI runs this
 make unit         # the unit plane only (tests/unit)
 make functional   # the functional plane only (tests/functional)
-make adapter      # the adapter conformance plane only (tests/adapter)
+make plugin       # render the harness plugin into build/plugin (needs uv for the lock)
 ```
 
 `make test` is an alias for `make verify`;
-`make install-hooks FRAMEWORK_DIR=<framework> BUNDLE_DIR=<bundle>` renders and installs the
-host hook registration. See the [`Makefile`](Makefile) for what each target runs and the
+`make install-hooks FRAMEWORK_DIR=<framework> BUNDLE_DIR=<bundle>` is the developer install of
+the hooks into a framework bundle. See the [`Makefile`](Makefile) for what each target runs and the
 [TDD plan](def/tdd-plan.md) for the test layout.
 
 ## Recovering an interrupted workflow instance

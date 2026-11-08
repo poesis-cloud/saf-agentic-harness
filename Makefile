@@ -1,7 +1,7 @@
 # Reusable orchestration-harness verification core.
 #
 # ONE entry point, reused everywhere:
-#   - the agent's fast inner loop runs a single slice (`unit`, `functional`, `adapter`);
+#   - the agent's fast inner loop runs a single slice (`unit`, `functional`);
 #   - CI runs the SAME `make verify` target over the whole tree.
 #
 # `verify` runs the pytest suite; it exits non-zero on any failure. Runtime workspace-artifact
@@ -11,14 +11,12 @@
 
 PYTHON ?= python3
 PYTEST := PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -p no:cacheprovider
-HOOKS_DEST ?= $(FRAMEWORK_DIR)/.github/hooks
 
-.PHONY: verify test unit functional adapter install-hooks install-hooks-copilot-cli
+.PHONY: verify test unit functional install-hooks plugin
 
 ## verify: the full pytest suite in one invocation — the unit plane (src/ units + the adapter's
-## own units), the functional plane (every harness function end to end through the composition
-## root), and the adapter plane (hook map, hook contracts, dispatch funnel). Blocks the push on
-## any failure.
+## own units) and the functional plane (every harness function end to end through the
+## composition root, and the adapter as a process). Blocks the push on any failure.
 verify:
 	$(PYTEST) tests -q
 
@@ -27,71 +25,18 @@ unit:
 	$(PYTEST) tests/unit -q
 
 ## functional: the functional plane only — every harness function driven through the real
-## composition root over a real framework and workspace.
+## composition root over a real framework and workspace, and the adapter as a process.
 functional:
 	$(PYTEST) tests/functional -q
-
-## adapter: the adapter conformance plane only — hooks map, hook contracts, dispatch funnel.
-adapter:
-	$(PYTEST) tests/adapter -q
 
 ## test: alias for the gate (same pytest suite as verify).
 test: verify
 
-## install-hooks: render the VS Code hook registration and install it where the host will read
-## it. ALL THREE targets in one run: the workspace hooks file, the per-orchestrator
-## agent-scoped UserPromptSubmit block (H0) that opens the session, and the workspace settings
-## that make the host EXECUTE them — without `chat.useHooks` the other two are discovered and
-## never run. Everything rendered into the first two is MACHINE-SPECIFIC (absolute dispatch
-## path, absolute framework root, absolute interpreter) and is never committed — re-run this after moving either
-## checkout.
-##
-## PIPELINE ORDERING — a framework ships its agents through a host bundle, and the H0 block
-## belongs in the agents the host is actually given. So the framework's OWN bundle renderer
-## runs FIRST, and this target injects on top of its output:
-##
-##   (in the framework checkout)  python3 builds/<host>/render_bundle.py . "$$BUNDLE"
-##   (here)                       make install-hooks FRAMEWORK_DIR=<framework> BUNDLE_DIR=$$BUNDLE
-##
-## There is no harness target for the first step: the bundle renderer is the framework's
-## artifact, in the framework's repo, and the harness neither ships nor versions it.
-##
-##   FRAMEWORK_DIR  required — the framework root; becomes every hook's cwd and the anchor the
-##                  harness itself reads from the environment.
-##   BUNDLE_DIR     the rendered bundle root. AGENTS_DIR and AGENTS_DEST both default to
-##                  $(BUNDLE_DIR)/agents — the H0 block is injected in place, on top of the
-##                  bundle's own frontmatter. There is NO framework-anchored default: it would
-##                  install a second copy of every orchestrator beside the delivered one.
-##   HOOKS_DEST     defaults to $(FRAMEWORK_DIR)/.github/hooks — the host collects
-##                  .github/hooks/*.json from the workspace folder it has OPEN, which is the
-##                  framework workspace the agents run in, not this harness checkout.
-##   AGENTS_DIR     agent sources to read; set it with AGENTS_DEST for a framework whose agents
-##                  reach the host some other way (e.g. the workspace .github/agents/ scope).
-##   AGENTS_DEST    where the rendered agents land.
-##   HARNESS_PYTHON absolute interpreter the hooks run under; defaults to the interpreter
-##                  running the renderer ($(PYTHON) — run from an activated venv, or set
-##                  PYTHON). It must import requirements.txt (PyYAML, jsonschema, cel-python)
-##                  or the render is refused. Recorded with FRAMEWORK_DIR in every hook entry's
-##                  `env`: the host runs hooks with its own environment, not your shell's.
-##   SETTINGS_DEST  directory holding the workspace settings file; defaults to the location the
-##                  adapter's settings map names, under $(FRAMEWORK_DIR). That file is COMMITTED
-##                  and hand-maintained, so the required keys are merged into it and everything
-##                  else — other settings, comments, indentation — is left as it was.
-install-hooks:
-	$(PYTHON) adapters/render_hooks.py \
-		--env vscode-github-copilot-chat \
-		$(if $(HARNESS_PYTHON),--python "$(HARNESS_PYTHON)") \
-		--framework-dir "$(FRAMEWORK_DIR)" \
-		--dest "$(HOOKS_DEST)" \
-		--bundle-dir "$(BUNDLE_DIR)" \
-		--agents-dir "$(AGENTS_DIR)" \
-		--agents-dest "$(AGENTS_DEST)" \
-		--settings-dest "$(SETTINGS_DEST)"
-
-## install-hooks-copilot-cli: render the GitHub Copilot app / Copilot CLI hooks
-## (adapters/github-copilot-cli) into the framework's rendered plugin bundle: the global
-## hooks.json and the orchestrators' agent-scoped H0 block. Machine-specific output, never
-## committed. On Windows run install.py directly (see adapters/github-copilot-cli/README.md).
+## install-hooks: the DEVELOPER install of the github-copilot adapter — render its hooks
+## (adapters/github-copilot) into a framework's rendered plugin bundle: the global hooks.json
+## and the orchestrators' agent-scoped H0 block. Machine-specific output, never committed. On
+## Windows run install.py directly (see adapters/github-copilot/README.md). Users install the
+## harness PLUGIN instead (see `plugin`).
 ##
 ##   FRAMEWORK_DIR  required — the framework CHECKOUT (not the bundle).
 ##   BUNDLE_DIR     required — the framework's rendered Copilot plugin bundle.
@@ -99,9 +44,18 @@ install-hooks:
 ##   HARNESS_PYTHON absolute interpreter the hooks run under; defaults to the interpreter
 ##                  running the installer ($(PYTHON)). It must import requirements.txt or the
 ##                  install is refused. Recorded as `exec` and SAF_HARNESS_PYTHON in every entry.
-install-hooks-copilot-cli:
-	$(PYTHON) adapters/github-copilot-cli/install.py \
+install-hooks:
+	$(PYTHON) adapters/github-copilot/install.py \
 		$(if $(HARNESS_PYTHON),--python "$(HARNESS_PYTHON)") \
 		--framework-dir "$(FRAMEWORK_DIR)" \
 		--bundle-dir "$(BUNDLE_DIR)" \
 		$(if $(WORKSPACE_DIR),--workspace-dir "$(WORKSPACE_DIR)")
+
+## plugin: build the harness PLUGIN (Agent Plugins 1.0) into PLUGIN_DIR (default
+## build/plugin): the manifest, the hooks, the shims and the launcher, and the runtime. Pass
+## LOCK=<requirements.lock> to ship a hash-locked lock; CI generates it with
+## `uv pip compile --universal --generate-hashes requirements.txt`.
+PLUGIN_DIR ?= build/plugin
+plugin:
+	$(PYTHON) adapters/github-copilot/render_plugin.py --dest "$(PLUGIN_DIR)" \
+		$(if $(LOCK),--lock "$(LOCK)")

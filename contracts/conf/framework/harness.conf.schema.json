@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gsmarc://saf/contracts/conf/framework/harness.conf/v1",
+  "title": "Harness compatibility configuration schema",
+  "description": "Validation schema for conf/harness.conf.yaml: the harness versions the framework supports (core spec, Harness compatibility). The fail-fast configuration load refuses an installed harness version outside `require`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "require"
+  ],
+  "properties": {
+    "require": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A PEP 440 version specifier set, e.g. \">=1.0.0a1,<1.1\". The installed harness version is read as a PEP 440 version."
+    }
+  }
+}

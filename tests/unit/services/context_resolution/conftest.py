@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from harness_version import HARNESS_VERSION
 from pathlib import Path
 
 import pytest
@@ -146,6 +147,7 @@ def register_session(session_log_store: SessionLogStore):
                         "agent": agent,
                         "sessionId": session_id,
                         "parentSessionId": parent_session_id,
+                        "harnessVersion": HARNESS_VERSION,
                     }
                 },
             )
@@ -303,6 +305,7 @@ def registration_entry():
                     "agent": agent,
                     "sessionId": session_id,
                     "parentSessionId": parent_session_id,
+                    "harnessVersion": HARNESS_VERSION,
                 }
             },
         )

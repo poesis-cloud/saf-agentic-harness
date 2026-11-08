@@ -164,6 +164,9 @@ def framework_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (root / "conf" / "access-control-list.conf.yaml").write_text(
         ACCESS_CONTROL_LIST, encoding="utf-8"
     )
+    (root / "conf" / "harness.conf.yaml").write_text(
+        'require: ">=1.0.0a1"\n', encoding="utf-8"
+    )
     (root / "conf" / "model-profiles.conf.yaml").write_text(
         _model_profiles(), encoding="utf-8"
     )

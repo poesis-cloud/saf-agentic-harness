@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from harness_version import HARNESS_VERSION
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -166,6 +167,7 @@ def start_session_log(
                     "agent": agent,
                     "sessionId": session_id,
                     "parentSessionId": None,
+                    "harnessVersion": HARNESS_VERSION,
                 }
             },
         )
