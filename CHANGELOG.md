@@ -4,7 +4,7 @@ All notable changes to this project are documented here. Versions follow
 [SemVer](https://semver.org/); pre-release tags (`-alpha`, `-beta`, `-rc`) are published as
 GitHub pre-releases.
 
-## Unreleased (v1.0.0-alpha.2)
+## v1.0.0-alpha.3
 
 ### Plugin fix
 
