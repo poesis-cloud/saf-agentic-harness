@@ -13,7 +13,7 @@
 #                          - a PR on poesis-cloud/saf-marketplace bumping the plugin entry's
 #                            version, ref and sha: on `main` (marketplace poesis-saf) for a
 #                            final release, on `preview` (poesis-saf-preview) for a
-#                            pre-release. It auto-merges once its validation passes. Skipped,
+#                            pre-release. It merges once its validation passes. Skipped,
 #                            with a notice, when the GitHub App secrets are absent.
 #   - workflow_dispatch  → gate + build, upload workflow artifacts only
 #
@@ -203,7 +203,7 @@ jobs:
                   echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
     marketplace:
-        # A PR on the marketplace catalogue branch of the release's channel, auto-merging once
+        # A PR on the marketplace catalogue branch of the release's channel, merging once
         # its validation passes. Credentials: a GitHub App installed on saf-marketplace only.
         name: Bump the marketplace entry
         needs: [package, plugin-branch]
