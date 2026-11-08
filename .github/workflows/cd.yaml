@@ -259,7 +259,7 @@ jobs:
                   token: ${{ steps.token.outputs.token }}
                   path: marketplace
 
-            - name: Open the PR and enable auto-merge
+            - name: Open the PR and merge it
               if: steps.credentials.outputs.enabled == 'true'
               working-directory: marketplace
               env:
@@ -273,13 +273,32 @@ jobs:
                   BRANCH="bump/poesis-saf-agentic-harness-${VERSION}"
                   git config user.name "saf-marketplace-bot"
                   git config user.email "saf-marketplace-bot@users.noreply.github.com"
-                  git switch -c "$BRANCH"
-                  python3 ../harness/.github/scripts/bump_marketplace.py \
-                      .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
-                  git add .github/plugin/marketplace.json
-                  git commit -m "Bump poesis-saf-agentic-harness to ${VERSION}"
-                  git push --force origin "$BRANCH"
-                  gh pr create --base "$BASE" --head "$BRANCH" \
-                      --title "Bump poesis-saf-agentic-harness to ${VERSION}" \
-                      --body "Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
-                  gh pr merge "$BRANCH" --auto --squash
+                  TITLE="Bump poesis-saf-agentic-harness to ${VERSION}"
+                  BODY="Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
+                  # Concurrent plugin bumps edit the same catalogue: each attempt restarts from
+                  # the freshest base, so a lost race only costs another attempt.
+                  for ATTEMPT in 1 2 3 4 5; do
+                      git fetch --quiet origin "$BASE"
+                      git switch -C "$BRANCH" "origin/${BASE}"
+                      python3 ../harness/.github/scripts/bump_marketplace.py \
+                          .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
+                      git add .github/plugin/marketplace.json
+                      if git diff --cached --quiet; then
+                          echo "The marketplace already points at ${REF}."
+                          exit 0
+                      fi
+                      git commit -q -m "$TITLE"
+                      git push --force origin "$BRANCH"
+                      if [ -z "$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[].number')" ]; then
+                          gh pr create --base "$BASE" --head "$BRANCH" --title "$TITLE" --body "$BODY"
+                      fi
+                      # Auto-merge is unavailable without branch protection rules: merge directly.
+                      if gh pr merge "$BRANCH" --auto --squash || gh pr merge "$BRANCH" --squash; then
+                          break
+                      fi
+                      if [ "$ATTEMPT" = 5 ]; then
+                          echo "::error::could not merge the marketplace PR after ${ATTEMPT} attempts"
+                          exit 1
+                      fi
+                      sleep $((ATTEMPT * 5))
+                  done
