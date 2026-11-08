@@ -13,7 +13,7 @@
 #                          - a PR on poesis-cloud/saf-marketplace bumping the plugin entry's
 #                            version, ref and sha: on `main` (marketplace poesis-saf) for a
 #                            final release, on `preview` (poesis-saf-preview) for a
-#                            pre-release. It auto-merges once its validation passes. Skipped,
+#                            pre-release. It merges once its validation passes. Skipped,
 #                            with a notice, when the GitHub App secrets are absent.
 #   - workflow_dispatch  → gate + build, upload workflow artifacts only
 #
@@ -203,7 +203,7 @@ jobs:
                   echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
     marketplace:
-        # A PR on the marketplace catalogue branch of the release's channel, auto-merging once
+        # A PR on the marketplace catalogue branch of the release's channel, merging once
         # its validation passes. Credentials: a GitHub App installed on saf-marketplace only.
         name: Bump the marketplace entry
         needs: [package, plugin-branch]
@@ -259,7 +259,7 @@ jobs:
                   token: ${{ steps.token.outputs.token }}
                   path: marketplace
 
-            - name: Open the PR and enable auto-merge
+            - name: Open the PR and merge it
               if: steps.credentials.outputs.enabled == 'true'
               working-directory: marketplace
               env:
@@ -273,13 +273,35 @@ jobs:
                   BRANCH="bump/poesis-saf-agentic-harness-${VERSION}"
                   git config user.name "saf-marketplace-bot"
                   git config user.email "saf-marketplace-bot@users.noreply.github.com"
-                  git switch -c "$BRANCH"
-                  python3 ../harness/.github/scripts/bump_marketplace.py \
-                      .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
-                  git add .github/plugin/marketplace.json
-                  git commit -m "Bump poesis-saf-agentic-harness to ${VERSION}"
-                  git push --force origin "$BRANCH"
-                  gh pr create --base "$BASE" --head "$BRANCH" \
-                      --title "Bump poesis-saf-agentic-harness to ${VERSION}" \
-                      --body "Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
-                  gh pr merge "$BRANCH" --auto --squash
+                  TITLE="Bump poesis-saf-agentic-harness to ${VERSION}"
+                  BODY="Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
+                  # Concurrent plugin bumps edit the same catalogue: each attempt restarts from
+                  # the freshest base, so a lost race only costs another attempt.
+                  for ATTEMPT in 1 2 3 4 5; do
+                      git fetch --quiet origin "$BASE"
+                      git switch -C "$BRANCH" "origin/${BASE}"
+                      python3 ../harness/.github/scripts/bump_marketplace.py \
+                          .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
+                      git add .github/plugin/marketplace.json
+                      if git diff --cached --quiet; then
+                          echo "The marketplace already points at ${REF}."
+                          exit 0
+                      fi
+                      git commit -q -m "$TITLE"
+                      git push --force origin "$BRANCH"
+                      if [ -z "$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number --jq '.[].number')" ]; then
+                          gh pr create --base "$BASE" --head "$BRANCH" --title "$TITLE" --body "$BODY"
+                      fi
+                      # Merge directly; when checks are required and pending, enable auto-merge
+                      # instead (unavailable without branch protection rules, hence direct first).
+                      gh pr merge "$BRANCH" --squash || gh pr merge "$BRANCH" --auto --squash || true
+                      for WAIT in $(seq 1 30); do
+                          [ "$(gh pr view "$BRANCH" --json state --jq .state)" = MERGED ] && break 2
+                          sleep 10
+                      done
+                      if [ "$ATTEMPT" = 5 ]; then
+                          echo "::error::could not merge the marketplace PR after ${ATTEMPT} attempts"
+                          exit 1
+                      fi
+                      sleep $((ATTEMPT * 5))
+                  done
