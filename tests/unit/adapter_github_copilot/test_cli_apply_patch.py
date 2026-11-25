@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from github_copilot_adapter.apply_patch import PatchParseError, parse_patch_targets
+from saf_host_adapter.apply_patch import PatchParseError, parse_patch_targets
 
 PATCH = """*** Begin Patch
 *** Add File: C:\\fw\\workspace\\portfolio\\new.md

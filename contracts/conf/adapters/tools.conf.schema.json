@@ -202,6 +202,31 @@
         "minLength": 1,
         "description": "One dispatch-mode value."
       }
+    },
+    "hostRootSessionKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe for the host's ROOT session id: the id shared by a conversation and every subagent inside it, on hosts where a subagent's events carry the root id beside their own (hostSessionKeys then lists the subagent's id first). Empty: the host session id is its own root."
+    },
+    "hostTurnAgentKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe, on a turn-opening event, for the host-observed identity of the agent selected for the conversation (the session-started boundary's agent). Empty: the host names no selected agent in its payloads, and only an agent-scoped registration can supply it."
+    },
+    "hostToolUseIdKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe, on a single-call tool event, for the host's tool-call id (correlates a dispatch's pre- and post-tool events)."
+    },
+    "syncDispatchFlagKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Boolean dispatch arguments that request background execution. A governed dispatch is denied unless each listed argument is present and false, for hosts that run a dispatch asynchronously when the argument is omitted."
+    },
+    "upsertTools": {
+      "description": "Write tools (declared in writeTools) that create a missing file or overwrite an existing one: the action is resolved per target at the pre-tool boundary — create when the path does not exist, update when it does.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One host tool name."
+      }
     }
   },
   "$defs": {

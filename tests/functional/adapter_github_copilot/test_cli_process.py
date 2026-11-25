@@ -80,6 +80,11 @@ def host(tmp_path: Path) -> Host:
     # adapter contracts the harness ships beside `adapters/`: the copy carries both.
     shutil.copy2(REPO_ROOT / "adapters" / "binding_contract.py", root / "adapters")
     shutil.copytree(
+        REPO_ROOT / "adapters" / "common",
+        root / "adapters" / "common",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copytree(
         REPO_ROOT / "contracts" / "conf" / "adapters", root / "contracts" / "conf" / "adapters"
     )
     shutil.copy2(STUB_ENTRYPOINT, root / "harness.py")

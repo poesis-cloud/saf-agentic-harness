@@ -1,10 +1,14 @@
 """The adapter's private record of which harness session each host session is in.
 
-Captured payloads show that inside a subagent EVERY event carries `sessionId` = that
-subagent's own `agentId` (with `parentAgentId` naming the dispatcher). Host sessions are
-therefore never shared between nested agents, so one flat record per host session is
-enough — no stack. One FILE per host session keeps parallel subagents (concurrent hook
-processes) from losing each other's updates; writes are atomic (`os.replace`).
+Every host binding names each agent by its own host id inside a subagent (Copilot: the
+subagent's `sessionId` = its `agentId`; Claude Code: the `agent_id` every event inside the
+subagent carries). Host sessions are therefore never shared between nested agents, so one
+flat record per host session is enough — no stack. One FILE per host session keeps parallel
+subagents (concurrent hook processes) from losing each other's updates; writes are atomic
+(`os.replace`).
+
+Hosts whose subagent-start event does not name the dispatcher (Claude Code) also keep the
+dispatches the adapter let through, so that event can be correlated to its dispatcher.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Iterator
@@ -23,6 +28,10 @@ STEP_ORIGIN = "step"
 
 class TrackerError(RuntimeError):
     """Raised when a persisted session record cannot be read back."""
+
+
+class AmbiguousDispatchError(TrackerError):
+    """Raised when a started subagent matches pending dispatches of several dispatchers."""
 
 
 @dataclass(frozen=True)
@@ -61,6 +70,8 @@ class SessionTracker:
     def __init__(self, state_dir: Path) -> None:
         self._sessions_dir = state_dir / "sessions"
         self._ignored_returns_dir = state_dir / "ignored-returns"
+        self._dispatches_dir = state_dir / "dispatches"
+        self._dispatchers_dir = state_dir / "dispatchers"
 
     def read(self, host_id: str) -> SessionRecord | None:
         path = self._path(host_id)
@@ -152,6 +163,83 @@ class SessionTracker:
             self._ignored_returns_dir / _safe_component(host_id), ignore_errors=True
         )
 
+    # Dispatch correlation (hosts whose subagent start names no dispatcher) ---------------
+
+    def add_pending_dispatch(
+        self, root_host_id: str, call_id: str | None, dispatcher_host_id: str, actor: str
+    ) -> None:
+        """Record a dispatch the adapter let through, until its subagent starts.
+
+        One FILE per dispatch, named so that a listing is in dispatch order; claimed by an
+        atomic unlink, so two concurrent subagent starts never claim the same dispatch.
+        """
+        directory = self._dispatches_dir / _safe_component(root_host_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        name = f"{time.time_ns():020d}-{_safe_name(call_id or os.urandom(6).hex())}.json"
+        _write_json(directory / name, {"dispatcher": dispatcher_host_id, "actor": actor})
+
+    def drop_pending_dispatch(self, root_host_id: str, call_id: str | None) -> None:
+        """Forget a dispatch whose tool call returned (its subagent started or never will)."""
+        if not call_id:
+            return
+        directory = self._dispatches_dir / _safe_component(root_host_id)
+        if directory.is_dir():
+            for entry in directory.glob(f"*-{_safe_name(call_id)}.json"):
+                entry.unlink(missing_ok=True)
+
+    def claim_pending_dispatch(self, root_host_id: str, actor: str) -> str | None:
+        """Answer the dispatcher of a subagent of `actor` that just started, and consume it.
+
+        None when no pending dispatch names that actor. Raises `AmbiguousDispatchError`
+        when pending dispatches of that actor come from more than one dispatcher: the
+        subagent cannot be attributed, so the caller fails closed.
+        """
+        directory = self._dispatches_dir / _safe_component(root_host_id)
+        while directory.is_dir():
+            matching: list[tuple[Path, str]] = []
+            for entry in sorted(directory.glob("*.json")):
+                try:
+                    recorded = json.loads(entry.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(recorded, dict) and recorded.get("actor") == actor:
+                    matching.append((entry, str(recorded.get("dispatcher"))))
+            if not matching:
+                return None
+            if len({dispatcher for _, dispatcher in matching}) > 1:
+                raise AmbiguousDispatchError(
+                    f"a '{actor}' subagent started while dispatches of it are pending from "
+                    "several agents: its dispatcher cannot be told apart"
+                )
+            entry, dispatcher = matching[0]
+            try:
+                entry.unlink()
+            except FileNotFoundError:
+                continue  # a concurrent start claimed it: list again
+            return dispatcher
+        return None
+
+    def clear_pending_dispatches(self, root_host_id: str) -> None:
+        shutil.rmtree(self._dispatches_dir / _safe_component(root_host_id), ignore_errors=True)
+
+    def remember_dispatcher(self, agent_host_id: str, dispatcher_host_id: str) -> None:
+        """Keep a subagent's dispatcher until its stop, which does not name it either."""
+        self._dispatchers_dir.mkdir(parents=True, exist_ok=True)
+        path = self._dispatchers_dir / _safe_component(agent_host_id)
+        _write_json(path, {"dispatcher": dispatcher_host_id})
+
+    def dispatcher_of(self, agent_host_id: str) -> str | None:
+        path = self._dispatchers_dir / _safe_component(agent_host_id)
+        try:
+            recorded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        value = recorded.get("dispatcher") if isinstance(recorded, dict) else None
+        return str(value) if value else None
+
+    def forget_dispatcher(self, agent_host_id: str) -> None:
+        (self._dispatchers_dir / _safe_component(agent_host_id)).unlink(missing_ok=True)
+
     def descendants(self, host_id: str) -> tuple[str, ...]:
         """Answer every host session registered (transitively) under `host_id`."""
         children: dict[str, list[str]] = {}
@@ -185,6 +273,22 @@ class SessionTracker:
         return self._sessions_dir / f"{host_id}.json"
 
 
+def _safe_name(raw: str) -> str:
+    """A host tool-call id as a filename component: `[A-Za-z0-9_-]` only."""
+    return "".join(character if character.isalnum() or character in "_-" else "-" for character in raw)
+
+
+def _write_json(path: Path, data: dict[str, str]) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, sort_keys=True)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def _safe_component(host_id: str) -> str:
     """Refuse a host id that could escape the tracker's directory."""
     if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
@@ -192,4 +296,4 @@ def _safe_component(host_id: str) -> str:
     return host_id
 
 
-__all__ = ["TrackerError", "STEP_ORIGIN", "TURN_ORIGIN", "SessionRecord", "SessionTracker"]
+__all__ = ["AmbiguousDispatchError", "TrackerError", "STEP_ORIGIN", "TURN_ORIGIN", "SessionRecord", "SessionTracker"]

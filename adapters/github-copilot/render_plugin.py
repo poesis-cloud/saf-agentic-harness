@@ -10,7 +10,8 @@ Adapter spec, Plugin mode — The harness plugin. The output holds no machine pa
   through `PLUGIN_ROOT`, rendered from `hooks.yaml`;
 - `VERSION`, `requirements.lock`, `launcher.py`, `bin/` (the shims, the registration, the
   stable launcher), and the runtime subset: `harness.py`, `src/`, `contracts/`,
-  `adapters/github-copilot/`, `adapters/binding_contract.py`, `LICENSE`, `NOTICE`, `README.md`.
+  `adapters/github-copilot/`, `adapters/common/` (the shared adapter base),
+  `adapters/binding_contract.py`, `LICENSE`, `NOTICE`, `README.md`.
 
 Without `--lock`, the lock is generated with
 `uv pip compile --universal --generate-hashes requirements.txt` (uv must be on PATH).
@@ -167,6 +168,9 @@ def render(destination: Path, lock: Path | None = None) -> Path:
         adapter = staging / "adapters" / "github-copilot"
         adapter.mkdir(parents=True)
         shutil.copy2(REPO_ROOT / "adapters" / "binding_contract.py", adapter.parent)
+        shutil.copytree(
+            REPO_ROOT / "adapters" / "common", adapter.parent / "common", ignore=_IGNORED
+        )
         for name in ADAPTER_FILES:
             shutil.copy2(ADAPTER_DIR / name, adapter / name)
         for name in ADAPTER_TREES:

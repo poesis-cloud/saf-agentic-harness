@@ -129,7 +129,7 @@ def test_the_default_build_wires_the_workspace_override(tmp_path: Path, monkeypa
         monkeypatch.delenv(variable, raising=False)
     monkeypatch.setenv("SAF_HARNESS_STATE_DIR", str(tmp_path / "state"))
     adapter, binding = ENTRY.build_adapter(str(framework), str(elsewhere))
-    from github_copilot_adapter.payload import HookInput
+    from saf_host_adapter.payload import HookInput
 
     decision = adapter.handle(HookInput("sessionStart", {"sessionId": "x"}, binding, None))
     assert f"(FRAMEWORK_WORKSPACE_DIR): {elsewhere}" in decision["additionalContext"]

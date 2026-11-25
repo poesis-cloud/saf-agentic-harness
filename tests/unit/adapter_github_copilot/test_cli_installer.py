@@ -205,7 +205,7 @@ def test_scoped_h0_commands_carry_the_same_resolved_layout_as_the_global_hooks(
     the default workspace while every other boundary looked in the overridden one."""
     import shlex
 
-    from github_copilot_adapter.layout import resolve_layout
+    from saf_host_adapter.layout import resolve_layout
 
     elsewhere = tmp_path / "other-workspace"
     elsewhere.mkdir()

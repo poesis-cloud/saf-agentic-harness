@@ -1,10 +1,9 @@
-"""Seam 1: the host's stdin payload, normalized across the runtime's two tool shapes.
+"""Seam 1: a host's stdin payload, read through its `tools.yaml` keys.
 
-Observed (Copilot app, runtime 1.0.102, Windows): `preToolUse` is BATCHED —
-`{"sessionId", "cwd", "toolCalls": [{"id", "name", "args"}, ...]}` with no `toolName`,
-`toolArgs`, or `timestamp`. The documented shape (`toolName` + `toolArgs`) is still what
-`postToolUse` / `postToolUseFailure` carry. Both are accepted; anything else is malformed
-and the gating boundary fails closed.
+Two tool shapes are accepted: a BATCHED pre-tool firing (`toolCallsKeys`, observed in the
+Copilot app: `{"toolCalls": [{"id", "name", "args"}, ...]}`) and the single-call shape
+(`toolKeys` + `inputKeys`, every other observed firing). Anything else is malformed and the
+gating boundary fails closed.
 """
 
 from __future__ import annotations
@@ -43,12 +42,19 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class HookInput:
-    """One host firing: the event name (from argv), its payload, and the scoping agent."""
+    """One host firing: the event name (from argv), its payload, and the scoping agent.
+
+    `dispatcher_from_session`: whether the host session id names a subagent's dispatcher
+    when the payload carries no parent id (true on hosts whose first-level subagent events
+    carry the dispatcher as their session). When false, the dispatcher is not observed in
+    the payload and the adapter correlates it from the dispatches it saw.
+    """
 
     event: str
     payload: Mapping[str, Any]
     binding: ToolBinding
     scoping_agent: str | None = None
+    dispatcher_from_session: bool = True
     _calls: tuple[ToolCall, ...] | None = field(default=None, repr=False, compare=False)
 
     @property
@@ -61,6 +67,27 @@ class HookInput:
         """The sanitized host session id — inside a subagent it is the subagent's id."""
         raw = self.raw_host_session_id
         return sanitize_identifier(raw) if raw else None
+
+    @property
+    def root_host_id(self) -> str | None:
+        """The sanitized id of the conversation every subagent of it shares, if the host
+        names one apart from the session id; else the host session id itself."""
+        value = self.binding.probe(self.payload, self.binding.host_root_session_keys)
+        return sanitize_identifier(str(value)) if value is not None else self.host_id
+
+    @property
+    def turn_agent(self) -> str | None:
+        """The agent selected for the conversation: the scoping registration's (`--agent`),
+        else the host-observed one (`hostTurnAgentKeys`, its plugin namespace dropped)."""
+        if self.scoping_agent:
+            return self.scoping_agent
+        value = self.binding.probe(self.payload, self.binding.host_turn_agent_keys)
+        return self.binding.agent_name(value) if isinstance(value, str) and value else None
+
+    @property
+    def tool_use_id(self) -> str | None:
+        value = self.binding.probe(self.payload, self.binding.host_tool_use_id_keys)
+        return str(value) if value is not None else None
 
     @property
     def raw_parent_host_session_id(self) -> str | None:
@@ -81,7 +108,9 @@ class HookInput:
         first-level subagent; for a subagent dispatched by a subagent the runtime fills
         `sessionId` with an id no other event carries (observed, app 1.0.102).
         """
-        return self.parent_host_id or self.host_id
+        if self.parent_host_id:
+            return self.parent_host_id
+        return self.host_id if self.dispatcher_from_session else None
 
     @property
     def timestamp(self) -> str | None:
@@ -108,7 +137,7 @@ class HookInput:
         if not isinstance(name, str) or not name:
             raise MalformedPayloadError("payload names no tool (neither toolCalls nor toolName)")
         args = self.binding.probe(self.payload, self.binding.input_keys)
-        return (ToolCall(name=name, args=_decode_args(args)),)
+        return (ToolCall(name=name, args=_decode_args(args), call_id=self.tool_use_id),)
 
     def _read_batched(self, entry: Any) -> ToolCall:
         if not isinstance(entry, Mapping):

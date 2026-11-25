@@ -9,30 +9,19 @@ does it ever render `modifiedArgs`: the adapter never edits an agent's command.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-_INSTRUCTIONS_HEADER = "# Instructions"
-_SKILLS_HEADER = "# Skills"
-_LOAD_DIRECTIVE = "Read `{path}` before acting."
-_INSTRUCTION_FILE_SUFFIX = ".instructions.md"
-_SKILL_FILE_SUFFIX = ".skill.md"
+from saf_host_adapter.reports import (
+    ContextRenderer,
+    describe_report,
+    read_error,
+    read_status,
+    step_failed_text,
+    write_rejected_text,
+    write_unvalidated_text,
+)
+
 _CONTEXT_SEPARATOR = "\n\n---\n\n"
-_WRITE_REJECTED = "WRITE REJECTED by the SAFe agentic harness: "
-_WRITE_RETRY_TAIL = "Rewrite the artifact to satisfy its schema and retry."
-_WRITE_UNVALIDATED = "WRITE OUTCOME UNKNOWN — the SAFe agentic harness answered an error: "
-# An error can follow the commit (`log-append-failed`: the harness commits, then journals),
-# so neither the commit nor a restore can be claimed or denied.
-_WRITE_ERROR_DIRECTIVE = (
-    "The harness answered an error for this write, so its state is UNKNOWN: it may already "
-    "be committed, may have been restored, or may still be uncommitted in the working tree. "
-    "Do not assume it was saved or discarded. Inspect the artifact (view it) before retrying, "
-    "fix what the error names, then redo the write only if it does not hold what you intended."
-)
-_STEP_RETRY_DIRECTIVE = (
-    "Per reports-handling: re-resolve (resolve-step) — the cursor returns the failed "
-    "step; do not surface step details to the user."
-)
 # postToolUse `additionalContext` is capped by the runtime at 10 KB (hooks reference).
 ADDITIONAL_CONTEXT_LIMIT = 10_000
 # Any hook's stdout is bounded at 10 MiB; it is the only bound on `subagentStart` /
@@ -79,168 +68,31 @@ def transformed_prompt(context: str, transformed: str) -> dict[str, Any]:
 
 def write_rejected(report: Mapping[str, Any]) -> dict[str, Any]:
     """H5 — overwrite the tool result the model sees, and direct the retry."""
-    description = describe_report(report)
+    result, context = write_rejected_text(report)
     return {
-        "modifiedResult": {
-            "resultType": "success",
-            "textResultForLlm": f"{_WRITE_REJECTED}{description}",
-        },
-        "additionalContext": _truncate(f"{description}\n\n{_write_retry_directive(report)}"),
+        "modifiedResult": {"resultType": "success", "textResultForLlm": result},
+        "additionalContext": _truncate(context),
     }
 
 
 def write_unvalidated(report: Mapping[str, Any]) -> dict[str, Any]:
     """H5 — an error outcome: the write was not validated; never claim it was restored."""
-    description = describe_report(report)
+    result, context = write_unvalidated_text(report)
     return {
-        "modifiedResult": {
-            "resultType": "success",
-            "textResultForLlm": f"{_WRITE_UNVALIDATED}{description}",
-        },
-        "additionalContext": _truncate(f"{description}\n\n{_WRITE_ERROR_DIRECTIVE}"),
+        "modifiedResult": {"resultType": "success", "textResultForLlm": result},
+        "additionalContext": _truncate(context),
     }
 
 
 def step_failed(report: Mapping[str, Any]) -> dict[str, Any]:
     """H6 — relay the failed postconditions with the re-resolve directive."""
-    return additional_context(f"{describe_report(report)}\n\n{_STEP_RETRY_DIRECTIVE}")
+    return additional_context(step_failed_text(report))
 
 
-class ContextRenderer:
-    """Render resolved instruction/skill refs into the context injected into a session."""
-
-    def __init__(self, instructions_dir: Path, skills_dir: Path) -> None:
-        self._instructions_dir = instructions_dir
-        self._skills_dir = skills_dir
-
-    def render(self, reports: Sequence[Mapping[str, Any]], *, inline: bool = True) -> str:
-        """Render instructions (inlined, or as load directives) and skill load directives.
-
-        `inline=False` is used where the runtime caps the injected text (postToolUse's
-        `additionalContext`): every ref becomes a short load directive instead.
-        """
-        sections: list[str] = []
-        instructions = _read_refs(reports, "instructions")
-        skills = _read_refs(reports, "skills")
-        if instructions:
-            sections.append(_INSTRUCTIONS_HEADER)
-            sections.extend(self._render_instruction(ref, inline) for ref in instructions)
-        if skills:
-            sections.append(_SKILLS_HEADER)
-            sections.extend(self._render_skill(skill) for skill in skills)
-        return "\n\n".join(sections)
-
-    def _render_instruction(self, ref: str, inline: bool) -> str:
-        path = self._find_instruction(ref)
-        if not inline:
-            return f"## {ref}\n\n{_LOAD_DIRECTIVE.format(path=path)}"
-        return f"## {ref}\n\n{path.read_text(encoding='utf-8').strip()}"
-
-    def _find_instruction(self, ref: str) -> Path:
-        filename = f"{ref}{_INSTRUCTION_FILE_SUFFIX}"
-        matches = sorted(
-            path
-            for path in self._instructions_dir.rglob(filename)
-            if path.is_file() and path.name == filename
-        )
-        if not matches:
-            raise FileNotFoundError(
-                f"instruction '{ref}' resolves to no file '{filename}'"
-            )
-        if len(matches) > 1:
-            raise ValueError(f"instruction '{ref}' resolves to more than one file")
-        return matches[0]
-
-    def _render_skill(self, skill: str) -> str:
-        path = self._skills_dir / f"{skill}{_SKILL_FILE_SUFFIX}"
-        # One path form for the agent on every OS; Windows tools accept `C:/...` too.
-        return f"## {skill}\n\n{_LOAD_DIRECTIVE.format(path=path.as_posix())}"
-
-
-def read_status(report: Mapping[str, Any]) -> str:
-    return str((report.get("outcome") or {}).get("status", ""))
-
-
-def read_error(report: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    error = (report.get("outcome") or {}).get("error")
-    return error if isinstance(error, Mapping) else None
-
-
-def describe_report(report: Mapping[str, Any]) -> str:
-    """Serialize one report into the reason the host relays to the model."""
-    function = str((report.get("context") or {}).get("function", "harness function"))
-    status = read_status(report)
-    error = read_error(report)
-    if error is not None:
-        return f"{function} {status}: {error.get('code')} — {error.get('message')}"
-    if "conditionChecks" in report:
-        return f"{function} {status}: {_describe_condition_checks(report)}"
-    if "authorization" in report:
-        authorization = report.get("authorization") or {}
-        return (
-            f"{function} {status}: {authorization.get('failureMessage')} "
-            f"({authorization.get('artifactPath')})"
-        )
-    if "artifactChecks" in report:
-        return f"{function} {status} {_describe_artifact_checks(report)}"
-    return f"{function} {status}"
-
-
-def _describe_condition_checks(report: Mapping[str, Any]) -> str:
-    parts = [
-        f"[{(check.get('condition') or {}).get('slug')}] {check.get('outcome')}"
-        + (
-            f" — {check['failureMessage']}"
-            if check.get("failureMessage") is not None
-            else ""
-        )
-        for check in report.get("conditionChecks") or ()
-    ]
-    delivery = report.get("artifactDelivery") or {}
-    if delivery.get("outcome") == "fail":
-        parts.append(f"[artifact delivery] fail — {delivery.get('failureMessage')}")
-    return "; ".join(parts)
-
-
-def _describe_revert(revert: Mapping[str, Any] | None) -> str:
-    """Render one revert record as what happened: `restored from <from>`, `deleted`, ….
-
-    Spec (core function 9, invariant 2): a failing path is restored from the step ref
-    tip or from `HEAD` — the record's `from` names which — or deleted. A record that
-    names no source renders without one.
-    """
-    record = revert or {}
-    action = record.get("action")
-    source = record.get("from")
-    if action == "restored" and source:
-        return f"restored from {source}"
-    return str(action) if action else "discarded"
-
-
-def _write_retry_directive(report: Mapping[str, Any]) -> str:
-    """Direct the retry, naming each failing path's revert as the report records it."""
-    reverts = "; ".join(
-        f"{check.get('artifactPath')} {_describe_revert(check.get('revert'))}"
-        for check in report.get("artifactChecks") or ()
-    )
-    discarded = f"The write was discarded ({reverts})." if reverts else "The write was discarded."
-    return f"{discarded} {_WRITE_RETRY_TAIL}"
-
-
-def _describe_artifact_checks(report: Mapping[str, Any]) -> str:
-    return "; ".join(
-        f"{check.get('artifactPath')}: {check.get('failureMessage')} "
-        f"({_describe_revert(check.get('revert'))})"
-        for check in report.get("artifactChecks") or ()
-    )
-
-
-def _read_refs(reports: Sequence[Mapping[str, Any]], key: str) -> tuple[str, ...]:
-    for report in reports:
-        refs = report.get(key)
-        if isinstance(refs, Sequence) and not isinstance(refs, str):
-            return tuple(str(ref) for ref in refs)
-    return ()
+def context_of(decision: Mapping[str, Any]) -> str | None:
+    """The `additionalContext` a decision already carries, if any."""
+    value = decision.get("additionalContext")
+    return value if isinstance(value, str) and value else None
 
 
 def _truncate(text: str) -> str:
@@ -251,11 +103,52 @@ def _truncate(text: str) -> str:
     return text.encode("utf-8")[:budget].decode("utf-8", errors="ignore") + marker
 
 
+
+
+class CopilotDecisions:
+    """The Copilot runtime's decision shapes, as the shared core asks for them.
+
+    Every method reads this module's functions (and limits) at call time.
+    """
+
+    deny = staticmethod(lambda reasons: deny(reasons))
+    announce = staticmethod(lambda text: additional_context(text))
+    step_context = staticmethod(lambda context: step_context(context))
+    settle_context = staticmethod(lambda text: additional_context(text))
+    fits_settle_context = staticmethod(lambda text: fits_additional_context(text))
+    context_of = staticmethod(lambda decision: context_of(decision))
+    write_rejected = staticmethod(lambda report: write_rejected(report))
+    write_unvalidated = staticmethod(lambda report: write_unvalidated(report))
+    step_failed = staticmethod(lambda report: step_failed(report))
+
+    @staticmethod
+    def fits_step_context(context: str) -> bool:
+        return fits_hook_output(step_context(context))
+
+    @staticmethod
+    def accepts_turn_context(hook: Any) -> bool:
+        """H0 injects only into the runtime's transformed prompt (`userPromptTransformed`)."""
+        transformed = hook.payload.get("transformedPrompt")
+        return isinstance(transformed, str) and bool(transformed)
+
+    @staticmethod
+    def turn_context(context: str, hook: Any) -> dict[str, Any]:
+        return transformed_prompt(context, str(hook.payload.get("transformedPrompt")))
+
+    @staticmethod
+    def fits_turn_context(context: str, hook: Any) -> bool:
+        return fits_hook_output(
+            transformed_prompt(context, str(hook.payload.get("transformedPrompt")))
+        )
+
+
 __all__ = [
     "ADDITIONAL_CONTEXT_LIMIT",
+    "CopilotDecisions",
     "HOOK_OUTPUT_LIMIT",
     "ContextRenderer",
     "additional_context",
+    "context_of",
     "deny",
     "describe_report",
     "fits_additional_context",

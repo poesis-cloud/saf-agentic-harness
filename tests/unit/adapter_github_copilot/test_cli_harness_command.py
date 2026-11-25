@@ -27,10 +27,10 @@ from cli_rig import (
     pre_tool_use,
 )
 from github_copilot_adapter.core import HARNESS_REJECTED, HARNESS_RESULT, Adapter
-from github_copilot_adapter.payload import HookInput
+from saf_host_adapter.payload import HookInput
 from github_copilot_adapter.renderer import ContextRenderer
-from github_copilot_adapter.runner import HarnessCommandError
-from github_copilot_adapter.tracker import SessionTracker
+from saf_host_adapter.runner import HarnessCommandError
+from saf_host_adapter.tracker import SessionTracker
 from harness_stub import build_error_report
 
 FORWARD = HARNESS.replace("\\", "/")

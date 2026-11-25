@@ -12,7 +12,7 @@ import yaml
 from cli_rig import ADAPTER_DIR, REPO_ROOT
 from contract_assertions import contract_validator
 from model_catalogue import bound_slugs, write_bound_catalogue, write_catalogue
-from github_copilot_adapter.binding import (
+from saf_host_adapter.binding import (
     BindingError,
     TargetExtractionError,
     ToolBinding,

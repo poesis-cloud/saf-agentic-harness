@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from cli_rig import CWD, WORKSPACE
-from github_copilot_adapter.paths import host_basename, is_windows_path, relativize, resolve_host_path
+from saf_host_adapter.paths import host_basename, is_windows_path, relativize, resolve_host_path
 
 
 @pytest.mark.parametrize(

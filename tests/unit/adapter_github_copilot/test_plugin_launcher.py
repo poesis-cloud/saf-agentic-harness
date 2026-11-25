@@ -118,7 +118,7 @@ def test_a_host_session_id_is_named_as_the_adapter_names_its_records(
     raw: str, named: str
 ) -> None:
     """The launcher, the shims and the adapter's tracker key one host session alike."""
-    from github_copilot_adapter.payload import sanitize_identifier
+    from saf_host_adapter.payload import sanitize_identifier
 
     assert LAUNCHER.safe_id(raw) == named == sanitize_identifier(raw)
 

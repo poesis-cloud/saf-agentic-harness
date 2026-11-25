@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from cli_rig import HOST, WORKSPACE, Rig, load_script, pre_tool_use
-from github_copilot_adapter.runner import HarnessCommandError, SubprocessCommandRunner
+from saf_host_adapter.runner import HarnessCommandError, SubprocessCommandRunner
 
 ENTRY = load_script("github_copilot_adapter_entry_deadline", "adapter.py")
 
@@ -117,7 +117,7 @@ def test_the_entry_hands_the_deadline_to_the_build(rig: Rig) -> None:
 
 
 def test_the_real_subprocess_runner_honors_its_timeout() -> None:
-    from github_copilot_adapter.runner import run_subprocess
+    from saf_host_adapter.runner import run_subprocess
 
     with pytest.raises(subprocess.TimeoutExpired):
         run_subprocess(
@@ -141,7 +141,7 @@ time.sleep(30)
 def test_a_timeout_kills_the_whole_process_tree(tmp_path: Path) -> None:
     """The harness starts git children (commit, revert): on expiry they must die with it,
     or they go on changing the workspace after the adapter reported failure."""
-    from github_copilot_adapter.runner import run_subprocess
+    from saf_host_adapter.runner import run_subprocess
 
     script = tmp_path / "tree.py"
     script.write_text(_TREE_SCRIPT, encoding="utf-8")

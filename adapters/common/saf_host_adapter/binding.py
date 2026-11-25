@@ -52,7 +52,7 @@ class Subcommand:
 
 @dataclass(frozen=True)
 class ToolBinding:
-    """The tool classes and payload keys of the Copilot CLI runtime."""
+    """The tool classes and payload keys of one host runtime (its `tools.yaml`)."""
 
     write_tools: Mapping[str, str]
     delete_tools: frozenset[str]
@@ -83,6 +83,11 @@ class ToolBinding:
     guarded_shell_tools: frozenset[str]
     model_bindings: Mapping[str, str] = field(default_factory=dict)
     agent_namespace_separator: str | None = None
+    host_root_session_keys: tuple[str, ...] = ()
+    host_turn_agent_keys: tuple[str, ...] = ()
+    host_tool_use_id_keys: tuple[str, ...] = ()
+    sync_dispatch_flag_keys: tuple[str, ...] = ()
+    upsert_tools: frozenset[str] = frozenset()
 
     def probe(self, payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
         """Answer the first present, non-empty value among `keys` (first hit wins)."""
@@ -270,6 +275,11 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
         mediated_command_keys=_strings(raw, "mediatedCommandKeys"),
         guarded_shell_tools=frozenset(_strings(raw, "guardedShellTools")),
         agent_namespace_separator=raw.get("hostAgentNamespaceSeparator") or None,
+        host_root_session_keys=_strings(raw, "hostRootSessionKeys"),
+        host_turn_agent_keys=_strings(raw, "hostTurnAgentKeys"),
+        host_tool_use_id_keys=_strings(raw, "hostToolUseIdKeys"),
+        sync_dispatch_flag_keys=_strings(raw, "syncDispatchFlagKeys"),
+        upsert_tools=frozenset(_strings(raw, "upsertTools")),
         model_bindings={
             str(slug): str((binding or {}).get("hostModelId"))
             for slug, binding in models.items()
