@@ -1,0 +1,69 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://saf/adapters/claude-code/contracts/hook-stdin/v1",
+    "title": "claude-code hook stdin contract",
+    "description": "Seam 1 of the adapter's invocation plumbing: the snake_case hook input Claude Code writes to a command hook's stdin. Grounded in payloads captured from Claude Code 2.1.323 on Linux, which are authoritative: every event carries the conversation's `session_id`, `cwd` and `hook_event_name`; every event fired inside a subagent also carries that subagent's `agent_id` and `agent_type`; the main thread's events carry the selected agent's `agent_type`; tool events carry `tool_name`, `tool_input` and `tool_use_id`. Deliberately permissive (unknown fields allowed): the runtime adds fields between releases and the adapter reads only the keys tools.yaml names, failing closed on a tool call it cannot read.",
+    "type": "object",
+    "required": ["session_id", "hook_event_name"],
+    "properties": {
+        "session_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The conversation: shared by the main thread and every subagent inside it."
+        },
+        "hook_event_name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The firing event (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, SubagentStart, SubagentStop, Stop, SessionEnd, …)."
+        },
+        "cwd": {
+            "type": "string",
+            "description": "The working directory of the session (absolute)."
+        },
+        "transcript_path": {
+            "type": "string"
+        },
+        "prompt_id": {
+            "type": "string",
+            "description": "The user prompt the firing belongs to: stamps the turn session (H0)."
+        },
+        "prompt": {
+            "type": "string",
+            "description": "UserPromptSubmit: the user's prompt."
+        },
+        "agent_id": {
+            "type": "string",
+            "description": "SubagentStart/SubagentStop: the subagent's id; inside a subagent: its own id."
+        },
+        "agent_type": {
+            "type": "string",
+            "description": "The agent acting: the subagent's, or the main thread's selected agent ('<plugin>:<agent>' for a plugin agent)."
+        },
+        "tool_name": {
+            "type": "string",
+            "description": "PreToolUse/PostToolUse/PostToolUseFailure: the tool."
+        },
+        "tool_input": {
+            "type": "object",
+            "description": "The tool's arguments."
+        },
+        "tool_use_id": {
+            "type": "string",
+            "description": "The tool call's id: the same on its pre- and post-tool events."
+        },
+        "tool_response": {
+            "description": "PostToolUse: the tool's result (for the `Agent` tool: its `status` and the returning subagent's `agentId`)."
+        },
+        "permission_mode": {
+            "type": "string"
+        },
+        "source": {
+            "type": "string",
+            "description": "SessionStart: startup, resume, clear or compact."
+        },
+        "reason": {
+            "type": "string",
+            "description": "SessionEnd: why the session ended."
+        }
+    }
+}

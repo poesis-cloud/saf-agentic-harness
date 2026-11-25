@@ -1,0 +1,23 @@
+# Claude Code hook registration (env-specific) — the source of truth in YAML. NOT installable
+# as-is: `render_plugin.py` renders it into the harness plugin's `hooks/hooks.json`, each
+# entry running the plugin's shim through `${CLAUDE_PLUGIN_ROOT}`:
+#
+#   sh "${CLAUDE_PLUGIN_ROOT}/bin/saf-hook.sh" <Event>
+#
+# No `matcher`: the adapter classifies every tool call itself from tools.yaml. `timeoutSec`
+# matters: a TIMED-OUT hook is a non-blocking error in this runtime, so a timed-out PreToolUse
+# FAILS OPEN; the gating events get a generous budget and the adapter stops every harness call
+# well before it. `SessionStart` also provisions the harness runtime (300 s).
+#
+# Unlike the Copilot runtime, no hook is agent-scoped: every payload names the conversation's
+# selected agent (`agent_type`), so H0 is the global `UserPromptSubmit`.
+hooks:
+  SessionStart: { timeoutSec: 300 }
+  UserPromptSubmit: { timeoutSec: 120 }
+  SubagentStart: { timeoutSec: 120 }
+  PreToolUse: { timeoutSec: 120 }
+  PostToolUse: { timeoutSec: 120 }
+  PostToolUseFailure: { timeoutSec: 60 }
+  SubagentStop: { timeoutSec: 60 }
+  Stop: { timeoutSec: 60 }
+  SessionEnd: { timeoutSec: 60 }

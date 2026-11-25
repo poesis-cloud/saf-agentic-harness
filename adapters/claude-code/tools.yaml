@@ -1,0 +1,69 @@
+# Claude Code environment binding (env-specific tool/payload map). Validated by
+# contracts/conf/adapters/tools.conf.schema.json. Every tool name and payload key the adapter
+# classifies on is DATA here, so a runtime that renames a field is corrected in this file, not
+# in code. Field names are AUTHORITATIVE from live captures — Claude Code 2.1.323 on Linux, see
+# tests/functional/adapter_claude_code/fixtures/ — where they differ from the public reference.
+
+# Write tools -> ACL action. Every file tool takes an absolute host path in `file_path`
+# (`notebook_path` for notebooks). `Write` creates a missing file AND overwrites an existing
+# one: as an upsert tool, its action is resolved per target (create / update).
+writeTools:
+  Write: create
+  Edit: update
+  MultiEdit: update
+  NotebookEdit: update
+upsertTools: [Write]
+deleteTools: []
+patchTools: []
+patchKeys: []
+writeToolSubcommands: {}
+
+# Single-call shape on every event (observed): one firing per tool call.
+toolKeys: [tool_name]
+inputKeys: [tool_input]
+toolCallsKeys: []
+toolCallNameKeys: []
+toolCallArgsKeys: []
+toolCallIdKeys: []
+hostToolUseIdKeys: [tool_use_id]
+pathKeys: [file_path, notebook_path]
+nestedPathKeys: []
+
+# Session identity (host-observed, never model-authored). EVERY event carries the
+# conversation's `session_id`; every event fired inside a subagent ALSO carries that
+# subagent's own `agent_id` (and `agent_type`), so the subagent's id comes first.
+# `SubagentStart` / `SubagentStop` carry the subagent's `agent_id` / `agent_type` but NO
+# dispatcher id: the adapter correlates the dispatcher from the dispatches it let through.
+hostSessionKeys: [agent_id, session_id]
+hostRootSessionKeys: [session_id]
+hostParentSessionKeys: []
+hostWorkerSessionKeys: [agent_id]
+hostStepActorKeys: [agent_type]
+# The conversation's selected agent (`claude --agent <plugin>:<agent>`, or the `agent`
+# setting) is named on every main-thread event, `UserPromptSubmit` included.
+hostTurnAgentKeys: [agent_type]
+# Plugin-delivered agents are namespaced by the runtime: `agent_type` and the dispatch's
+# `subagent_type` read '<plugin-name>:<agent>'. The acting framework agent is the part after
+# the last ':'.
+hostAgentNamespaceSeparator: ":"
+# No event timestamp: the turn session is stamped with the prompt's own id.
+hostTimestampKeys: [prompt_id]
+hostCwdKeys: [cwd]
+
+# Subagent dispatch: `Agent` (args subagent_type, description, prompt, model?,
+# run_in_background?). `Task` is its former name.
+dispatchTools: [Agent, Task]
+dispatchAgentKeys: [subagent_type]
+dispatchModelKeys: [model]
+dispatchModeKeys: []
+asyncDispatchModes: []
+# A dispatch WITHOUT `run_in_background` was observed running in the background
+# (2.1.323: `status: async_launched`): a governed dispatch must say `false` explicitly.
+syncDispatchFlagKeys: [run_in_background]
+
+# Harness request surface (H4): a shell command naming `harness.py resolve-step[-model]` is a
+# REQUEST the PreToolUse hook answers by running the function itself; the shell never runs it.
+mediatedCommandTools: [Bash]
+mediatedCommandKeys: [command]
+# Guarded shell class (I9): advisory textual guard on every other shell command.
+guardedShellTools: [Bash]

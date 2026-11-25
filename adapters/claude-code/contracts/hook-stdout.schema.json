@@ -1,0 +1,103 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "gsmarc://saf/adapters/claude-code/contracts/hook-stdout/v1",
+    "title": "claude-code hook stdout contract",
+    "description": "Seam 4 of the adapter's invocation plumbing: the single JSON object the adapter prints on stdout (exit 0) for Claude Code to honor. Empty stdout is a valid pass-through and is NOT governed by this contract. Every event-specific field sits in `hookSpecificOutput`, whose `hookEventName` names the firing event. The adapter never emits `permissionDecision: allow` (an authorized call passes through to the runtime's own permission flow) nor `ask`, and never `updatedInput`: it never edits an agent's command. Verified on Claude Code 2.1.323: a deny reason reaches the model verbatim; `additionalContext` reaches it from SessionStart, UserPromptSubmit, SubagentStart and PostToolUse; a PostToolUse `decision: block` shows its `reason` to the model.",
+    "type": "object",
+    "oneOf": [
+        {
+            "$ref": "#/$defs/denyDecision"
+        },
+        {
+            "$ref": "#/$defs/blockedResultDecision"
+        },
+        {
+            "$ref": "#/$defs/contextDecision"
+        }
+    ],
+    "$defs": {
+        "denyDecision": {
+            "description": "PreToolUse — H2/H3 deny, H4 (the hook-executed harness request: its report as a RESULT reason, or a REJECTED reason), and every fail-closed path.",
+            "type": "object",
+            "required": ["hookSpecificOutput"],
+            "additionalProperties": false,
+            "properties": {
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": ["hookEventName", "permissionDecision", "permissionDecisionReason"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "hookEventName": {
+                            "const": "PreToolUse"
+                        },
+                        "permissionDecision": {
+                            "const": "deny"
+                        },
+                        "permissionDecisionReason": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        },
+        "blockedResultDecision": {
+            "description": "PostToolUse — H5 write rejected or left unvalidated: the reason shown next to the tool result, plus the retry directive.",
+            "type": "object",
+            "required": ["decision", "reason", "hookSpecificOutput"],
+            "additionalProperties": false,
+            "properties": {
+                "decision": {
+                    "const": "block"
+                },
+                "reason": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": ["hookEventName", "additionalContext"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "hookEventName": {
+                            "const": "PostToolUse"
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 10000
+                        }
+                    }
+                }
+            }
+        },
+        "contextDecision": {
+            "description": "SessionStart (the announce), UserPromptSubmit (H0 workflow context), SubagentStart (H1 step context), PostToolUse/PostToolUseFailure (H5/H6 directives, the H0 fallback).",
+            "type": "object",
+            "required": ["hookSpecificOutput"],
+            "additionalProperties": false,
+            "properties": {
+                "hookSpecificOutput": {
+                    "type": "object",
+                    "required": ["hookEventName", "additionalContext"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "hookEventName": {
+                            "enum": [
+                                "SessionStart",
+                                "UserPromptSubmit",
+                                "SubagentStart",
+                                "PostToolUse",
+                                "PostToolUseFailure"
+                            ]
+                        },
+                        "additionalContext": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

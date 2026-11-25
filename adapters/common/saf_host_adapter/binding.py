@@ -200,7 +200,8 @@ def _read_yaml(path: Path, contract: str) -> Mapping[str, Any]:
 
 
 # Every probe a gate depends on: empty, it would classify every firing as a pass-through.
-_GATING_PROBES = (
+# A host binding whose runtime has no batched tool-call shape passes its own list.
+GATING_PROBES = (
     ("writeTools", "no write would ever be authorized (H3) or validated (H5)"),
     ("pathKeys", "no write target could be extracted — every write would be denied"),
     ("toolCallsKeys", "no batched preToolUse call would be gated"),
@@ -212,7 +213,12 @@ _GATING_PROBES = (
 )
 
 
-def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -> ToolBinding:
+def load_tool_binding(
+    adapter_dir: Path,
+    *,
+    framework_dir: Path | None = None,
+    gating_probes: Sequence[tuple[str, str]] = GATING_PROBES,
+) -> ToolBinding:
     """Load this adapter's binding, contract-validated at load (fail fast, never empty).
 
     Given the framework root (the hook bootstrap always passes it), the framework model
@@ -221,7 +227,7 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
     """
     tools_path = adapter_dir / TOOLS_FILENAME
     raw = _read_yaml(tools_path, TOOLS_CONTRACT)
-    for key, why in _GATING_PROBES:
+    for key, why in gating_probes:
         try:
             require_non_empty(raw, key, source=str(tools_path), why=why)
         except BindingContractError as failure:
@@ -288,6 +294,7 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
 
 
 __all__ = [
+    "GATING_PROBES",
     "BindingError",
     "Subcommand",
     "TargetExtractionError",

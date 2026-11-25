@@ -1,0 +1,22 @@
+# Claude Code environment binding — canonical model slug -> host model id. Validated by
+# contracts/conf/adapters/models.conf.schema.json.
+#
+# `hostModelId` is the exact string this runtime accepts as the `Agent` tool's `model`
+# argument. Claude Code 2.1.323 accepts only the family aliases there (observed: "expected
+# one of sonnet | opus | haiku | fable"); each alias runs the CURRENT model of that family
+# for the account, not a pinned version. So `claude-opus-4.8` and `claude-opus-4.8-fast`
+# both route to `opus`: the profile's capabilities and cost rank still drive the harness's
+# choice of family. This file MUST bind every profile slug of the framework catalogue
+# (conf/model-profiles.conf.yaml): every hook load refuses a catalogue naming a slug this
+# file does not bind.
+modelBindings:
+  claude-fable-5:
+    hostModelId: fable
+  claude-opus-4.8:
+    hostModelId: opus
+  claude-opus-4.8-fast:
+    hostModelId: opus
+  claude-sonnet-5:
+    hostModelId: sonnet
+  claude-haiku-4.5:
+    hostModelId: haiku
