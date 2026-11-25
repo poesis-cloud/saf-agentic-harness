@@ -803,8 +803,24 @@ class Adapter:
             )
         rendered = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
         directive = _RESULT_DIRECTIVE.format(function=request.function)
+        directive += self._host_model_directive(report)
         return self._decisions.deny(
             [f"{HARNESS_RESULT} ({request.function}): {directive}\n\n{rendered}"]
+        )
+
+    def _host_model_directive(self, report: Mapping[str, Any]) -> str:
+        """`resolve-step-model` names a canonical profile slug; where this host's binding
+        dispatches it under another id (`models.yaml`), name that id, so the agent passes
+        what the host's dispatch tool accepts."""
+        if (report.get("context") or {}).get("function") != "resolve-step-model":
+            return ""
+        slug = (report.get("profile") or {}).get("slug")
+        host_model = self._binding.model_bindings.get(str(slug)) if slug else None
+        if not host_model or host_model == slug:
+            return ""
+        return (
+            f" On this host, dispatch the resolved profile '{slug}' with the model "
+            f"'{host_model}': pass exactly '{host_model}' as the dispatch tool's model argument."
         )
 
     def _find_guarded_path(self, command: str, cwd: str | None) -> str | None:
