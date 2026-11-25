@@ -12,7 +12,7 @@
 PYTHON ?= python3
 PYTEST := PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m pytest -p no:cacheprovider
 
-.PHONY: verify test unit functional install-hooks plugin
+.PHONY: verify test unit functional install-hooks plugin plugin-claude
 
 ## verify: the full pytest suite in one invocation — the unit plane (src/ units + the adapter's
 ## own units) and the functional plane (every harness function end to end through the
@@ -58,4 +58,12 @@ install-hooks:
 PLUGIN_DIR ?= build/plugin
 plugin:
 	$(PYTHON) adapters/github-copilot/render_plugin.py --dest "$(PLUGIN_DIR)" \
+		$(if $(LOCK),--lock "$(LOCK)")
+
+## plugin-claude: build the harness PLUGIN for Claude Code into CLAUDE_PLUGIN_DIR (default
+## build/claude-plugin): `.claude-plugin/plugin.json`, `hooks/hooks.json`, the shim and the
+## launcher, and the runtime (with the shared adapter base). LOCK as for `plugin`.
+CLAUDE_PLUGIN_DIR ?= build/claude-plugin
+plugin-claude:
+	$(PYTHON) adapters/claude-code/render_plugin.py --dest "$(CLAUDE_PLUGIN_DIR)" \
 		$(if $(LOCK),--lock "$(LOCK)")
