@@ -15,7 +15,8 @@ The canonical harness-core specification — terminology, invariants, the twelve
 contract, design, and implementation — lives in **[`def/core/spec.md`](def/core/spec.md)**.
 Read that first; this file is
 only an orientation pointer. Each host binding has its own specification under
-`def/adapter/<host>/spec.md`. Today there is one,
+`def/adapter/<host>/spec.md`. Today there are two: [`claude-code`](def/adapter/claude-code/spec.md),
+the Claude Code runtime, and
 [`github-copilot`](def/adapter/github-copilot/spec.md): the GitHub Copilot agent runtime that
 the Copilot CLI, the Copilot app and VS Code (Session Target: Copilot) share.
 
@@ -34,6 +35,12 @@ Copilot**. The first session provisions the harness requirements from the plugin
 `requirements.lock`. A folder is governed when its Git top-level holds a committed
 `.saf/workspace.yaml` naming the framework. Full steps, settings and the developer install are
 in [`adapters/github-copilot/README.md`](adapters/github-copilot/README.md).
+
+**Claude Code.** The harness also ships as a Claude Code plugin, rendered with
+`make plugin-claude` beside the framework's Claude Code plugin; it is not published in a
+marketplace yet. Load both with `claude --plugin-dir <harness plugin> --plugin-dir
+<framework plugin> --agent <framework plugin>:<orchestrator>`, from a SAF workspace. See
+[`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 ## SAF context
 
@@ -57,7 +64,8 @@ supplied to it as environment-anchored paths (`FRAMEWORK_DIR`, `FRAMEWORK_WORKSP
   (`harness-src-classes.puml`) — `src/` only, host-blind.
 - `def/adapter/<host>/` — one specification + class diagram per host binding
   (`github-copilot/`).
-- `adapters/` — host-specific bindings (`github-copilot/`, with its plugin renderer).
+- `adapters/` — host-specific bindings (`github-copilot/`, `claude-code/`, each with its plugin
+  renderer) over the shared adapter base `adapters/common/`.
 - `contracts/` — JSON Schema contracts for configuration, artifacts, and the journal.
 - `src/` — the Python implementation; `harness.py` at the root is its entry point
   (`python3 harness.py <function> [flags]`).
@@ -92,6 +100,7 @@ make verify       # the full pytest suite (unit + functional planes); CI runs th
 make unit         # the unit plane only (tests/unit)
 make functional   # the functional plane only (tests/functional)
 make plugin       # render the harness plugin into build/plugin (needs uv for the lock)
+make plugin-claude  # render the Claude Code harness plugin into build/claude-plugin
 ```
 
 `make test` is an alias for `make verify`;

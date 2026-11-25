@@ -10,7 +10,8 @@ The host binding for the **GitHub Copilot agent runtime**, the one runtime three
 
 This document is the adapter's canonical specification. It binds the runtime's **hooks** to
 the boundaries of [`../../core/spec.md`](../../core/spec.md) (Boundary Normalization), and it
-is the harness's only host binding. H0–H7 name those boundaries as bound in
+is one of the harness's host bindings (with [`claude-code`](../claude-code/spec.md), over the
+same shared adapter base `adapters/common/saf_host_adapter`). H0–H7 name those boundaries as bound in
 [Hook → boundary binding](#hook--boundary-binding). The harness function contracts are the
 core's and are not restated here. The class model is
 [`adapter-src-classes.puml`](adapter-src-classes.puml).

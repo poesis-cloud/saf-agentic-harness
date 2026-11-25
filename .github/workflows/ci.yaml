@@ -166,3 +166,33 @@ jobs:
 
             - name: Run yamllint
               run: yamllint -d relaxed .
+
+    claude-plugin:
+        name: Claude Code plugin render and validation
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install dependencies
+              run: python -m pip install --quiet -r requirements.txt uv
+
+            - name: Render the Claude Code plugin with its lock
+              run: python adapters/claude-code/render_plugin.py --dest build/claude-plugin
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
+            - name: Validate the plugin with Claude Code
+              run: |
+                  npm install --global --silent @anthropic-ai/claude-code
+                  claude --version
+                  claude plugin validate "$PWD/build/claude-plugin"
