@@ -22,8 +22,18 @@ adapters/claude-code/
 ## Install the plugins (users)
 
 The harness ships as the Claude Code plugin **`poesis-saf-agentic-harness`**, beside the
-framework's own plugin (for example `poesis-saf-agentic-organization`). Until both are
-published in a marketplace, render and load them locally:
+framework's own plugin (for example `poesis-saf-agentic-organization`). Both come from the
+marketplace `poesis-cloud/saf-marketplace` (Claude Code catalogue
+`.claude-plugin/marketplace.json`): branch `main` is the stable channel (`poesis-saf`), branch
+`preview` the pre-release channel (`poesis-saf-preview`).
+
+```bash
+claude plugin marketplace add poesis-cloud/saf-marketplace
+claude plugin install poesis-saf-agentic-harness@poesis-saf
+claude plugin install poesis-saf-agentic-organization@poesis-saf
+```
+
+From checkouts, render both plugins and load them per session instead:
 
 ```bash
 make plugin-claude CLAUDE_PLUGIN_DIR=../saf-harness-claude-plugin      # this repository
@@ -32,6 +42,9 @@ cd <your SAF workspace>
 claude --plugin-dir ../saf-harness-claude-plugin --plugin-dir ../saf-organization-claude-plugin \
        --agent poesis-saf-agentic-organization:release-train-engineer
 ```
+
+Each release (CD, `v<version>` tag) publishes the rendered plugin on the orphan branch
+`claude-plugin`, tagged `claude-plugin-v<version>`, and bumps its marketplace entry.
 
 Prerequisites: **Python ≥ 3.10** (or `SAF_HARNESS_PYTHON`), **Git ≥ 2.38** with a Git identity
 in the workspace, and network access once (or a mirror through `PIP_INDEX_URL` /

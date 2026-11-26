@@ -36,10 +36,10 @@ Copilot**. The first session provisions the harness requirements from the plugin
 `.saf/workspace.yaml` naming the framework. Full steps, settings and the developer install are
 in [`adapters/github-copilot/README.md`](adapters/github-copilot/README.md).
 
-**Claude Code.** The harness also ships as a Claude Code plugin, rendered with
-`make plugin-claude` beside the framework's Claude Code plugin; it is not published in a
-marketplace yet. Load both with `claude --plugin-dir <harness plugin> --plugin-dir
-<framework plugin> --agent <framework plugin>:<orchestrator>`, from a SAF workspace. See
+**Claude Code.** The harness also ships as a Claude Code plugin, from the same marketplace:
+`claude plugin marketplace add poesis-cloud/saf-marketplace`, then
+`claude plugin install poesis-saf-agentic-harness@poesis-saf` and the framework's plugin. From a
+checkout, `make plugin-claude` renders it. See
 [`adapters/claude-code/README.md`](adapters/claude-code/README.md).
 
 ## SAF context
