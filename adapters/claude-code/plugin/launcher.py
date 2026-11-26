@@ -549,11 +549,46 @@ def run(argv: Sequence[str], stdin: Any, out: Any, err: Any) -> int:
         "--workspace-root", workspace.root,
     ]
     completed = subprocess.run(command, input=raw, capture_output=True, env=adapter_environment())
-    out.write(completed.stdout.decode("utf-8", "replace"))
-    err.write(completed.stderr.decode("utf-8", "replace"))
-    out.flush()
+    return relay(event, completed.returncode, completed.stdout, completed.stderr, out, err)
+
+
+def is_decision(stdout: str) -> bool:
+    """Empty (a pass) or ONE JSON object: anything else Claude Code would read as plain text,
+    which at `PreToolUse` lets the call run."""
+    text = stdout.strip()
+    if not text:
+        return True
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
+
+
+def relay(event: str, code: int, stdout: bytes, stderr: bytes, out: Any, err: Any) -> int:
+    """Relay the adapter's answer, or fail closed where the runtime can veto.
+
+    Claude Code blocks only on exit 2 or a structured deny: an adapter that crashed (exit 1,
+    a signal) or answered something other than one JSON object must never let a governed
+    tool call run. At `PreToolUse` that becomes a structured deny; elsewhere a warning (exit
+    1), never exit 2, which would keep a stopping agent running or erase the user's prompt.
+    """
+    answer = stdout.decode("utf-8", "replace")
+    diagnostics = stderr.decode("utf-8", "replace")
+    err.write(diagnostics)
     err.flush()
-    return completed.returncode
+    if code == 0 and is_decision(answer):
+        out.write(answer)
+        out.flush()
+        return 0
+    lines = [line.strip() for line in diagnostics.splitlines() if line.strip()]
+    cause = lines[-1][:300] if lines else (
+        f"exit {code}" if code != 0 else "an answer that is not one JSON object"
+    )
+    if event == GATING_EVENT:
+        return deny(f"the harness hook failed, so this call is refused ({cause})", out)
+    if event == SESSION_START:
+        return warn(f"the harness hook failed ({cause})", out)
+    return 1
 
 
 def main() -> int:

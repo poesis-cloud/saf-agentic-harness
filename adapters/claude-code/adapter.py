@@ -27,21 +27,40 @@ import time
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Mapping, Sequence, TextIO
 
-import yaml
-
 ADAPTER_DIR = Path(__file__).resolve().parent
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
-from claude_code_adapter import renderer  # noqa: E402
-from claude_code_adapter.core import ADAPTER_ID, EVENTS, GATING_EVENT, Adapter  # noqa: E402
-from claude_code_adapter.renderer import ContextRenderer  # noqa: E402
-from saf_host_adapter.binding import load_tool_binding  # noqa: E402
-from saf_host_adapter.invocation import HarnessInvocation  # noqa: E402
-from saf_host_adapter.layout import resolve_layout, resolve_state_dir  # noqa: E402
-from saf_host_adapter.payload import HookInput  # noqa: E402
-from saf_host_adapter.runner import SubprocessCommandRunner  # noqa: E402
-from saf_host_adapter.tracker import SessionTracker  # noqa: E402
+
+def bootstrap_exit(argv: Sequence[str]) -> int:
+    """The exit of a firing that failed before any hook handling (stdlib only): block where
+    the runtime can veto (`PreToolUse`, exit 2), warn everywhere else (exit 1)."""
+    arguments = list(argv)
+    event = next((arguments[i + 1] for i, a in enumerate(arguments[:-1]) if a == "--event"), "")
+    return 2 if event == "PreToolUse" else 1
+
+
+try:
+    import yaml
+
+    from claude_code_adapter import renderer
+    from claude_code_adapter.core import ADAPTER_ID, EVENTS, GATING_EVENT, Adapter
+    from claude_code_adapter.renderer import ContextRenderer
+    from saf_host_adapter.binding import load_tool_binding
+    from saf_host_adapter.invocation import HarnessInvocation
+    from saf_host_adapter.layout import resolve_layout, resolve_state_dir
+    from saf_host_adapter.payload import HookInput
+    from saf_host_adapter.runner import SubprocessCommandRunner
+    from saf_host_adapter.tracker import SessionTracker
+except Exception as _import_failure:  # noqa: BLE001 - a broken runtime must never fail open
+    if __name__ != "__main__":
+        raise
+    print(
+        f"[claude-code] the adapter could not load — failing closed: "
+        f"{type(_import_failure).__name__}: {_import_failure}",
+        file=sys.stderr,
+    )
+    raise SystemExit(bootstrap_exit(sys.argv[1:])) from _import_failure
 
 HARNESS_ENTRYPOINT = ADAPTER_DIR.parents[1] / "harness.py"
 HARNESS_VERSION_FILE = ADAPTER_DIR.parents[1] / "VERSION"
@@ -220,10 +239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SystemExit as exit_:
         # argparse refuses a malformed command line with exit 2: keep that only where the
         # runtime can veto.
-        event = next(
-            (arguments[i + 1] for i, a in enumerate(arguments[:-1]) if a == "--event"), ""
-        )
-        return failure_exit(event) if exit_.code else 0
+        return bootstrap_exit(arguments) if exit_.code else 0
 
 
 if __name__ == "__main__":

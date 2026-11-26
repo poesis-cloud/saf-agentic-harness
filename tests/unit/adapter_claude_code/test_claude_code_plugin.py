@@ -187,3 +187,61 @@ def test_the_shim_blocks_a_governed_tool_call_when_no_python_is_found(tmp_path: 
     passed = subprocess.run(["/bin/sh", str(shim), "PreToolUse"], input=elsewhere, text=True,
                             capture_output=True, env=environment, cwd=tmp_path)
     assert passed.returncode == 0
+
+
+@pytest.mark.parametrize(
+    ("event", "code", "stdout", "expected_code", "denied"),
+    [
+        ("PreToolUse", 1, b"", 0, True),
+        ("PreToolUse", -9, b"", 0, True),
+        ("PreToolUse", 0, b"Traceback: not json", 0, True),
+        ("PreToolUse", 0, b"[1, 2]", 0, True),
+        ("Stop", 1, b"", 1, False),
+        ("UserPromptSubmit", -9, b"", 1, False),
+        ("SubagentStop", 0, b"not json", 1, False),
+    ],
+)
+def test_a_failed_adapter_never_lets_a_governed_call_run(
+    event: str, code: int, stdout: bytes, expected_code: int, denied: bool
+) -> None:
+    out, err = io.StringIO(), io.StringIO()
+    assert LAUNCHER.relay(event, code, stdout, b"Traceback\nModuleNotFoundError: yaml\n", out, err) == expected_code
+    if denied:
+        decision = json.loads(out.getvalue())["hookSpecificOutput"]
+        assert decision["permissionDecision"] == "deny"
+        assert "ModuleNotFoundError: yaml" in decision["permissionDecisionReason"]
+    else:
+        assert out.getvalue() == ""
+    assert "Traceback" in err.getvalue()
+
+
+def test_a_failed_adapter_warns_at_session_start() -> None:
+    out = io.StringIO()
+    assert LAUNCHER.relay("SessionStart", 1, b"", b"boom\n", out, io.StringIO()) == 0
+    assert "boom" in json.loads(out.getvalue())["systemMessage"]
+
+
+@pytest.mark.parametrize("stdout", [b"", b"  \n", b'{"hookSpecificOutput": {"hookEventName": "PreToolUse"}}\n'])
+def test_a_valid_adapter_answer_is_relayed_unchanged(stdout: bytes) -> None:
+    out = io.StringIO()
+    assert LAUNCHER.relay("PreToolUse", 0, stdout, b"", out, io.StringIO()) == 0
+    assert out.getvalue() == stdout.decode("utf-8")
+
+
+@pytest.mark.parametrize(("event", "code"), [("PreToolUse", 2), ("Stop", 1), ("SessionStart", 1)])
+def test_an_adapter_that_cannot_load_fails_closed_only_where_the_runtime_can_veto(
+    tmp_path: Path, event: str, code: int
+) -> None:
+    """A broken runtime (here: `yaml` cannot be imported) exits before any hook handling."""
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "yaml.py").write_text("raise ImportError('yaml is broken')\n", encoding="utf-8")
+    import os
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, str(ADAPTER_DIR / "adapter.py"), "hook", "--event", event],
+        input=b"{}", capture_output=True, env={**os.environ, "PYTHONPATH": str(shadow)},
+    )
+    assert done.returncode == code
+    assert b"could not load" in done.stderr and done.stdout == b""

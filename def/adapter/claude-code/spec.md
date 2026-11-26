@@ -143,7 +143,14 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
 by host fact 7: a bootstrap failure exits **2 at `PreToolUse` only**, and **1** at every other
 event. Exit 2 elsewhere would trap a stopping agent or erase the user's prompt, and the gating
 event already denies every tool call of a session whose bootstrap is broken. The launcher and
-the shim follow the same rule.
+the shim follow the same rule:
+
+- an adapter that cannot even load (a broken runtime: an import fails) exits 2 at `PreToolUse`
+  and 1 elsewhere, before any hook handling;
+- the launcher relays the adapter's answer only when the adapter exited 0 with an empty stdout
+  or ONE JSON object (anything else Claude Code would read as plain text and let the call run).
+  Any other outcome — a non-zero exit, a signal, unreadable output — becomes a structured `deny`
+  at `PreToolUse`, a `systemMessage` warning at `SessionStart`, and exit 1 elsewhere.
 
 ## Model binding
 
