@@ -228,8 +228,9 @@ def test_h6_evaluates_the_bound_workers_return_in_the_dispatching_session(rig: R
     rig.open_turn()
     rig.open_step()
     rig.fire(in_worker("SubagentStop", stop_hook_active=False))
-    assert rig.tracker.read(WORKER) is None
-    assert rig.runner.inquiries("end-session") == [{"sessionId": WORKER}]
+    # A stop can be vetoed by another hook: the worker stays governed until its dispatch returns.
+    assert rig.tracker.read(WORKER).stopped
+    assert rig.runner.inquiries("end-session") == []
     rig.runner.script["check-step-postconditions"] = build_report(
         "check-step-postconditions", "fail",
         conditionChecks=[build_failing_condition_check("owned", "wrong owner")],
@@ -244,6 +245,11 @@ def test_h6_evaluates_the_bound_workers_return_in_the_dispatching_session(rig: R
     assert rig.runner.inquiries("check-step-postconditions") == [
         {"sessionId": TURN_SESSION, "parentSessionId": None}
     ]
+    # The worker session ended at its dispatch's return, before the step was evaluated.
+    functions = rig.runner.functions()
+    assert functions.index("end-session") < functions.index("check-step-postconditions")
+    assert rig.runner.inquiries("end-session") == [{"sessionId": WORKER}]
+    assert rig.tracker.read(WORKER) is None
 
 
 def test_h6_skips_the_return_of_a_refused_duplicate(rig: Rig) -> None:
@@ -275,9 +281,33 @@ def test_h7_closes_the_turn_and_every_descendant(rig: Rig) -> None:
 def test_stop_ends_the_turn_and_the_next_prompt_opens_a_new_one(rig: Rig) -> None:
     rig.open_turn()
     rig.fire(main_thread("Stop", stop_hook_active=False))
-    assert rig.tracker.read(SESSION) is None
+    assert rig.tracker.read(SESSION).stopped
+    assert rig.runner.inquiries("end-session") == []
     rig.fire(main_thread("UserPromptSubmit", prompt_id="second", prompt="go on"))
+    assert rig.runner.inquiries("end-session") == [{"sessionId": TURN_SESSION}]
     assert rig.runner.inquiries("start-session")[-1]["sessionId"] == f"{SESSION}-tsecond"
+    assert not rig.tracker.read(SESSION).stopped
+
+
+def test_an_agent_whose_stop_was_vetoed_stays_governed(rig: Rig) -> None:
+    """Review of #42: another Stop/SubagentStop hook can veto the stop; the agent keeps
+    working and every tool call it makes is still governed."""
+    rig.open_turn()
+    rig.open_step()
+    rig.fire(in_worker("SubagentStop", stop_hook_active=False))
+    rig.runner.script["check-step-authorization"] = build_report(
+        "check-step-authorization", "denied", authorization={
+            "actor": STEP_ACTOR, "artifactPath": "a.md", "action": "create", "resource": "epic",
+            "failureMessage": "not granted"})
+    write = in_worker("PreToolUse", tool_name="Write", tool_use_id="w2",
+                      tool_input={"file_path": "/home/user/acme-notes/workspace/a.md", "content": "y"},
+                      stop_hook_active=True)
+    assert _denied(rig.fire(write))
+    rig.fire(main_thread("Stop", stop_hook_active=False))
+    own = main_thread("PreToolUse", tool_name="Write", tool_use_id="w3",
+                      tool_input={"file_path": "/home/user/acme-notes/workspace/b.md", "content": "y"})
+    assert _denied(rig.fire(own))
+    assert rig.runner.inquiries("end-session") == []
 
 
 def test_a_session_another_harness_version_opened_is_refused(rig: Rig) -> None:

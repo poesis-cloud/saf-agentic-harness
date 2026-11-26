@@ -61,9 +61,15 @@ class SessionRecord:
     # identity). Absent from a record an older harness wrote.
     workspace: str | None = None
     harness_version: str | None = None
+    # The host reported the agent's stop, but the session is kept open until its end is
+    # certain (hosts where another hook can veto a stop and the agent keeps working).
+    stopped: bool = False
 
     def with_context_injected(self) -> "SessionRecord":
         return replace(self, context_injected=True)
+
+    def with_stopped(self) -> "SessionRecord":
+        return replace(self, stopped=True)
 
     @property
     def registered(self) -> bool:

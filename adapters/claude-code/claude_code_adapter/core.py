@@ -75,6 +75,9 @@ CLAUDE_CODE_HOST = HostProfile(
     ),
     decisions=ClaudeCodeDecisions(),
     correlate_dispatches=True,
+    # Another Stop/SubagentStop hook can veto a stop (`decision: block`): the agent keeps
+    # working, so its session must stay governed until its end is certain.
+    defer_stop_closure=True,
 )
 
 

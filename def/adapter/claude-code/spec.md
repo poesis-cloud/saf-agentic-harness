@@ -57,7 +57,9 @@ as written, with this runtime's event and field names.
 7. **Failure semantics.** Only **exit 2** blocks (`PreToolUse`: the call is denied with stderr
    as the reason). Exit 1, a crash and a **timeout** are non-blocking errors: the call
    proceeds — they **fail open** (observed). Exit 2 at `Stop`/`SubagentStop` makes the agent
-   continue, and at `UserPromptSubmit` erases the prompt.
+   continue, and at `UserPromptSubmit` erases the prompt. Any other plugin's or user's
+   `Stop`/`SubagentStop` hook can therefore **veto a stop**: the agent keeps working after its
+   stop event fired. Hooks run in parallel, so no hook knows at the stop whether it stands.
 8. **Tools.** Files: `Read`, `Write` (`file_path`, `content`; creates missing folders, overwrites
    an existing file), `Edit` (`file_path`, `old_string`, `new_string`), `NotebookEdit`
    (`notebook_path`). Shell: `Bash` (`command`, `description`), on every OS. Search: `Grep`,
@@ -84,8 +86,10 @@ as written, with this runtime's event and field names.
 | `PostToolUse` · write tool | **H5** write-ended | `check-step-artifact` | `decision: block` + reason + retry directive on revert or error |
 | `PostToolUse` / `PostToolUseFailure` · `Agent` | **H6** step-ended | `check-step-postconditions` (dispatcher's session) | `additionalContext` on fail |
 | `PostToolUse` · any (first one only, if H0 context never landed) | H0 fallback | `resolve-*-instructions/skills` | `additionalContext` with load directives |
-| `SubagentStop` | **H7** worker session ended | `end-session` (step) | none |
-| `Stop` | **H7** turn session ended | `end-session` (the turn) | none |
+| `SubagentStop` | **H7** worker stopped (marked; ended at its dispatch's return) | none | none |
+| `Stop` | **H7** turn stopped (marked; ended at the next prompt) | none | none |
+| `PostToolUse` / `PostToolUseFailure` · `Agent`, naming the returned subagent | **H7** worker session ended, then H6 | `end-session` (step) | as H6 |
+| `UserPromptSubmit` after a stopped turn | **H7** turn session ended, then H0 | `end-session` (the turn) | as H0 |
 | `SessionEnd` | **H7** closure | `end-session` for the conversation and every descendant | none |
 
 The adapter never edits an agent's command (no `updatedInput`) and never emits `allow`.
@@ -98,8 +102,13 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
 - **Turn session (H0):** `<session_id>-t<prompt_id>`, opened at `UserPromptSubmit` for the agent
   the payload names (`hostTurnAgentKeys: [agent_type]`, namespace stripped). No agent-scoped
   hook is needed (host fact 4): a conversation with no selected agent, or whose agent is not a
-  framework agent (`start-session` answers `not-applicable`), stays ungoverned. The turn ends
-  at `Stop`; the next prompt opens a new turn.
+  framework agent (`start-session` answers `not-applicable`), stays ungoverned.
+- **Stops are not ends (host fact 7).** A stop only marks the session *stopped*
+  (`defer_stop_closure`); the session stays governed, so an agent whose stop another hook vetoed
+  keeps working under the harness. It ends when its end is certain: a worker at its dispatch's
+  return (the returned `agentId`), right before H6 evaluates the step, so the worker session has
+  ended at step-ended (core function 10); a turn at the conversation's next prompt, which then
+  opens a new turn; every session at `SessionEnd`.
 - **A framework agent selected on its own is governed (deliberate difference from Copilot).**
   `start-session` admits any agent of the framework's access control list as a root session,
   not only workflow orchestrators. On Copilot only orchestrators carry the H0 hooks, so a
@@ -124,6 +133,12 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
     and dispatches are denied);
   - otherwise the claimed dispatcher is the parent, and is remembered for that subagent's
     `SubagentStop` (which names no dispatcher either), where it arms H6's ignored-return marker.
+
+  An ambiguous start claims no pending dispatch, so the dispatches that made it ambiguous stay
+  pending until their own returns (or the 5-minute expiry). Meanwhile every new start of the
+  same agent is ambiguous too and refused. This is fail closed: no step is evaluated early (a
+  dispatch still pending at its return evaluates nothing), and the orchestrator re-resolves
+  once the concurrent dispatches have returned.
 - **Records** live in the adapter's state folder: `SAF_HARNESS_STATE_DIR`, else
   `$CLAUDE_PLUGIN_DATA/state` in plugin mode, else
   `$XDG_STATE_HOME/saf-agentic-harness/claude-code` (`%LOCALAPPDATA%` on Windows). Stamping,

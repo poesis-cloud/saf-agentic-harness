@@ -276,3 +276,28 @@ def test_a_framework_specialist_selected_on_its_own_cannot_write_the_workspace(
              "tool_input": {"file_path": str(real.workspace_dir / REPORT_REF), "content": "x"}}
     assert _denied(_fire(real, "PreToolUse", write))
     assert real.lock_refs() == []
+
+
+def test_a_worker_whose_stop_was_vetoed_keeps_writing_under_governance(
+    real: RealHarness,
+) -> None:
+    """Review of #42: another SubagentStop hook vetoes the worker's stop and it keeps
+    working. Its write is still authorized and committed onto its step ref; its session
+    ends at its dispatch's return, which then promotes the step."""
+    head = real.git("rev-parse", "HEAD")
+    _open_turn_and_resolve(real)
+    assert not _denied(_fire(real, "PreToolUse", _dispatch("toolu_a")))
+    _fire(real, "SubagentStart", {"agent_id": WORKER_A, "agent_type": f"{PLUGIN}:{ACTOR}"})
+    (step_ref,) = real.step_refs()
+    _fire(real, "SubagentStop", _stop(WORKER_A))  # vetoed by another hook: A keeps working
+
+    assert not _denied(_fire(real, "PreToolUse", {**_write(real, WORKER_A), "stop_hook_active": True}))
+    real.write_report()
+    _fire(real, "PostToolUse", {**_write(real, WORKER_A), "tool_response": {"type": "create"}})
+    assert REPORT_REF in real.git("ls-tree", "-r", "--name-only", step_ref)
+
+    _fire(real, "SubagentStop", {**_stop(WORKER_A), "stop_hook_active": True})
+    _fire(real, "PostToolUse", _returned("toolu_a", WORKER_A))
+    (outcome,) = _outcomes(real)
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"

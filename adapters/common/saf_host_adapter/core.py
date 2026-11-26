@@ -106,12 +106,18 @@ class HostProfile:
     `correlate_dispatches`: the host's subagent-start event does not name the dispatcher,
     so the adapter keeps the dispatches it let through and attributes each started
     subagent to the one pending dispatch of its agent (fail closed when ambiguous).
+
+    `defer_stop_closure`: another hook can veto an agent's stop on this host, and the agent
+    then keeps working. A stop only marks the session stopped; the session ends when its
+    end is certain: a worker at its dispatch's return (named by the returned subagent's id),
+    a turn at the conversation's next prompt, every session at the host session's end.
     """
 
     adapter_id: str
     events: HostEvents
     decisions: HostDecisions
     correlate_dispatches: bool = False
+    defer_stop_closure: bool = False
 
 
 _STARTED = "started"
@@ -314,6 +320,10 @@ class Adapter:
         record = self._tracker.read(host_id)
         if record is not None and record.origin == STEP_ORIGIN:
             return None
+        if record is not None and record.stopped:
+            # The previous turn's stop stood: the new prompt opens a new turn.
+            self._close(host_id)
+            record = None
         if record is None:
             dispatcher = hook.parent_host_id
             if dispatcher and dispatcher != host_id and self._tracker.read(dispatcher):
@@ -998,6 +1008,10 @@ class Adapter:
         worker = (
             self._tracker.take_worker(hook.root_host_id, agent) if hook.root_host_id else None
         )
+        if self._host.defer_stop_closure:
+            # The dispatch returned: the subagent's end is now certain (step-ended follows the
+            # worker session's end, core function 10).
+            self._close(agent)
         if (
             worker is None
             or worker.get("outcome") != WORKER_REGISTERED
@@ -1088,7 +1102,10 @@ class Adapter:
     def _close_agent(self, hook: HookInput) -> Decision:
         """H7 — `agentStop` ends the turn (or step) of the agent that stopped."""
         if hook.host_id:
-            self._close(hook.host_id)
+            if self._host.defer_stop_closure:
+                self._mark_stopped(hook.host_id)
+            else:
+                self._close(hook.host_id)
             if self._host.correlate_dispatches and hook.host_id == hook.root_host_id:
                 # The conversation's turn ended: no dispatch of it is still starting.
                 self._tracker.clear_pending_dispatches(hook.host_id)
@@ -1106,8 +1123,17 @@ class Adapter:
                 # H6: a sub-agent recorded as ignored at H1 has now stopped, so the
                 # dispatcher's next return is its own (host fact 6) and is not evaluated.
                 self._tracker.arm_ignored_return(dispatcher, step_host)
-            self._close(step_host)
+            if self._host.defer_stop_closure:
+                self._mark_stopped(step_host)
+            else:
+                self._close(step_host)
         return None
+
+    def _mark_stopped(self, host_id: str) -> None:
+        """Keep a stopped session governed until its end is certain (defer_stop_closure)."""
+        record = self._tracker.read(host_id)
+        if record is not None and not record.stopped:
+            self._tracker.write(host_id, record.with_stopped())
 
     def _close_host_session(self, hook: HookInput) -> Decision:
         """`sessionEnd` closes the host session and every session still open below it."""
