@@ -197,7 +197,10 @@ renders it (`make plugin-claude`):
   `PreToolUse`, a `systemMessage` warning at `SessionStart`. An orchestrator selected in a
   folder that is not a SAF workspace of its framework gets the `UserPromptSubmit` context "this
   folder is not a SAF workspace; ask me to initialise it".
-- **The registry** is the per-user SAF registry of the Copilot plugin mode. The framework
+- **The registry** is the per-user SAF registry of the Copilot plugin mode, at the same place
+  for every reader and writer: `SAF_AGENTIC_REGISTRY_DIR`, else `%LOCALAPPDATA%\saf-agentic\registry`
+  on Windows — where Claude Code runs the hooks through Git Bash, so the shell scripts convert
+  that path with `cygpath` — else `$XDG_STATE_HOME/saf-agentic/registry`. The framework
   plugin's `SessionStart` writes `hosts/claude-code/frameworks/<name>/root` — keyed by host, so
   a Copilot and a Claude Code install of the same framework never overwrite each other. The
   harness plugin needs no registry entry of its own: no framework hook calls it (no

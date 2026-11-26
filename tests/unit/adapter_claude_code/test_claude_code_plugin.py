@@ -258,3 +258,42 @@ def test_a_pending_dispatch_that_never_started_expires(tmp_path: Path) -> None:
     tracker.add_pending_dispatch(SESSION, "new", "agent-b", "x:actor")
     assert tracker.claim_pending_dispatch(SESSION, "x:actor") == "agent-b"
     assert not list((tmp_path / "dispatches" / SESSION).glob("*.json"))
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX shim")
+@pytest.mark.parametrize("override", [False, True])
+def test_the_shim_and_the_launcher_agree_on_the_windows_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, override: bool
+) -> None:
+    """Review of #36: under Git Bash the shell scripts must use the registry the Python
+    launcher reads on Windows (%LOCALAPPDATA%), and SAF_AGENTIC_REGISTRY_DIR wins over both."""
+    import os
+    import shutil
+
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for tool in ("cat", "tr", "grep", "head", "sed", "dirname", "mkdir", "printf"):
+        found = shutil.which(tool)
+        if found:
+            (tools / tool).symlink_to(found)
+    local = tmp_path / "AppData" / "Local"
+    environment = {"PATH": str(tools), "HOME": str(tmp_path / "home"), "OS": "Windows_NT",
+                   "LOCALAPPDATA": str(local)}
+    if override:
+        environment["SAF_AGENTIC_REGISTRY_DIR"] = str(tmp_path / "explicit")
+    from types import SimpleNamespace
+
+    with monkeypatch.context() as patched:
+        # The launcher's Windows branch, without making pathlib Windows-flavoured here.
+        patched.setattr(LAUNCHER, "os", SimpleNamespace(name="nt", environ=environment))
+        registry = LAUNCHER.registry_dir(environment)
+    assert registry == (tmp_path / "explicit" if override else local / "saf-agentic" / "registry")
+    LAUNCHER.write_entry(LAUNCHER.framework_entry(registry, PLUGIN), str(tmp_path))
+    payload = json.dumps({"session_id": SESSION, "cwd": str(tmp_path),
+                          "agent_type": f"{PLUGIN}:release-train-engineer"})
+    done = subprocess.run(["/bin/sh", str(ADAPTER_DIR / "plugin" / "bin" / "saf-hook.sh"),
+                           "UserPromptSubmit"], input=payload, text=True, capture_output=True,
+                          env=environment, cwd=tmp_path)
+    assert done.returncode == 0, done.stderr
+    assert (registry / "intents" / SESSION).is_file()
+    assert not (tmp_path / "home" / ".local").exists()

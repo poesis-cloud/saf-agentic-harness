@@ -29,7 +29,19 @@ field() {
         grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n 1 |
         sed "s/^\"$1\"[[:space:]]*:[[:space:]]*\"\(.*\)\"\$/\1/"
 }
-registry=${SAF_AGENTIC_REGISTRY_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/saf-agentic/registry}
+# The per-user SAF registry, where the Python launcher looks for it: SAF_AGENTIC_REGISTRY_DIR,
+# else %LOCALAPPDATA%\saf-agentic\registry on Windows (Git Bash runs the hooks there), else
+# $XDG_STATE_HOME/saf-agentic/registry. A Windows path is converted for sh when cygpath exists.
+native() {
+    if [ -n "$1" ] && command -v cygpath >/dev/null 2>&1; then cygpath -u "$1"; else printf '%s' "$1"; fi
+}
+if [ -n "${SAF_AGENTIC_REGISTRY_DIR:-}" ]; then
+    registry=$(native "$SAF_AGENTIC_REGISTRY_DIR")
+elif [ "${OS:-}" = Windows_NT ] && [ -n "${LOCALAPPDATA:-}" ]; then
+    registry="$(native "$LOCALAPPDATA")/saf-agentic/registry"
+else
+    registry=${XDG_STATE_HOME:-$HOME/.local/state}/saf-agentic/registry
+fi
 # Named as the adapter names its records: lowercase, [^a-z0-9-] mapped to '-'.
 safe() { tr 'A-Z' 'a-z' | sed 's/[^a-z0-9-]/-/g'; }
 session=$(field session_id | safe)
@@ -49,7 +61,13 @@ case $event in
         ;;
     PreToolUse)
         governed=''
-        state=${SAF_HARNESS_STATE_DIR:-${CLAUDE_PLUGIN_DATA:+$CLAUDE_PLUGIN_DATA/state}}
+        if [ -n "${SAF_HARNESS_STATE_DIR:-}" ]; then
+            state=$(native "$SAF_HARNESS_STATE_DIR")
+        elif [ -n "${CLAUDE_PLUGIN_DATA:-}" ]; then
+            state="$(native "$CLAUDE_PLUGIN_DATA")/state"
+        else
+            state=''
+        fi
         if [ -n "$session" ] && [ -f "$registry/intents/$session" ]; then governed=1; fi
         for host in "$agent_id" "$session"; do
             if [ -n "$host" ] && [ -n "$state" ] && [ -f "$state/claude-code/sessions/$host.json" ]; then
