@@ -227,6 +227,27 @@
         "minLength": 1,
         "description": "One host tool name."
       }
+    },
+    "dispatchResultKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered payload field names to probe, on a dispatch's post-tool event, for the dispatch's result object (e.g. Claude Code's `tool_response`)."
+    },
+    "dispatchResultAgentKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in a dispatch's result object, for the host id of the subagent that returned. When declared, a dispatch return concludes the step only when that subagent was registered as the step's worker by this dispatcher; any other returned subagent (refused, ambiguous, not applicable, or never seen) leaves the step in flight."
+    },
+    "dispatchResultStatusKeys": {
+      "$ref": "#/$defs/keyList",
+      "description": "Ordered field names to probe, in a dispatch's result object, for the dispatch's status."
+    },
+    "asyncDispatchStatuses": {
+      "description": "Dispatch result statuses that mean the dispatch returned before its subagent ended (it runs in the background): such a return never concludes the step.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One dispatch result status."
+      }
     }
   },
   "$defs": {

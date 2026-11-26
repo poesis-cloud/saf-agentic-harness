@@ -42,6 +42,7 @@ from .runner import CommandRunner, HarnessCommandError
 from .tracker import (
     STEP_ORIGIN,
     TURN_ORIGIN,
+    WORKER_REGISTERED,
     AmbiguousDispatchError,
     SessionRecord,
     SessionTracker,
@@ -395,6 +396,7 @@ class Adapter:
             # Never registered as the step's worker, yet attributable: its return must not
             # conclude the step (H6).
             self._ignore_return(parent_host, parent, sanitize_identifier(str(agent_id)))
+            self._note_worker(hook, agent_id, parent_host, "unattributed")
             return None
         actor = self._binding.agent_name(str(actor))
         step_host = sanitize_identifier(str(agent_id))
@@ -415,6 +417,7 @@ class Adapter:
                     registration_failure="its dispatcher's session is not registered",
                 ),
             )
+            self._note_worker(hook, agent_id, parent_host, "refused")
             return None
         if self._host.correlate_dispatches:
             self._tracker.remember_dispatcher(step_host, parent_host)
@@ -428,12 +431,15 @@ class Adapter:
         )
         if report is not None and read_status(report) == _NOT_APPLICABLE:
             self._ignore_return(parent_host, parent, step_host)
+            self._note_worker(hook, agent_id, parent_host, "not-applicable")
             return None
         failure = self._registration_failure(report)
         if failure is not None:
             self._tracker.write(step_host, replace(record, registration_failure=failure))
             self._ignore_return(parent_host, parent, step_host)
+            self._note_worker(hook, agent_id, parent_host, "refused")
             return None
+        self._note_worker(hook, agent_id, parent_host, WORKER_REGISTERED)
         context, delivered = self._resolve_context(
             record,
             inline=True,
@@ -472,7 +478,19 @@ class Adapter:
                     harness_version=self._harness_version,
                 ),
             )
+            self._note_worker(hook, agent_id, None, "ambiguous")
             return None
+
+    def _note_worker(
+        self, hook: HookInput, agent_id: Any, dispatcher_host: str | None, outcome: str
+    ) -> None:
+        """Keep H1's outcome for this subagent where the host reports, at the dispatch's
+        return, which subagent returned (H6 decides by that identity)."""
+        root = hook.root_host_id
+        if self._binding.dispatch_result_agent_keys and root and agent_id is not None:
+            self._tracker.record_worker(
+                root, sanitize_identifier(str(agent_id)), dispatcher_host, outcome
+            )
 
     def _ignore_return(
         self, dispatcher_host: str, dispatcher: SessionRecord, step_host: str
@@ -898,19 +916,20 @@ class Adapter:
 
     def _settle_tool_call(self, hook: HookInput) -> Decision:
         host_id = hook.host_id
-        record = self._tracker.read(host_id) if host_id else None
-        if record is None or not record.registered:
-            return None
         try:
             (call,) = hook.read_tool_calls()
         except (MalformedPayloadError, ValueError):
             return None
+        is_dispatch = self._binding.is_dispatch_tool(call.name)
+        if is_dispatch and self._host.correlate_dispatches and hook.root_host_id:
+            # Whatever the dispatching session is, its returned dispatch is no longer pending.
+            self._tracker.drop_pending_dispatch(hook.root_host_id, call.call_id)
+        record = self._tracker.read(host_id) if host_id else None
+        if record is None or not record.registered:
+            return None
         decision: dict[str, Any] = {}
-        if self._binding.is_dispatch_tool(call.name):
-            if self._host.correlate_dispatches and hook.root_host_id:
-                self._tracker.drop_pending_dispatch(hook.root_host_id, call.call_id)
-            if not self._tracker.consume_ignored_return(host_id):
-                decision = dict(self._settle_step(record) or {})
+        if is_dispatch:
+            decision = dict(self._settle_dispatch(hook, host_id, record) or {})
         elif hook.event == self._events.post_tool_use and (
             self._binding.resolve_write_action(call.name, call.args) is not None
         ):
@@ -918,6 +937,54 @@ class Adapter:
         if not record.context_injected and hook.event == self._events.post_tool_use:
             decision = self._append_late_context(host_id, record, decision)
         return decision or None
+
+    def _settle_dispatch(
+        self, hook: HookInput, host_id: str, record: SessionRecord
+    ) -> Decision:
+        """H6 — decide whether this dispatch return concludes the dispatcher's step.
+
+        A host that reports which subagent returned (`dispatchResultAgentKeys`) is decided by
+        that observed identity: only the subagent H1 registered as this dispatcher's worker
+        concludes the step; a background return concludes nothing. Other hosts rely on the
+        ignored-return markers, which follow the host's event order.
+        """
+        if not self._binding.dispatch_result_agent_keys:
+            if self._tracker.consume_ignored_return(host_id):
+                return None
+            return self._settle_step(record)
+        result = self._binding.probe(hook.payload, self._binding.dispatch_result_keys)
+        result = result if isinstance(result, Mapping) else {}
+        status = self._binding.probe(result, self._binding.dispatch_result_status_keys)
+        if isinstance(status, str) and status in self._binding.async_dispatch_statuses:
+            self._diagnostic(f"[{self._adapter_id}] {hook.event}: a dispatch returned '{status}'")
+            return self._decisions.settle_context(
+                "This dispatch returned before its subagent ended (it runs in the background), "
+                "so the step was not evaluated. Dispatch steps synchronously "
+                "(run_in_background: false); re-resolve (resolve-step) once the subagent ends."
+            )
+        returned = self._binding.probe(result, self._binding.dispatch_result_agent_keys)
+        if returned is None:
+            # No identity in this return: fall back on the event-order markers.
+            if self._tracker.consume_ignored_return(host_id):
+                return None
+            return self._settle_step(record)
+        agent = sanitize_identifier(str(returned))
+        self._tracker.discard_ignored_return(host_id, agent)
+        worker = (
+            self._tracker.take_worker(hook.root_host_id, agent) if hook.root_host_id else None
+        )
+        if (
+            worker is None
+            or worker.get("outcome") != WORKER_REGISTERED
+            or worker.get("dispatcher") != host_id
+        ):
+            self._diagnostic(
+                f"[{self._adapter_id}] {hook.event}: subagent '{agent}' returned but was not "
+                f"registered as this dispatcher's worker "
+                f"({(worker or {}).get('outcome', 'never seen')}): the step stays in flight"
+            )
+            return None
+        return self._settle_step(record)
 
     def _settle_write(
         self, hook: HookInput, record: SessionRecord, call: ToolCall
@@ -997,6 +1064,9 @@ class Adapter:
         """H7 — `agentStop` ends the turn (or step) of the agent that stopped."""
         if hook.host_id:
             self._close(hook.host_id)
+            if self._host.correlate_dispatches and hook.host_id == hook.root_host_id:
+                # The conversation's turn ended: no dispatch of it is still starting.
+                self._tracker.clear_pending_dispatches(hook.host_id)
         return None
 
     def _close_subagent(self, hook: HookInput) -> Decision:
@@ -1025,6 +1095,7 @@ class Adapter:
             self._close(host_id)
             if self._host.correlate_dispatches:
                 self._tracker.clear_pending_dispatches(hook.root_host_id or host_id)
+            self._tracker.clear_workers(hook.root_host_id or host_id)
         return None
 
     def _close(self, host_id: str) -> None:

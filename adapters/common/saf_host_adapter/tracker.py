@@ -20,10 +20,16 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 TURN_ORIGIN = "turn"
 STEP_ORIGIN = "step"
+# A subagent starts within seconds of its dispatch (observed): a dispatch still pending after
+# this long was never started (the call failed, was refused, or was interrupted) and must not
+# make a later dispatch of the same agent look ambiguous.
+PENDING_DISPATCH_TTL_SECONDS = 300
+# The outcome H1 recorded for a started subagent, read back when its dispatch returns.
+WORKER_REGISTERED = "registered"
 
 
 class TrackerError(RuntimeError):
@@ -67,11 +73,13 @@ class SessionRecord:
 class SessionTracker:
     """Persist one `SessionRecord` per sanitized host session id."""
 
-    def __init__(self, state_dir: Path) -> None:
+    def __init__(self, state_dir: Path, clock: Callable[[], int] = time.time_ns) -> None:
         self._sessions_dir = state_dir / "sessions"
         self._ignored_returns_dir = state_dir / "ignored-returns"
         self._dispatches_dir = state_dir / "dispatches"
         self._dispatchers_dir = state_dir / "dispatchers"
+        self._workers_dir = state_dir / "workers"
+        self._clock = clock
 
     def read(self, host_id: str) -> SessionRecord | None:
         path = self._path(host_id)
@@ -175,7 +183,7 @@ class SessionTracker:
         """
         directory = self._dispatches_dir / _safe_component(root_host_id)
         directory.mkdir(parents=True, exist_ok=True)
-        name = f"{time.time_ns():020d}-{_safe_name(call_id or os.urandom(6).hex())}.json"
+        name = f"{self._clock():020d}-{_safe_name(call_id or os.urandom(6).hex())}.json"
         _write_json(directory / name, {"dispatcher": dispatcher_host_id, "actor": actor})
 
     def drop_pending_dispatch(self, root_host_id: str, call_id: str | None) -> None:
@@ -195,9 +203,13 @@ class SessionTracker:
         subagent cannot be attributed, so the caller fails closed.
         """
         directory = self._dispatches_dir / _safe_component(root_host_id)
+        oldest = self._clock() - PENDING_DISPATCH_TTL_SECONDS * 1_000_000_000
         while directory.is_dir():
             matching: list[tuple[Path, str]] = []
             for entry in sorted(directory.glob("*.json")):
+                if _stamp(entry) < oldest:
+                    entry.unlink(missing_ok=True)  # never started: expired
+                    continue
                 try:
                     recorded = json.loads(entry.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
@@ -221,6 +233,38 @@ class SessionTracker:
 
     def clear_pending_dispatches(self, root_host_id: str) -> None:
         shutil.rmtree(self._dispatches_dir / _safe_component(root_host_id), ignore_errors=True)
+
+    def record_worker(
+        self, root_host_id: str, agent_host_id: str, dispatcher_host_id: str | None, outcome: str
+    ) -> None:
+        """Keep what H1 decided for a started subagent, for H6 to read when its dispatch
+        returns naming it (hosts that report the returned subagent)."""
+        directory = self._workers_dir / _safe_component(root_host_id)
+        directory.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            directory / _safe_component(agent_host_id),
+            {"dispatcher": dispatcher_host_id or "", "outcome": outcome},
+        )
+
+    def take_worker(self, root_host_id: str, agent_host_id: str) -> dict[str, str] | None:
+        """Read and forget what H1 decided for a returned subagent; None when unknown."""
+        path = self._workers_dir / _safe_component(root_host_id) / _safe_component(agent_host_id)
+        try:
+            recorded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        path.unlink(missing_ok=True)
+        return {str(k): str(v) for k, v in recorded.items()} if isinstance(recorded, dict) else None
+
+    def clear_workers(self, root_host_id: str) -> None:
+        shutil.rmtree(self._workers_dir / _safe_component(root_host_id), ignore_errors=True)
+
+    def discard_ignored_return(self, dispatcher_host_id: str, agent_host_id: str) -> None:
+        """Forget one sub-agent's ignored-return marker, pending or armed: its return was
+        decided by its observed identity instead."""
+        directory = self._ignored_returns_dir / _safe_component(dispatcher_host_id)
+        for state in ("pending", "returned"):
+            (directory / state / _safe_component(agent_host_id)).unlink(missing_ok=True)
 
     def remember_dispatcher(self, agent_host_id: str, dispatcher_host_id: str) -> None:
         """Keep a subagent's dispatcher until its stop, which does not name it either."""
@@ -271,6 +315,12 @@ class SessionTracker:
         if not host_id or "/" in host_id or "\\" in host_id or host_id.startswith("."):
             raise ValueError(f"unsafe host session id: {host_id!r}")
         return self._sessions_dir / f"{host_id}.json"
+
+
+def _stamp(entry: Path) -> int:
+    """The dispatch time a pending-dispatch file name starts with (0 when unreadable)."""
+    head = entry.name.split("-", 1)[0]
+    return int(head) if head.isdigit() else 0
 
 
 def _safe_name(raw: str) -> str:

@@ -245,3 +245,16 @@ def test_an_adapter_that_cannot_load_fails_closed_only_where_the_runtime_can_vet
     )
     assert done.returncode == code
     assert b"could not load" in done.stderr and done.stdout == b""
+
+
+def test_a_pending_dispatch_that_never_started_expires(tmp_path: Path) -> None:
+    """Review of #42: a stale pending dispatch must not make a later one look ambiguous."""
+    from saf_host_adapter.tracker import PENDING_DISPATCH_TTL_SECONDS, SessionTracker
+
+    now = [10**18]
+    tracker = SessionTracker(tmp_path, clock=lambda: now[0])
+    tracker.add_pending_dispatch(SESSION, "old", "agent-a", "x:actor")
+    now[0] += (PENDING_DISPATCH_TTL_SECONDS + 1) * 1_000_000_000
+    tracker.add_pending_dispatch(SESSION, "new", "agent-b", "x:actor")
+    assert tracker.claim_pending_dispatch(SESSION, "x:actor") == "agent-b"
+    assert not list((tmp_path / "dispatches" / SESSION).glob("*.json"))

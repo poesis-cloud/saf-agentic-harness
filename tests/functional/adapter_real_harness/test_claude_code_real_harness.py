@@ -230,3 +230,33 @@ def test_an_unobserved_dispatch_leaves_its_subagent_ungoverned(real: RealHarness
     assert _fire(real, "SubagentStart", {"agent_id": WORKER_A,
                                          "agent_type": f"{PLUGIN}:{ACTOR}"}) is None
     assert real.step_refs() == []
+
+
+def test_an_ambiguous_subagents_return_never_concludes_the_bound_workers_step(
+    real: RealHarness,
+) -> None:
+    """Review of #42: worker A is bound to the step; A and the orchestrator then both
+    dispatch the actor, so the next subagent B cannot be attributed (refused, fail closed).
+    B's return evaluates nothing; A's return concludes and promotes the step."""
+    head = real.git("rev-parse", "HEAD")
+    _open_turn_and_resolve(real)
+    assert not _denied(_fire(real, "PreToolUse", _dispatch("toolu_a")))
+    _fire(real, "SubagentStart", {"agent_id": WORKER_A, "agent_type": f"{PLUGIN}:{ACTOR}"})
+    nested = {**_dispatch("toolu_n"), "agent_id": WORKER_A, "agent_type": f"{PLUGIN}:{ACTOR}"}
+    assert not _denied(_fire(real, "PreToolUse", nested))
+    assert not _denied(_fire(real, "PreToolUse", _dispatch("toolu_b")))
+    _fire(real, "SubagentStart", {"agent_id": WORKER_B, "agent_type": f"{PLUGIN}:{ACTOR}"})
+    assert _denied(_fire(real, "PreToolUse", _write(real, WORKER_B)))
+
+    _fire(real, "SubagentStop", _stop(WORKER_B))
+    _fire(real, "PostToolUse", _returned("toolu_b", WORKER_B))
+    assert _outcomes(real) == []
+
+    assert not _denied(_fire(real, "PreToolUse", _write(real, WORKER_A)))
+    real.write_report()
+    _fire(real, "PostToolUse", {**_write(real, WORKER_A), "tool_response": {"type": "create"}})
+    _fire(real, "SubagentStop", _stop(WORKER_A))
+    _fire(real, "PostToolUse", _returned("toolu_a", WORKER_A))
+    (outcome,) = _outcomes(real)
+    assert outcome["promotion"]["outcome"] == "promoted"
+    assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"

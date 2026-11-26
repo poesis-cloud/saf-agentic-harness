@@ -104,8 +104,11 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
 - **Dispatcher correlation (H1).** `SubagentStart` names no dispatcher (host fact 3), so the
   shared core runs with `correlate_dispatches`: every dispatch a `PreToolUse` lets through is
   recorded as *pending* under the conversation (dispatcher host id, `subagent_type`,
-  `tool_use_id`), and dropped at that dispatch's post-tool event. A `SubagentStart` claims the
-  oldest pending dispatch of its `agent_type`:
+  `tool_use_id`). A pending dispatch is dropped at that dispatch's post-tool event (whatever the
+  dispatching session is, governed or not), at the end of the conversation's turn (`Stop`), and
+  when it is older than 5 minutes (a subagent starts within seconds of its dispatch: an older
+  one was never started). A `SubagentStart` claims the oldest pending dispatch of its
+  `agent_type`:
   - none → the subagent was not dispatched by a session the adapter saw: it stays
     **ungoverned** (as a Copilot `not-applicable`);
   - pending dispatches of that agent from **several** dispatchers → the subagent cannot be
@@ -129,6 +132,16 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
   attribution is denied, as on Copilot. A `resolve-step-model` result also names the host model
   `models.yaml` binds the resolved profile to when it differs from the slug: "dispatch the
   resolved profile '<slug>' with the model '<alias>'".
+- **H6.** The dispatch's result names the subagent that returned and its status
+  (`dispatchResultKeys: [tool_response]`, `dispatchResultAgentKeys: [agentId]`,
+  `dispatchResultStatusKeys: [status]`). H1 records, for every started subagent, what it decided
+  (registered as this dispatcher's worker, refused, ambiguous, not applicable). A return concludes
+  the step only when its subagent was registered as **this** dispatcher's worker; any other
+  returned subagent — refused, ambiguous, not a framework agent, or never seen — leaves the step in
+  flight for its bound worker (core function 10). A return with status `async_launched`
+  (`asyncDispatchStatuses`) evaluates nothing and tells the orchestrator to re-resolve once the
+  subagent ends. A return that names no subagent falls back on the event-order markers of the
+  Copilot binding.
 - **H5.** The write already ran and Claude Code cannot replace a built-in tool's result, so a
   reverted or unvalidated write answers `decision: block` with the `WRITE REJECTED` /
   `WRITE OUTCOME UNKNOWN` text as `reason`, and the retry directive as `additionalContext`.

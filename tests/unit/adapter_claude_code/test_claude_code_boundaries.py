@@ -301,3 +301,80 @@ def test_h4_names_the_host_model_of_the_resolved_profile(rig: Rig) -> None:
         "command": f"python3 {HARNESS} resolve-step-model", "description": "model"})
     reason = _specific(rig.fire(request))["permissionDecisionReason"]
     assert "dispatch the resolved profile 'claude-opus-4.8' with the model 'opus'" in reason
+
+
+def _return(tool_use_id: str, worker: str | None, status: str = "completed", **extra) -> dict:
+    response = {"status": status, **({"agentId": worker} if worker else {})}
+    return main_thread("PostToolUse", tool_name="Agent", tool_use_id=tool_use_id,
+                       tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}", "prompt": "p",
+                                   "run_in_background": False},
+                       tool_response=response, **extra)
+
+
+def test_h6_never_concludes_the_step_on_an_ambiguous_subagents_return(rig: Rig) -> None:
+    """Review of #42: a subagent refused because its dispatcher is ambiguous has no
+    ignored-return marker; its return must still leave the step in flight."""
+    rig.open_turn()
+    rig.open_step()
+    nested = in_worker("PreToolUse", tool_name="Agent", tool_use_id="toolu_n",
+                       tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}", "prompt": "p",
+                                   "description": "d", "run_in_background": False})
+    rig.fire(nested)
+    rig.fire(dispatch("toolu_e"))
+    rig.fire(event("SubagentStart", agent_id=OTHER_WORKER, agent_type=f"{PLUGIN}:{STEP_ACTOR}"))
+    rig.fire(in_worker("SubagentStop", worker=OTHER_WORKER, stop_hook_active=False))
+    assert rig.fire(_return("toolu_e", OTHER_WORKER)) is None
+    assert "check-step-postconditions" not in rig.runner.functions()
+    assert any("ambiguous" in line for line in rig.diagnostics)
+    rig.fire(in_worker("SubagentStop", stop_hook_active=False))
+    rig.fire(_return("toolu_d", WORKER))
+    assert rig.runner.functions().count("check-step-postconditions") == 1
+
+
+def test_h6_never_concludes_the_step_on_a_non_framework_or_unknown_subagent(rig: Rig) -> None:
+    rig.open_turn()
+    rig.runner.script["start-session"] = [
+        build_report("start-session", "not-applicable"),
+    ]
+    rig.open_step()
+    assert rig.fire(_return("toolu_d", WORKER)) is None
+    assert rig.fire(_return("toolu_x", "a0000000000000000")) is None
+    assert "check-step-postconditions" not in rig.runner.functions()
+
+
+def test_h6_never_concludes_the_step_on_a_background_return(rig: Rig) -> None:
+    rig.open_turn()
+    rig.open_step()
+    decision = rig.fire(_return("toolu_d", WORKER, status="async_launched"))
+    assert "runs in the background" in _specific(decision)["additionalContext"]
+    assert "check-step-postconditions" not in rig.runner.functions()
+
+
+def test_h6_without_a_returned_identity_falls_back_on_the_event_order(rig: Rig) -> None:
+    rig.open_turn()
+    rig.open_step()
+    rig.fire(in_worker("SubagentStop", stop_hook_active=False))
+    rig.fire(_return("toolu_d", None))
+    assert rig.runner.functions().count("check-step-postconditions") == 1
+
+
+def test_a_failed_dispatch_of_an_ungoverned_subagent_leaves_nothing_pending(rig: Rig) -> None:
+    """Review of #42: the pending dispatch of an ungoverned agent is dropped at its return,
+    so a later legitimate dispatch of the same actor is not refused as ambiguous."""
+    rig.open_turn()
+    ungoverned = "u0000000000000001"
+    rig.fire(in_worker("PreToolUse", worker=ungoverned, tool_name="Agent", tool_use_id="toolu_u",
+                       tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}", "prompt": "p",
+                                   "run_in_background": False}))
+    rig.fire(in_worker("PostToolUseFailure", worker=ungoverned, tool_name="Agent",
+                       tool_use_id="toolu_u", tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}"},
+                       error="interrupted"))
+    rig.open_step()
+    assert rig.tracker.read(WORKER).registered
+
+
+def test_the_end_of_a_turn_drops_its_pending_dispatches(rig: Rig) -> None:
+    rig.open_turn()
+    rig.fire(dispatch("toolu_never_started"))
+    rig.fire(main_thread("Stop", stop_hook_active=False))
+    assert rig.tracker.claim_pending_dispatch(SESSION, f"{PLUGIN}:{STEP_ACTOR}") is None

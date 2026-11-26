@@ -88,6 +88,10 @@ class ToolBinding:
     host_tool_use_id_keys: tuple[str, ...] = ()
     sync_dispatch_flag_keys: tuple[str, ...] = ()
     upsert_tools: frozenset[str] = frozenset()
+    dispatch_result_keys: tuple[str, ...] = ()
+    dispatch_result_agent_keys: tuple[str, ...] = ()
+    dispatch_result_status_keys: tuple[str, ...] = ()
+    async_dispatch_statuses: frozenset[str] = frozenset()
 
     def probe(self, payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
         """Answer the first present, non-empty value among `keys` (first hit wins)."""
@@ -286,6 +290,10 @@ def load_tool_binding(
         host_tool_use_id_keys=_strings(raw, "hostToolUseIdKeys"),
         sync_dispatch_flag_keys=_strings(raw, "syncDispatchFlagKeys"),
         upsert_tools=frozenset(_strings(raw, "upsertTools")),
+        dispatch_result_keys=_strings(raw, "dispatchResultKeys"),
+        dispatch_result_agent_keys=_strings(raw, "dispatchResultAgentKeys"),
+        dispatch_result_status_keys=_strings(raw, "dispatchResultStatusKeys"),
+        async_dispatch_statuses=frozenset(_strings(raw, "asyncDispatchStatuses")),
         model_bindings={
             str(slug): str((binding or {}).get("hostModelId"))
             for slug, binding in models.items()

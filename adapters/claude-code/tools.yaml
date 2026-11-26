@@ -67,3 +67,12 @@ mediatedCommandTools: [Bash]
 mediatedCommandKeys: [command]
 # Guarded shell class (I9): advisory textual guard on every other shell command.
 guardedShellTools: [Bash]
+
+# Dispatch returns (H6): the `Agent` tool's result names the subagent that returned
+# (`tool_response.agentId`) and its status; a background launch answers `async_launched`
+# (observed, 2.1.323). Only the subagent H1 registered as this dispatcher's worker concludes
+# the step.
+dispatchResultKeys: [tool_response]
+dispatchResultAgentKeys: [agentId]
+dispatchResultStatusKeys: [status]
+asyncDispatchStatuses: [async_launched]
