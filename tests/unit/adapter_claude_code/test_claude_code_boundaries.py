@@ -325,7 +325,10 @@ def test_h6_never_concludes_the_step_on_an_ambiguous_subagents_return(rig: Rig) 
     rig.fire(in_worker("SubagentStop", worker=OTHER_WORKER, stop_hook_active=False))
     assert rig.fire(_return("toolu_e", OTHER_WORKER)) is None
     assert "check-step-postconditions" not in rig.runner.functions()
-    assert any("ambiguous" in line for line in rig.diagnostics)
+    # The ambiguous start could not claim a dispatch, so its dispatch is still pending at its
+    # return: the return is not evaluated either way.
+    assert any("cannot be told apart" in line for line in rig.diagnostics)
+    assert any("is not evaluated" in line or "stays in flight" in line for line in rig.diagnostics)
     rig.fire(in_worker("SubagentStop", stop_hook_active=False))
     rig.fire(_return("toolu_d", WORKER))
     assert rig.runner.functions().count("check-step-postconditions") == 1
@@ -378,3 +381,48 @@ def test_the_end_of_a_turn_drops_its_pending_dispatches(rig: Rig) -> None:
     rig.fire(dispatch("toolu_never_started"))
     rig.fire(main_thread("Stop", stop_hook_active=False))
     assert rig.tracker.claim_pending_dispatch(SESSION, f"{PLUGIN}:{STEP_ACTOR}") is None
+
+
+def test_a_dispatch_that_failed_before_its_subagent_started_never_evaluates_the_step(rig: Rig) -> None:
+    """Review of #42: a second dispatch failing before SubagentStart carries no agentId; it
+    must not evaluate the step the first (still running) worker is bound to."""
+    rig.open_turn()
+    rig.open_step()
+    rig.fire(dispatch("toolu_fails"))
+    failed = main_thread("PostToolUseFailure", tool_name="Agent", tool_use_id="toolu_fails",
+                         tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}"}, error="bad type")
+    assert rig.fire(failed) is None
+    assert "check-step-postconditions" not in rig.runner.functions()
+    rig.fire(in_worker("SubagentStop", stop_hook_active=False))
+    crashed = main_thread("PostToolUseFailure", tool_name="Agent", tool_use_id="toolu_d",
+                          tool_input={"subagent_type": f"{PLUGIN}:{STEP_ACTOR}"}, error="crashed")
+    rig.fire(crashed)
+    assert rig.runner.functions().count("check-step-postconditions") == 1
+
+
+def test_a_subagent_starting_after_a_plugin_update_is_refused_not_ungoverned(rig: Rig) -> None:
+    """Review of #42: the dispatch was allowed, then the plugin changed before SubagentStart."""
+    from dataclasses import replace
+
+    rig.open_turn()
+    rig.fire(dispatch())
+    rig.tracker.write(SESSION, replace(rig.tracker.read(SESSION), harness_version="0.9.0"))
+    rig.fire(event("SubagentStart", agent_id=WORKER, agent_type=f"{PLUGIN}:{STEP_ACTOR}"))
+    record = rig.tracker.read(WORKER)
+    assert record is not None and not record.registered
+    assert "plugin was updated" in record.registration_failure
+    write = in_worker("PreToolUse", tool_name="Write", tool_use_id="w",
+                      tool_input={"file_path": "/home/user/acme-notes/workspace/a.md", "content": "y"})
+    assert _denied(rig.fire(write))
+
+
+def test_an_unreadable_pending_dispatch_refuses_the_started_subagent(rig: Rig, tmp_path: Path) -> None:
+    """Review of #42: unreadable correlation state fails closed (refused), never ungoverned."""
+    rig.open_turn()
+    rig.fire(dispatch())
+    (entry,) = (tmp_path / "state" / "dispatches" / SESSION).glob("*.json")
+    entry.write_text("{not json", encoding="utf-8")
+    rig.fire(event("SubagentStart", agent_id=WORKER, agent_type=f"{PLUGIN}:{STEP_ACTOR}"))
+    record = rig.tracker.read(WORKER)
+    assert record is not None and not record.registered
+    assert "cannot be read" in record.registration_failure

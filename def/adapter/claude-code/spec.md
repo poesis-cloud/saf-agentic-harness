@@ -98,8 +98,16 @@ The adapter never edits an agent's command (no `updatedInput`) and never emits `
 - **Turn session (H0):** `<session_id>-t<prompt_id>`, opened at `UserPromptSubmit` for the agent
   the payload names (`hostTurnAgentKeys: [agent_type]`, namespace stripped). No agent-scoped
   hook is needed (host fact 4): a conversation with no selected agent, or whose agent is not a
-  framework orchestrator (`start-session` answers `not-applicable`), stays ungoverned. The
-  turn ends at `Stop`; the next prompt opens a new turn.
+  framework agent (`start-session` answers `not-applicable`), stays ungoverned. The turn ends
+  at `Stop`; the next prompt opens a new turn.
+- **A framework agent selected on its own is governed (deliberate difference from Copilot).**
+  `start-session` admits any agent of the framework's access control list as a root session,
+  not only workflow orchestrators. On Copilot only orchestrators carry the H0 hooks, so a
+  specialist selected there is ungoverned and writes freely. Here the same specialist opens a
+  governed turn: it can read and converse, and every write to the workspace is denied, since
+  no step instance is in flight (core function 8). Workspace writes stay the steps' alone. The
+  adapter does not filter H0 by the framework's orchestrators: it would have to read the
+  framework's configuration, which an adapter never does.
 - **Worker session (H1):** the subagent's `agent_id`.
 - **Dispatcher correlation (H1).** `SubagentStart` names no dispatcher (host fact 3), so the
   shared core runs with `correlate_dispatches`: every dispatch a `PreToolUse` lets through is

@@ -260,3 +260,19 @@ def test_an_ambiguous_subagents_return_never_concludes_the_bound_workers_step(
     (outcome,) = _outcomes(real)
     assert outcome["promotion"]["outcome"] == "promoted"
     assert real.git("rev-list", "--count", f"{head}..HEAD") == "1"
+
+
+def test_a_framework_specialist_selected_on_its_own_cannot_write_the_workspace(
+    real: RealHarness,
+) -> None:
+    """Spec (claude-code, Session identity): a non-orchestrator framework agent selected as
+    the conversation's agent opens a governed turn, and its writes are denied (no step in
+    flight) — a deliberate difference from Copilot, where it stays ungoverned."""
+    specialist = f"{PLUGIN}:{ACTOR}"
+    opened = _fire(real, "UserPromptSubmit", {"prompt_id": "p-s", "prompt": "write it",
+                                              "agent_type": specialist})
+    assert "SAFe agentic harness" in _specific(opened)["additionalContext"]
+    write = {"agent_type": specialist, "tool_name": "Write", "tool_use_id": "toolu_s",
+             "tool_input": {"file_path": str(real.workspace_dir / REPORT_REF), "content": "x"}}
+    assert _denied(_fire(real, "PreToolUse", write))
+    assert real.lock_refs() == []

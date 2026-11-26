@@ -186,21 +186,29 @@ class SessionTracker:
         name = f"{self._clock():020d}-{_safe_name(call_id or os.urandom(6).hex())}.json"
         _write_json(directory / name, {"dispatcher": dispatcher_host_id, "actor": actor})
 
-    def drop_pending_dispatch(self, root_host_id: str, call_id: str | None) -> None:
-        """Forget a dispatch whose tool call returned (its subagent started or never will)."""
+    def drop_pending_dispatch(self, root_host_id: str, call_id: str | None) -> bool:
+        """Forget a dispatch whose tool call returned; answer whether it was still pending,
+        i.e. its subagent never started (a started subagent claimed it)."""
         if not call_id:
-            return
+            return False
         directory = self._dispatches_dir / _safe_component(root_host_id)
+        dropped = False
         if directory.is_dir():
             for entry in directory.glob(f"*-{_safe_name(call_id)}.json"):
-                entry.unlink(missing_ok=True)
+                try:
+                    entry.unlink()
+                except FileNotFoundError:
+                    continue
+                dropped = True
+        return dropped
 
     def claim_pending_dispatch(self, root_host_id: str, actor: str) -> str | None:
         """Answer the dispatcher of a subagent of `actor` that just started, and consume it.
 
         None when no pending dispatch names that actor. Raises `AmbiguousDispatchError`
-        when pending dispatches of that actor come from more than one dispatcher: the
-        subagent cannot be attributed, so the caller fails closed.
+        when pending dispatches of that actor come from more than one dispatcher, or when a
+        pending dispatch cannot be read: the subagent cannot be attributed, so the caller
+        fails closed.
         """
         directory = self._dispatches_dir / _safe_component(root_host_id)
         oldest = self._clock() - PENDING_DISPATCH_TTL_SECONDS * 1_000_000_000
@@ -212,9 +220,19 @@ class SessionTracker:
                     continue
                 try:
                     recorded = json.loads(entry.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
-                    continue
-                if isinstance(recorded, dict) and recorded.get("actor") == actor:
+                except FileNotFoundError:
+                    continue  # a concurrent start claimed it
+                except (OSError, ValueError) as failure:
+                    raise AmbiguousDispatchError(
+                        f"the pending dispatch {entry.name} cannot be read ({failure}): the "
+                        "started subagent cannot be attributed"
+                    ) from failure
+                if not isinstance(recorded, dict):
+                    raise AmbiguousDispatchError(
+                        f"the pending dispatch {entry.name} is not a record: the started "
+                        "subagent cannot be attributed"
+                    )
+                if recorded.get("actor") == actor:
                     matching.append((entry, str(recorded.get("dispatcher"))))
             if not matching:
                 return None

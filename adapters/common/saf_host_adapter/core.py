@@ -390,7 +390,23 @@ class Adapter:
             and parent.harness_version != self._harness_version
         ):
             # The dispatcher was correlated, not observed, so `handle` could not check its
-            # version: the subagent stays ungoverned, and its dispatcher is refused anyway.
+            # version. The subagent is already starting: record it UNREGISTERED, so its
+            # writes and dispatches are denied (fail closed), never left ungoverned.
+            step_host = sanitize_identifier(str(agent_id))
+            self._tracker.write(
+                step_host,
+                SessionRecord(
+                    session_id=step_host,
+                    agent=self._binding.agent_name(str(actor or "")),
+                    origin=STEP_ORIGIN,
+                    parent_session_id=parent.session_id,
+                    parent_host_id=parent_host,
+                    registration_failure=PLUGIN_UPDATED,
+                    workspace=self._workspace_dir,
+                    harness_version=self._harness_version,
+                ),
+            )
+            self._note_worker(hook, agent_id, parent_host, "refused")
             return None
         if actor is None:
             # Never registered as the step's worker, yet attributable: its return must not
@@ -921,14 +937,23 @@ class Adapter:
         except (MalformedPayloadError, ValueError):
             return None
         is_dispatch = self._binding.is_dispatch_tool(call.name)
+        never_started = False
         if is_dispatch and self._host.correlate_dispatches and hook.root_host_id:
             # Whatever the dispatching session is, its returned dispatch is no longer pending.
-            self._tracker.drop_pending_dispatch(hook.root_host_id, call.call_id)
+            # Still pending means no subagent ever started for it.
+            never_started = self._tracker.drop_pending_dispatch(hook.root_host_id, call.call_id)
         record = self._tracker.read(host_id) if host_id else None
         if record is None or not record.registered:
             return None
         decision: dict[str, Any] = {}
-        if is_dispatch:
+        if is_dispatch and never_started:
+            # A dispatch that failed before its subagent started delivered no step: it must
+            # not evaluate the step another (still running) worker is bound to.
+            self._diagnostic(
+                f"[{self._adapter_id}] {hook.event}: dispatch '{call.call_id}' returned before "
+                "any subagent started: the step is not evaluated"
+            )
+        elif is_dispatch:
             decision = dict(self._settle_dispatch(hook, host_id, record) or {})
         elif hook.event == self._events.post_tool_use and (
             self._binding.resolve_write_action(call.name, call.args) is not None
