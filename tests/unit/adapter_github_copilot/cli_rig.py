@@ -31,12 +31,12 @@ if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
 from contract_assertions import assert_matches_contract  # noqa: E402
-from github_copilot_adapter.binding import ToolBinding, load_tool_binding  # noqa: E402
+from saf_host_adapter.binding import ToolBinding, load_tool_binding  # noqa: E402
 from github_copilot_adapter.core import Adapter  # noqa: E402
-from github_copilot_adapter.invocation import HarnessInvocation  # noqa: E402
-from github_copilot_adapter.payload import HookInput  # noqa: E402
+from saf_host_adapter.invocation import HarnessInvocation  # noqa: E402
+from saf_host_adapter.payload import HookInput  # noqa: E402
 from github_copilot_adapter.renderer import ContextRenderer  # noqa: E402
-from github_copilot_adapter.tracker import SessionTracker  # noqa: E402
+from saf_host_adapter.tracker import SessionTracker  # noqa: E402
 from harness_stub import build_error_report, build_report, default_script  # noqa: E402
 
 STDOUT_CONTRACT = "gsmarc://saf/adapters/github-copilot/contracts/hook-stdout/v1"

@@ -209,7 +209,7 @@ def test_a_linked_workspace_root_is_followed_to_its_real_path(tmp_path, binding)
 
 @pytest.mark.parametrize("dir_fd", [True, False], ids=["descriptor-walk", "checked-paths"])
 def test_make_contained_folders_refuses_a_link_component(tmp_path, monkeypatch, dir_fd) -> None:
-    from github_copilot_adapter import folders
+    from saf_host_adapter import folders
 
     if not dir_fd:
         monkeypatch.setattr(folders, "_supports_dir_fd", lambda: False)

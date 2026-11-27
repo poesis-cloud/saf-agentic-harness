@@ -20,8 +20,8 @@ from cli_rig import (
     pre_tool_use,
 )
 from github_copilot_adapter.core import PLUGIN_UPDATED, Adapter
-from github_copilot_adapter.payload import HookInput
-from github_copilot_adapter.tracker import SessionTracker
+from saf_host_adapter.payload import HookInput
+from saf_host_adapter.tracker import SessionTracker
 
 VERSION = "1.0.0-alpha.2"
 
@@ -134,13 +134,13 @@ def test_the_entry_rebuilds_the_adapter_on_the_recorded_workspace(tmp_path: Path
     import io
 
     from cli_rig import ADAPTER_DIR, load_script, make_invocation
-    from github_copilot_adapter.binding import load_tool_binding
+    from saf_host_adapter.binding import load_tool_binding
     from github_copilot_adapter.renderer import ContextRenderer
 
     entry = load_script("github_copilot_adapter_entry_pin", "adapter.py")
     binding = load_tool_binding(ADAPTER_DIR)
     tracker = SessionTracker(tmp_path / "state")
-    from github_copilot_adapter.tracker import TURN_ORIGIN, SessionRecord
+    from saf_host_adapter.tracker import TURN_ORIGIN, SessionRecord
 
     tracker.write(HOST, SessionRecord(
         "turn", "rte", TURN_ORIGIN, workspace="/fixed/workspace", harness_version=VERSION,

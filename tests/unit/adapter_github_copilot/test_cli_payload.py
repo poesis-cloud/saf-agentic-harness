@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 from cli_rig import STDIN_CONTRACT, assert_matches_contract, captured_payloads
-from github_copilot_adapter.binding import ToolBinding
+from saf_host_adapter.binding import ToolBinding
 from github_copilot_adapter.core import EVENTS, classify_calls
-from github_copilot_adapter.payload import HookInput, MalformedPayloadError, sanitize_identifier
+from saf_host_adapter.payload import HookInput, MalformedPayloadError, sanitize_identifier
 
 
 def _hook(binding: ToolBinding, event: str, payload: dict) -> HookInput:

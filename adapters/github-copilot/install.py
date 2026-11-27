@@ -39,7 +39,7 @@ if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
 from github_copilot_adapter.core import EVENTS  # noqa: E402
-from github_copilot_adapter.layout import (  # noqa: E402
+from saf_host_adapter.layout import (  # noqa: E402
     FRAMEWORK_DIR_VARIABLE,
     LAYOUT_VARIABLES,
     LayoutError,

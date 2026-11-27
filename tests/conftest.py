@@ -11,3 +11,5 @@ SRC_ROOT = REPO_ROOT / "src"
 sys.path.insert(0, str(SRC_ROOT))
 # Shared test helpers (e.g. `posix_shell`) live beside this conftest.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The shared adapter base (`saf_host_adapter`) every host adapter imports.
+sys.path.insert(0, str(REPO_ROOT / "adapters" / "common"))

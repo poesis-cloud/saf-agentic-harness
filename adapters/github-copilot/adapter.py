@@ -36,18 +36,18 @@ if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
 from github_copilot_adapter import renderer  # noqa: E402
-from github_copilot_adapter.binding import load_tool_binding  # noqa: E402
+from saf_host_adapter.binding import load_tool_binding  # noqa: E402
 from github_copilot_adapter.core import ADAPTER_ID, EVENTS, Adapter  # noqa: E402
-from github_copilot_adapter.invocation import HarnessInvocation  # noqa: E402
-from github_copilot_adapter.layout import (  # noqa: E402
+from saf_host_adapter.invocation import HarnessInvocation  # noqa: E402
+from saf_host_adapter.layout import (  # noqa: E402
     LAYOUT_VARIABLES,
     resolve_layout,
     resolve_state_dir,
 )
-from github_copilot_adapter.payload import HookInput  # noqa: E402
+from saf_host_adapter.payload import HookInput  # noqa: E402
 from github_copilot_adapter.renderer import ContextRenderer  # noqa: E402
-from github_copilot_adapter.runner import SubprocessCommandRunner  # noqa: E402
-from github_copilot_adapter.tracker import SessionTracker  # noqa: E402
+from saf_host_adapter.runner import SubprocessCommandRunner  # noqa: E402
+from saf_host_adapter.tracker import SessionTracker  # noqa: E402
 
 HARNESS_ENTRYPOINT = ADAPTER_DIR.parents[1] / "harness.py"
 HARNESS_VERSION_FILE = ADAPTER_DIR.parents[1] / "VERSION"

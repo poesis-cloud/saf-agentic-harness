@@ -10,8 +10,12 @@
 #                            -alpha, -beta, or -rc, e.g. v1.0.0-alpha.2);
 #                          - the plugin, at the root of the orphan branch `copilot-plugin`,
 #                            tagged `plugin-v<version>`;
-#                          - a PR on poesis-cloud/saf-marketplace bumping the plugin entry's
-#                            version, ref and sha: on `main` (marketplace poesis-saf) for a
+#                          - the Claude Code plugin, at the root of the orphan branch
+#                            `claude-plugin`, tagged `claude-plugin-v<version>`;
+#                          - a PR on poesis-cloud/saf-marketplace bumping the plugin entries'
+#                            version, ref and sha in both catalogues (Copilot:
+#                            `.github/plugin/marketplace.json`; Claude Code:
+#                            `.claude-plugin/marketplace.json`): on `main` (poesis-saf) for a
 #                            final release, on `preview` (poesis-saf-preview) for a
 #                            pre-release. It merges once its validation passes. Skipped,
 #                            with a notice, when the GitHub App secrets are absent.
@@ -62,6 +66,7 @@ jobs:
         outputs:
             archive: ${{ steps.build.outputs.archive }}
             plugin-zip: ${{ steps.plugin.outputs.zip }}
+            claude-plugin-zip: ${{ steps.claude-plugin.outputs.zip }}
             version: ${{ steps.plugin.outputs.version }}
         steps:
             - name: Checkout
@@ -103,6 +108,26 @@ jobs:
                   include-hidden-files: true
                   retention-days: 14
 
+            - name: Build the Claude Code harness plugin
+              id: claude-plugin
+              # The same hash-locked requirements as the Copilot plugin.
+              run: |
+                  VERSION="$(tr -d '[:space:]' < VERSION)"
+                  NAME="poesis-saf-agentic-harness-claude-plugin-v${VERSION}"
+                  python adapters/claude-code/render_plugin.py --dest build/claude-plugin \
+                      --lock build/plugin/requirements.lock
+                  (cd build/claude-plugin && zip -qr "../../${NAME}.zip" .)
+                  sha256sum "${NAME}.zip" > "${NAME}.zip.sha256"
+                  echo "zip=${NAME}.zip" >> "$GITHUB_OUTPUT"
+
+            - name: Upload the Claude Code plugin
+              uses: actions/upload-artifact@v4
+              with:
+                  name: harness-claude-plugin
+                  path: build/claude-plugin
+                  include-hidden-files: true
+                  retention-days: 14
+
             - name: Build the source archive
               id: build
               # `git archive` ships exactly the committed tree — no build cruft, no
@@ -123,6 +148,8 @@ jobs:
                       ${{ steps.build.outputs.archive }}.sha256
                       ${{ steps.plugin.outputs.zip }}
                       ${{ steps.plugin.outputs.zip }}.sha256
+                      ${{ steps.claude-plugin.outputs.zip }}
+                      ${{ steps.claude-plugin.outputs.zip }}.sha256
                   retention-days: 14
 
     publish:
@@ -147,6 +174,8 @@ jobs:
                       ${{ needs.package.outputs.archive }}.sha256
                       ${{ needs.package.outputs.plugin-zip }}
                       ${{ needs.package.outputs.plugin-zip }}.sha256
+                      ${{ needs.package.outputs.claude-plugin-zip }}
+                      ${{ needs.package.outputs.claude-plugin-zip }}.sha256
                   generate_release_notes: true
                   # SemVer pre-release tags (-alpha / -beta / -rc) publish
                   # as GitHub pre-releases, never as the latest release.
@@ -202,11 +231,60 @@ jobs:
                   echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
                   echo "ref=${REF}" >> "$GITHUB_OUTPUT"
 
+    claude-plugin-branch:
+        # The Claude Code plugin at the root of the orphan branch `claude-plugin`, one commit
+        # per release (its parent is the previous release's), tagged `claude-plugin-v<version>`.
+        name: Publish the Claude Code plugin branch
+        needs: package
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: write
+        outputs:
+            sha: ${{ steps.commit.outputs.sha }}
+            ref: ${{ steps.commit.outputs.ref }}
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Download the plugin
+              uses: actions/download-artifact@v4
+              with:
+                  name: harness-claude-plugin
+                  path: ${{ runner.temp }}/claude-plugin
+
+            - name: Commit and tag the plugin
+              id: commit
+              env:
+                  VERSION: ${{ needs.package.outputs.version }}
+              run: |
+                  REF="claude-plugin-v${VERSION}"
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  export GIT_INDEX_FILE="$RUNNER_TEMP/claude-plugin.index"
+                  # upload-artifact drops the executable bit: restore it on the shim.
+                  chmod +x "$RUNNER_TEMP/claude-plugin/bin/saf-hook.sh"
+                  git --work-tree="$RUNNER_TEMP/claude-plugin" add --all .
+                  TREE="$(git write-tree)"
+                  PARENT=""
+                  if git fetch --quiet origin claude-plugin; then
+                      PARENT="-p $(git rev-parse FETCH_HEAD)"
+                  fi
+                  # shellcheck disable=SC2086
+                  SHA="$(git commit-tree "$TREE" $PARENT -m "Harness Claude Code plugin ${VERSION} (from ${GITHUB_SHA})")"
+                  git tag -a "$REF" "$SHA" -m "Harness Claude Code plugin ${VERSION}"
+                  git push origin "${SHA}:refs/heads/claude-plugin" "refs/tags/${REF}"
+                  echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+                  echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+
     marketplace:
         # A PR on the marketplace catalogue branch of the release's channel, merging once
         # its validation passes. Credentials: a GitHub App installed on saf-marketplace only.
         name: Bump the marketplace entry
-        needs: [package, plugin-branch]
+        needs: [package, plugin-branch, claude-plugin-branch]
         if: startsWith(github.ref, 'refs/tags/v')
         runs-on: ubuntu-latest
         timeout-minutes: 10
@@ -267,6 +345,8 @@ jobs:
                   VERSION: ${{ needs.package.outputs.version }}
                   REF: ${{ needs.plugin-branch.outputs.ref }}
                   SHA: ${{ needs.plugin-branch.outputs.sha }}
+                  CLAUDE_REF: ${{ needs.claude-plugin-branch.outputs.ref }}
+                  CLAUDE_SHA: ${{ needs.claude-plugin-branch.outputs.sha }}
                   BASE: ${{ steps.channel.outputs.branch }}
                   MARKETPLACE: ${{ steps.channel.outputs.name }}
               run: |
@@ -274,7 +354,7 @@ jobs:
                   git config user.name "saf-marketplace-bot"
                   git config user.email "saf-marketplace-bot@users.noreply.github.com"
                   TITLE="Bump poesis-saf-agentic-harness to ${VERSION}"
-                  BODY="Points the harness plugin at \`${REF}\` (\`${SHA}\`) of poesis-cloud/saf-agentic-harness."
+                  BODY="Points the harness plugin at \`${REF}\` (\`${SHA}\`) and the harness Claude Code plugin at \`${CLAUDE_REF}\` (\`${CLAUDE_SHA}\`) of poesis-cloud/saf-agentic-harness."
                   # Concurrent plugin bumps edit the same catalogue: each attempt restarts from
                   # the freshest base, so a lost race only costs another attempt.
                   for ATTEMPT in 1 2 3 4 5; do
@@ -282,9 +362,11 @@ jobs:
                       git switch -C "$BRANCH" "origin/${BASE}"
                       python3 ../harness/.github/scripts/bump_marketplace.py \
                           .github/plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$REF" "$SHA"
-                      git add .github/plugin/marketplace.json
+                      python3 ../harness/.github/scripts/bump_marketplace.py \
+                          .claude-plugin/marketplace.json "$MARKETPLACE" "$VERSION" "$CLAUDE_REF" "$CLAUDE_SHA"
+                      git add .github/plugin/marketplace.json .claude-plugin/marketplace.json
                       if git diff --cached --quiet; then
-                          echo "The marketplace already points at ${REF}."
+                          echo "The marketplace already points at ${REF} and ${CLAUDE_REF}."
                           exit 0
                       fi
                       git commit -q -m "$TITLE"

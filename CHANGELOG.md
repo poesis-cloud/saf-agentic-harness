@@ -4,6 +4,33 @@ All notable changes to this project are documented here. Versions follow
 [SemVer](https://semver.org/); pre-release tags (`-alpha`, `-beta`, `-rc`) are published as
 GitHub pre-releases.
 
+## Unreleased
+
+### Claude Code
+
+- **A second host: Claude Code.** The `claude-code` adapter binds Claude Code's hooks to the
+  harness boundaries (H0–H7), grounded in payloads captured on Claude Code 2.1.323
+  (`def/adapter/claude-code/spec.md`). H0 reads the conversation's selected agent from the
+  payload, so no hook is agent-scoped; a started subagent is attributed to the dispatch the
+  adapter let through (fail closed when ambiguous); a dispatch must set
+  `run_in_background: false`; every failure blocks at `PreToolUse` only, the one event where
+  Claude Code honors a veto.
+- **The harness installs as a Claude Code plugin**, `make plugin-claude`
+  (`adapters/claude-code/render_plugin.py`): `.claude-plugin/plugin.json`, `hooks/hooks.json`
+  through `${CLAUDE_PLUGIN_ROOT}`, the runtime provisioned in `CLAUDE_PLUGIN_DATA`. A framework
+  registers its Claude Code plugin under `hosts/claude-code/frameworks/<name>/root` in the
+  per-user registry.
+- **`resolve-step-model` answers name the host model** the binding dispatches the resolved
+  profile under when it differs from the slug (Claude Code accepts only model aliases).
+
+### Shared adapter base
+
+- **`adapters/common/saf_host_adapter`.** The host-agnostic gating logic moved out of the
+  Copilot adapter: each host supplies a `HostProfile` (event names, decision shapes) and its
+  declarative binding. The Copilot adapter's behavior is unchanged. The `tools.conf` schema
+  gains optional keys: `hostRootSessionKeys`, `hostTurnAgentKeys`, `hostToolUseIdKeys`,
+  `syncDispatchFlagKeys`, `upsertTools`.
+
 ## v1.0.0-alpha.3
 
 ### Plugin fix

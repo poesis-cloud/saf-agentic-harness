@@ -52,7 +52,7 @@ class Subcommand:
 
 @dataclass(frozen=True)
 class ToolBinding:
-    """The tool classes and payload keys of the Copilot CLI runtime."""
+    """The tool classes and payload keys of one host runtime (its `tools.yaml`)."""
 
     write_tools: Mapping[str, str]
     delete_tools: frozenset[str]
@@ -83,6 +83,15 @@ class ToolBinding:
     guarded_shell_tools: frozenset[str]
     model_bindings: Mapping[str, str] = field(default_factory=dict)
     agent_namespace_separator: str | None = None
+    host_root_session_keys: tuple[str, ...] = ()
+    host_turn_agent_keys: tuple[str, ...] = ()
+    host_tool_use_id_keys: tuple[str, ...] = ()
+    sync_dispatch_flag_keys: tuple[str, ...] = ()
+    upsert_tools: frozenset[str] = frozenset()
+    dispatch_result_keys: tuple[str, ...] = ()
+    dispatch_result_agent_keys: tuple[str, ...] = ()
+    dispatch_result_status_keys: tuple[str, ...] = ()
+    async_dispatch_statuses: frozenset[str] = frozenset()
 
     def probe(self, payload: Mapping[str, Any], keys: Sequence[str]) -> Any:
         """Answer the first present, non-empty value among `keys` (first hit wins)."""
@@ -195,7 +204,8 @@ def _read_yaml(path: Path, contract: str) -> Mapping[str, Any]:
 
 
 # Every probe a gate depends on: empty, it would classify every firing as a pass-through.
-_GATING_PROBES = (
+# A host binding whose runtime has no batched tool-call shape passes its own list.
+GATING_PROBES = (
     ("writeTools", "no write would ever be authorized (H3) or validated (H5)"),
     ("pathKeys", "no write target could be extracted — every write would be denied"),
     ("toolCallsKeys", "no batched preToolUse call would be gated"),
@@ -207,7 +217,12 @@ _GATING_PROBES = (
 )
 
 
-def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -> ToolBinding:
+def load_tool_binding(
+    adapter_dir: Path,
+    *,
+    framework_dir: Path | None = None,
+    gating_probes: Sequence[tuple[str, str]] = GATING_PROBES,
+) -> ToolBinding:
     """Load this adapter's binding, contract-validated at load (fail fast, never empty).
 
     Given the framework root (the hook bootstrap always passes it), the framework model
@@ -216,7 +231,7 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
     """
     tools_path = adapter_dir / TOOLS_FILENAME
     raw = _read_yaml(tools_path, TOOLS_CONTRACT)
-    for key, why in _GATING_PROBES:
+    for key, why in gating_probes:
         try:
             require_non_empty(raw, key, source=str(tools_path), why=why)
         except BindingContractError as failure:
@@ -270,6 +285,15 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
         mediated_command_keys=_strings(raw, "mediatedCommandKeys"),
         guarded_shell_tools=frozenset(_strings(raw, "guardedShellTools")),
         agent_namespace_separator=raw.get("hostAgentNamespaceSeparator") or None,
+        host_root_session_keys=_strings(raw, "hostRootSessionKeys"),
+        host_turn_agent_keys=_strings(raw, "hostTurnAgentKeys"),
+        host_tool_use_id_keys=_strings(raw, "hostToolUseIdKeys"),
+        sync_dispatch_flag_keys=_strings(raw, "syncDispatchFlagKeys"),
+        upsert_tools=frozenset(_strings(raw, "upsertTools")),
+        dispatch_result_keys=_strings(raw, "dispatchResultKeys"),
+        dispatch_result_agent_keys=_strings(raw, "dispatchResultAgentKeys"),
+        dispatch_result_status_keys=_strings(raw, "dispatchResultStatusKeys"),
+        async_dispatch_statuses=frozenset(_strings(raw, "asyncDispatchStatuses")),
         model_bindings={
             str(slug): str((binding or {}).get("hostModelId"))
             for slug, binding in models.items()
@@ -278,6 +302,7 @@ def load_tool_binding(adapter_dir: Path, *, framework_dir: Path | None = None) -
 
 
 __all__ = [
+    "GATING_PROBES",
     "BindingError",
     "Subcommand",
     "TargetExtractionError",
